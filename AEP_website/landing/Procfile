@@ -1,0 +1,1 @@
+web: mkdir -p logs/nginx && bin/start-nginx-static

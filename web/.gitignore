@@ -1,0 +1,14 @@
+# Playwright Test Artifacts
+test-results/
+playwright-report/
+playwright/.cache/
+tests/.auth/
+
+# Screenshots
+tests/screenshots/
+
+# Videos
+videos/
+
+# Traces
+traces/

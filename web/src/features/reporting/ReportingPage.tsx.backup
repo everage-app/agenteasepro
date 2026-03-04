@@ -1,0 +1,489 @@
+import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { PageLayout } from '../../components/layout/PageLayout';
+import api from '../../lib/api';
+
+interface ReportingStats {
+  agentActivity: {
+    totalLeads: number;
+    newLeadsThisWeek: number;
+    activeClients: number;
+    closedDealsThisMonth: number;
+  };
+  calls: {
+    totalCalls: number;
+    missedCalls: number;
+    avgCallDuration: string;
+    callsByDay: Array<{ day: string; count: number }>;
+  };
+  texts: {
+    totalTexts: number;
+    responseRate: number;
+    avgResponseTime: string;
+  };
+  appointments: {
+    totalAppointments: number;
+    upcoming: number;
+    completed: number;
+    noShows: number;
+  };
+  deals: {
+    activeDeals: number;
+    underContract: number;
+    closedThisMonth: number;
+    avgDealValue: number;
+    conversionRate: number;
+  };
+  leadSources: {
+    topSources: Array<{ source: string; leads: number; closed: number; conversionRate: number }>;
+  };
+  marketing: {
+    totalCampaigns: number;
+    sent: number;
+    totalClicks: number;
+    clickRate: number;
+  };
+  properties: {
+    activeListings: number;
+    soldThisMonth: number;
+    avgDaysOnMarket: number;
+    totalViews: number;
+  };
+}
+
+export function ReportingPage() {
+  const navigate = useNavigate();
+  const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState<ReportingStats | null>(null);
+  const [timeRange, setTimeRange] = useState<'week' | 'month' | 'quarter' | 'year'>('month');
+
+  useEffect(() => {
+    fetchReportingData();
+  }, [timeRange]);
+
+  const fetchReportingData = async () => {
+    try {
+      const response = await api.get('/reporting/overview', {
+        params: { timeRange },
+      });
+      setStats(response.data);
+    } catch (error) {
+      console.error('Error fetching reporting data:', error);
+      // Set mock data for demo
+      setStats({
+        agentActivity: {
+          totalLeads: 127,
+          newLeadsThisWeek: 18,
+          activeClients: 34,
+          closedDealsThisMonth: 5,
+        },
+        calls: {
+          totalCalls: 243,
+          missedCalls: 12,
+          avgCallDuration: '4:32',
+          callsByDay: [
+            { day: 'Mon', count: 42 },
+            { day: 'Tue', count: 38 },
+            { day: 'Wed', count: 51 },
+            { day: 'Thu', count: 45 },
+            { day: 'Fri', count: 39 },
+            { day: 'Sat', count: 18 },
+            { day: 'Sun', count: 10 },
+          ],
+        },
+        texts: {
+          totalTexts: 892,
+          responseRate: 87,
+          avgResponseTime: '12m',
+        },
+        appointments: {
+          totalAppointments: 56,
+          upcoming: 14,
+          completed: 38,
+          noShows: 4,
+        },
+        deals: {
+          activeDeals: 12,
+          underContract: 5,
+          closedThisMonth: 5,
+          avgDealValue: 425000,
+          conversionRate: 23,
+        },
+        leadSources: {
+          topSources: [
+            { source: 'Zillow', leads: 45, closed: 12, conversionRate: 26.7 },
+            { source: 'Referrals', leads: 38, closed: 15, conversionRate: 39.5 },
+            { source: 'Social Media', leads: 29, closed: 6, conversionRate: 20.7 },
+            { source: 'Open House', leads: 15, closed: 4, conversionRate: 26.7 },
+          ],
+        },
+        marketing: {
+          totalCampaigns: 24,
+          sent: 18,
+          totalClicks: 456,
+          clickRate: 12.3,
+        },
+        properties: {
+          activeListings: 8,
+          soldThisMonth: 3,
+          avgDaysOnMarket: 32,
+          totalViews: 1834,
+        },
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (loading || !stats) {
+    return (
+      <PageLayout title="Reporting & Analytics" subtitle="Loading your insights...">
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-cyan-400"></div>
+        </div>
+      </PageLayout>
+    );
+  }
+
+  return (
+    <PageLayout
+      title="Reporting & Analytics"
+      subtitle="Track your performance and make data-driven decisions"
+      maxWidth="full"
+    >
+      {/* Time Range Selector */}
+      <div className="flex justify-end mb-6">
+        <div className="inline-flex rounded-2xl bg-white/5 border border-white/10 p-1">
+          {(['week', 'month', 'quarter', 'year'] as const).map((range) => (
+            <button
+              key={range}
+              onClick={() => setTimeRange(range)}
+              className={`px-4 py-2 rounded-xl text-sm font-medium transition-all capitalize ${
+                timeRange === range
+                  ? 'bg-white/10 text-white shadow-lg'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              {range}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="space-y-8">
+        {/* AGENTS SECTION */}
+        <Section title="Agents" emoji="👥">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+            <ReportCard
+              title="Agent Activity"
+              description="Track leads and follow-up stats"
+              icon="📊"
+              stats={[
+                { label: 'Total Leads', value: stats.agentActivity.totalLeads },
+                { label: 'New This Week', value: stats.agentActivity.newLeadsThisWeek, highlight: true },
+                { label: 'Active Clients', value: stats.agentActivity.activeClients },
+                { label: 'Closed This Month', value: stats.agentActivity.closedDealsThisMonth },
+              ]}
+              onClick={() => navigate('/clients')}
+              gradient="from-blue-500/20 to-cyan-500/10"
+              borderColor="border-blue-500/30"
+            />
+
+            <ReportCard
+              title="Calls"
+              description="Call volume and performance"
+              icon="📞"
+              stats={[
+                { label: 'Total Calls', value: stats.calls.totalCalls },
+                { label: 'Missed', value: stats.calls.missedCalls, alert: stats.calls.missedCalls > 10 },
+                { label: 'Avg Duration', value: stats.calls.avgCallDuration },
+              ]}
+              gradient="from-emerald-500/20 to-teal-500/10"
+              borderColor="border-emerald-500/30"
+            />
+
+            <ReportCard
+              title="Texts"
+              description="Message delivery and engagement"
+              icon="💬"
+              stats={[
+                { label: 'Total Messages', value: stats.texts.totalTexts },
+                { label: 'Response Rate', value: `${stats.texts.responseRate}%`, highlight: true },
+                { label: 'Avg Response', value: stats.texts.avgResponseTime },
+              ]}
+              gradient="from-purple-500/20 to-pink-500/10"
+              borderColor="border-purple-500/30"
+            />
+
+            <ReportCard
+              title="Appointments"
+              description="Meeting outcomes and details"
+              icon="📅"
+              stats={[
+                { label: 'Total', value: stats.appointments.totalAppointments },
+                { label: 'Upcoming', value: stats.appointments.upcoming, highlight: true },
+                { label: 'Completed', value: stats.appointments.completed },
+                { label: 'No-Shows', value: stats.appointments.noShows, alert: stats.appointments.noShows > 3 },
+              ]}
+              onClick={() => navigate('/calendar')}
+              gradient="from-amber-500/20 to-orange-500/10"
+              borderColor="border-amber-500/30"
+            />
+          </div>
+        </Section>
+
+        {/* Deals Section */}
+        <Section title="Deals" emoji="💼">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            <ReportCard
+              title="Deals Overview"
+              description="Pipeline and commission tracking"
+              icon="🤝"
+              stats={[
+                { label: 'Active Deals', value: stats.deals.activeDeals },
+                { label: 'Under Contract', value: stats.deals.underContract, highlight: true },
+                { label: 'Closed This Month', value: stats.deals.closedThisMonth },
+                { label: 'Avg Deal Value', value: `$${(stats.deals.avgDealValue / 1000).toFixed(0)}K` },
+              ]}
+              onClick={() => navigate('/dashboard')}
+              gradient="from-cyan-500/20 to-blue-500/10"
+              borderColor="border-cyan-500/30"
+              span2
+            />
+
+            <ReportCard
+              title="Conversion Rate"
+              description="Lead to closed ratio"
+              icon="📈"
+              stats={[
+                { label: 'Conversion Rate', value: `${stats.deals.conversionRate}%`, highlight: true, large: true },
+                { label: 'Industry Avg', value: '20%', muted: true },
+              ]}
+              gradient="from-emerald-500/20 to-green-500/10"
+              borderColor="border-emerald-500/30"
+            />
+          </div>
+        </Section>
+
+        {/* LEAD SOURCES SECTION */}
+        <Section title="Lead Sources" emoji="🎯">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+            {stats.leadSources.topSources.map((source, index) => (
+              <ReportCard
+                key={source.source}
+                title={source.source}
+                description={`${source.leads} leads • ${source.closed} closed`}
+                icon={['🥇', '🥈', '🥉', '📊'][index]}
+                stats={[
+                  { label: 'Total Leads', value: source.leads },
+                  { label: 'Closed', value: source.closed, highlight: true },
+                  { label: 'Conversion', value: `${source.conversionRate.toFixed(1)}%` },
+                ]}
+                gradient={[
+                  'from-yellow-500/20 to-amber-500/10',
+                  'from-slate-500/20 to-gray-500/10',
+                  'from-orange-500/20 to-red-500/10',
+                  'from-indigo-500/20 to-purple-500/10',
+                ][index]}
+                borderColor={[
+                  'border-yellow-500/30',
+                  'border-slate-500/30',
+                  'border-orange-500/30',
+                  'border-indigo-500/30',
+                ][index]}
+              />
+            ))}
+          </div>
+        </Section>
+
+        {/* MARKETING SECTION */}
+        <Section title="Marketing" emoji="📢">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+            <ReportCard
+              title="Batch Emails"
+              description="Campaign results and engagement"
+              icon="📧"
+              stats={[
+                { label: 'Total Campaigns', value: stats.marketing.totalCampaigns },
+                { label: 'Sent', value: stats.marketing.sent, highlight: true },
+                { label: 'Total Clicks', value: stats.marketing.totalClicks },
+                { label: 'Click Rate', value: `${stats.marketing.clickRate}%` },
+              ]}
+              onClick={() => navigate('/marketing')}
+              gradient="from-rose-500/20 to-pink-500/10"
+              borderColor="border-rose-500/30"
+            />
+
+            <ReportCard
+              title="Properties"
+              description="Listing inquiries and performance"
+              icon="🏡"
+              stats={[
+                { label: 'Active Listings', value: stats.properties.activeListings },
+                { label: 'Sold This Month', value: stats.properties.soldThisMonth, highlight: true },
+                { label: 'Avg Days on Market', value: stats.properties.avgDaysOnMarket },
+                { label: 'Total Views', value: stats.properties.totalViews },
+              ]}
+              onClick={() => navigate('/listings')}
+              gradient="from-teal-500/20 to-cyan-500/10"
+              borderColor="border-teal-500/30"
+            />
+          </div>
+        </Section>
+
+        {/* Call Activity Chart */}
+        <Section title="Call Activity" emoji="📊">
+          <div className="rounded-2xl bg-white/5 border border-white/10 backdrop-blur-xl p-6">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-lg font-semibold text-white">Calls by Day</h3>
+              <span className="text-sm text-slate-400">Last 7 days</span>
+            </div>
+            <div className="flex items-end justify-between gap-2 h-48">
+              {stats.calls.callsByDay.map((day, index) => {
+                const maxCalls = Math.max(...stats.calls.callsByDay.map(d => d.count));
+                const height = (day.count / maxCalls) * 100;
+                return (
+                  <div key={index} className="flex-1 flex flex-col items-center gap-2">
+                    <div className="flex-1 w-full flex items-end">
+                      <div
+                        className="w-full rounded-t-lg bg-gradient-to-t from-emerald-500 to-cyan-400 transition-all hover:opacity-80 cursor-pointer"
+                        style={{ height: `${height}%` }}
+                        title={`${day.count} calls`}
+                      />
+                    </div>
+                    <div className="text-xs text-slate-400">{day.day}</div>
+                    <div className="text-xs font-semibold text-white">{day.count}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </Section>
+
+        {/* Quick Actions */}
+        <Section title="Quick Actions" emoji="⚡">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <QuickActionButton
+              icon="📊"
+              label="Export Report"
+              onClick={() => alert('Export coming soon!')}
+            />
+            <QuickActionButton
+              icon="🎯"
+              label="Set Goals"
+              onClick={() => navigate('/settings/automations')}
+            />
+            <QuickActionButton
+              icon="📅"
+              label="Schedule Review"
+              onClick={() => navigate('/calendar')}
+            />
+            <QuickActionButton
+              icon="💡"
+              label="Get Insights"
+              onClick={() => alert('AI insights coming soon!')}
+            />
+          </div>
+        </Section>
+      </div>
+    </PageLayout>
+  );
+}
+
+// Helper Components
+function Section({ title, emoji, children }: { title: string; emoji: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-3">
+        <span className="text-2xl">{emoji}</span>
+        <h2 className="text-xl font-bold text-white">{title}</h2>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+interface ReportCardProps {
+  title: string;
+  description: string;
+  icon: string;
+  stats: Array<{
+    label: string;
+    value: string | number;
+    highlight?: boolean;
+    alert?: boolean;
+    muted?: boolean;
+    large?: boolean;
+  }>;
+  onClick?: () => void;
+  gradient: string;
+  borderColor: string;
+  span2?: boolean;
+}
+
+function ReportCard({ title, description, icon, stats, onClick, gradient, borderColor, span2 }: ReportCardProps) {
+  return (
+    <div
+      onClick={onClick}
+      className={`relative overflow-hidden rounded-2xl bg-white/5 border ${borderColor} backdrop-blur-xl p-6 transition-all ${
+        onClick ? 'cursor-pointer hover:bg-white/10 hover:scale-[1.02]' : ''
+      } ${span2 ? 'md:col-span-2' : ''}`}
+    >
+      {/* Gradient background */}
+      <div className={`absolute inset-0 bg-gradient-to-br ${gradient} opacity-50`} />
+      
+      {/* Content */}
+      <div className="relative z-10">
+        <div className="flex items-start justify-between mb-4">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-2xl">{icon}</span>
+              <h3 className="text-base font-semibold text-white">{title}</h3>
+            </div>
+            <p className="text-xs text-slate-400">{description}</p>
+          </div>
+          {onClick && (
+            <svg className="w-5 h-5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+          )}
+        </div>
+
+        <div className={`grid gap-3 ${span2 ? 'grid-cols-2 md:grid-cols-4' : 'grid-cols-2'}`}>
+          {stats.map((stat, index) => (
+            <div key={index} className="space-y-1">
+              <div
+                className={`font-bold ${
+                  stat.large ? 'text-3xl' : 'text-xl'
+                } ${
+                  stat.highlight
+                    ? 'text-cyan-400'
+                    : stat.alert
+                    ? 'text-red-400'
+                    : stat.muted
+                    ? 'text-slate-500'
+                    : 'text-white'
+                }`}
+              >
+                {stat.value}
+              </div>
+              <div className="text-xs text-slate-400 uppercase tracking-wider">{stat.label}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function QuickActionButton({ icon, label, onClick }: { icon: string; label: string; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="flex flex-col items-center justify-center gap-3 p-6 rounded-2xl bg-white/5 border border-white/10 hover:bg-white/10 hover:border-cyan-500/30 transition-all group"
+    >
+      <span className="text-3xl group-hover:scale-110 transition-transform">{icon}</span>
+      <span className="text-sm font-medium text-white">{label}</span>
+    </button>
+  );
+}

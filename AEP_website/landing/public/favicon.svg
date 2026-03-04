@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <!-- Gradient definitions -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0f172a"/>
+      <stop offset="100%" style="stop-color:#1e293b"/>
+    </linearGradient>
+    <linearGradient id="accentGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#3b82f6"/>
+      <stop offset="50%" style="stop-color:#22d3ee"/>
+      <stop offset="100%" style="stop-color:#f59e0b"/>
+    </linearGradient>
+    <linearGradient id="glowGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#3b82f6;stop-opacity:0.5"/>
+      <stop offset="100%" style="stop-color:#22d3ee;stop-opacity:0.5"/>
+    </linearGradient>
+  </defs>
+  
+  <!-- Background with rounded corners -->
+  <rect width="64" height="64" rx="14" fill="url(#bgGrad)"/>
+  
+  <!-- Glow effect -->
+  <rect x="8" y="8" width="48" height="48" rx="10" fill="url(#glowGrad)" opacity="0.15"/>
+  
+  <!-- Back square - offset top-right -->
+  <rect x="22" y="10" width="30" height="30" rx="5" fill="#1e293b" stroke="url(#accentGrad)" stroke-width="2"/>
+  
+  <!-- Front square - offset bottom-left -->
+  <rect x="12" y="22" width="30" height="30" rx="5" fill="#0f172a" stroke="url(#accentGrad)" stroke-width="2"/>
+  
+  <!-- House icon centered in front square -->
+  <g transform="translate(15, 28)">
+    <!-- Roof -->
+    <path d="M12 2L2 10H4V18H20V10H22L12 2Z" fill="#1e293b" stroke="url(#accentGrad)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <!-- Door -->
+    <rect x="9" y="11" width="6" height="7" rx="0.5" fill="#0f172a" stroke="url(#accentGrad)" stroke-width="1"/>
+    <!-- Door handle -->
+    <circle cx="13.5" cy="14.5" r="0.8" fill="#22d3ee"/>
+  </g>
+  
+  <!-- Corner accent -->
+  <circle cx="52" cy="12" r="4" fill="url(#accentGrad)" opacity="0.8"/>
+</svg>

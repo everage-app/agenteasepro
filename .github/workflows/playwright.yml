@@ -1,0 +1,131 @@
+name: Playwright Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  test:
+    timeout-minutes: 60
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        node-version: [20.x]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Setup Node.js ${{ matrix.node-version }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ matrix.node-version }}
+        cache: 'npm'
+    
+    - name: Install dependencies (server)
+      working-directory: ./server
+      run: npm ci
+    
+    - name: Install dependencies (web)
+      working-directory: ./web
+      run: npm ci
+    
+    - name: Install Playwright Browsers
+      working-directory: ./web
+      run: npx playwright install --with-deps
+    
+    - name: Setup Database
+      working-directory: ./server
+      run: |
+        npx prisma generate
+        npx prisma migrate deploy
+      env:
+        DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    
+    - name: Start Backend Server
+      working-directory: ./server
+      run: |
+        npm run build
+        npm start &
+        for i in {1..60}; do
+          (echo > /dev/tcp/127.0.0.1/3001) >/dev/null 2>&1 && break
+          sleep 1
+        done
+        (echo > /dev/tcp/127.0.0.1/3001) >/dev/null 2>&1
+      env:
+        PORT: 3001
+        NODE_ENV: test
+        DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        JWT_SECRET: ${{ secrets.JWT_SECRET }}
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    
+    - name: Start Frontend Dev Server
+      working-directory: ./web
+      run: |
+        npm run dev -- --host 127.0.0.1 --port 5174 --strictPort &
+        for i in {1..60}; do
+          (echo > /dev/tcp/127.0.0.1/5174) >/dev/null 2>&1 && break
+          sleep 1
+        done
+        (echo > /dev/tcp/127.0.0.1/5174) >/dev/null 2>&1
+    
+    - name: Run Playwright tests
+      working-directory: ./web
+      run: npm test
+      env:
+        CI: true
+    
+    - name: Upload Playwright Report
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: playwright-report
+        path: web/playwright-report/
+        retention-days: 30
+    
+    - name: Upload Test Results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: test-results
+        path: web/test-results/
+        retention-days: 30
+
+  test-api:
+    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20.x
+        cache: 'npm'
+    
+    - name: Install dependencies
+      working-directory: ./web
+      run: npm ci
+    
+    - name: Install Playwright
+      working-directory: ./web
+      run: npx playwright install --with-deps chromium
+    
+    - name: Run API tests
+      working-directory: ./web
+      run: npm run test:api
+      env:
+        CI: true
+    
+    - name: Upload API Test Report
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: api-test-report
+        path: web/playwright-report/
+        retention-days: 30

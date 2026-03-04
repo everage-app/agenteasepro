@@ -1,0 +1,15 @@
+[build]
+  base = "AEP_website/landing"
+  command = "npm run build"
+  publish = "AEP_website/landing/dist"
+
+[[redirects]]
+  from = "https://www.agenteasepro.com/*"
+  to = "https://agenteasepro.com/:splat"
+  status = 301
+  force = true
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

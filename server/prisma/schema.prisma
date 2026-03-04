@@ -1,0 +1,1143 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum AgentStatus {
+  ACTIVE
+  SUSPENDED
+  REVOKED
+}
+
+enum SubscriptionStatus {
+  TRIAL
+  ACTIVE
+  PAST_DUE
+  CANCELED
+}
+
+enum BillingMode {
+  FREE
+  STANDARD
+  CUSTOM
+}
+
+enum SupportCategory {
+  GENERAL
+  SUGGESTION
+  BILLING
+  BUG
+}
+
+enum SupportStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum SupportPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+model Agent {
+  id                String             @id @default(uuid())
+  email             String             @unique
+  name              String
+  passwordHash      String?
+  resetToken        String?
+  resetTokenExpiry  DateTime?
+  emailVerified     Boolean            @default(false)
+  emailVerifyToken  String?
+  emailVerifyExpiry DateTime?
+  status            AgentStatus        @default(ACTIVE)
+  subscriptionStatus SubscriptionStatus @default(TRIAL)
+  stripeCustomerId  String?
+  stripeSubscriptionId String?
+  billingMode       BillingMode        @default(STANDARD)
+  billingCustomPriceCents Int?
+  billingAccessOverride Boolean        @default(false)
+  termsAcceptedAt   DateTime?
+  privacyAcceptedAt DateTime?
+  termsVersionAccepted String?
+  privacyVersionAccepted String?
+  termsUrlAccepted  String?
+  privacyUrlAccepted String?
+  legalAcceptedIp   String?
+  legalAcceptedUserAgent String?
+  brokerageName     String?
+  licenseNumber     String?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  clients           Client[]
+  properties        Property[]
+  deals             Deal[]
+  listings          Listing[]
+  marketingBlasts   MarketingBlast[]
+  marketingDeliveryLogs MarketingDeliveryLog[]
+  marketingEmailEvents MarketingEmailEvent[]
+  dealEvents        DealEvent[]
+  tasks             Task[]
+  mlsListings       MlsListing[]
+  channelConnections AgentChannelConnection[]
+  dailyActivities   DailyActivity[]
+  automationRules   AutomationRule[]
+  googleCalendar    GoogleCalendarConnection?
+  idxConnection     IdxConnection?
+  aiSettings        AgentAiSettings?
+  profileSettings   AgentProfileSettings?
+  notificationPrefs AgentNotificationPrefs?
+  landingPages      LandingPage[]
+  leads             Lead[]
+  internalEvents    InternalEvent[]
+  internalErrors    InternalError[]
+  supportRequests   SupportRequest[]
+}
+
+model SupportRequest {
+  id            String          @id @default(uuid())
+  agentId       String
+  agent         Agent           @relation(fields: [agentId], references: [id])
+  category      SupportCategory @default(GENERAL)
+  subject       String
+  message       String
+  status        SupportStatus   @default(OPEN)
+  priority      SupportPriority @default(MEDIUM)
+  pagePath      String?
+  pageUrl       String?
+  userAgent     String?
+  meta          Json?
+  internalNotes String?
+  resolvedAt    DateTime?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+}
+
+model AgentProfileSettings {
+  id              String   @id @default(cuid())
+  agentId         String   @unique
+  agent           Agent    @relation(fields: [agentId], references: [id])
+  firstName       String?
+  lastName        String?
+  phone           String?
+  licenseNumber   String?
+  licenseSuffix   String?
+  licenseState    String?
+  licenseExpiry   DateTime?
+  narMemberId     String?
+  timezone        String   @default("America/Denver")
+  signatureBlock  String?
+  photoUrl        String?
+  yearsExperience Int?
+  specializations String?
+  bio             String?
+  // Branding
+  brokerageName   String?
+  brokerageLogoUrl String?
+  brokerageAddress String?
+  brokeragePhone  String?
+  officeAddress   String?
+  brokerageLicense String?
+  brandColor      String   @default("#3B82F6")
+  accentColor     String   @default("#06B6D4")
+  logoUrl         String?
+  websiteUrl      String?
+  googleAnalyticsId String?
+  facebookUrl     String?
+  instagramUrl    String?
+  linkedinUrl     String?
+  emailFooter     String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model AgentNotificationPrefs {
+  id                String   @id @default(cuid())
+  agentId           String   @unique
+  agent             Agent    @relation(fields: [agentId], references: [id])
+  deadlineEmails    Boolean  @default(true)
+  dailyPlanEnabled  Boolean  @default(true)
+  dailyPlanTime     String   @default("07:00")
+  inAppBanners      Boolean  @default(true)
+  signatureAlerts   Boolean  @default(true)
+  documentComplete  Boolean  @default(true)
+  marketingSummaries Boolean @default(true)
+  quietHoursStart   String   @default("22:00")
+  quietHoursEnd     String   @default("07:00")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+model AgentAiSettings {
+  id        String   @id @default(cuid())
+  agentId   String   @unique
+  agent     Agent    @relation(fields: [agentId], references: [id])
+  level     AiAssistanceLevel @default(MEDIUM)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+enum AiAssistanceLevel {
+  OFF
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum ReferralRank {
+  A
+  B
+  C
+}
+
+enum ClientRole {
+  BUYER
+  SELLER
+  BOTH
+  OTHER
+}
+
+enum ClientStage {
+  NEW_LEAD
+  NURTURE
+  ACTIVE
+  UNDER_CONTRACT
+  CLOSED
+  PAST_CLIENT
+  DEAD
+}
+
+enum ClientTemperature {
+  HOT
+  WARM
+  COLD
+}
+
+model Property {
+  id        String   @id @default(uuid())
+  agentId   String
+  agent     Agent    @relation(fields: [agentId], references: [id])
+  mlsId     String?
+  street    String
+  city      String
+  county    String
+  state     String   @default("UT")
+  zip       String
+  taxId     String?
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  deals     Deal[]
+
+  @@index([agentId, createdAt])
+  @@index([agentId, mlsId])
+}
+
+model Deal {
+  id                 String              @id @default(uuid())
+  agentId            String
+  agent              Agent               @relation(fields: [agentId], references: [id])
+  title              String
+  propertyId         String
+  property           Property            @relation(fields: [propertyId], references: [id])
+  buyerId            String?
+  buyer              Client?             @relation("BuyerDeals", fields: [buyerId], references: [id])
+  sellerId           String?
+  seller             Client?             @relation("SellerDeals", fields: [sellerId], references: [id])
+  status             DealStatus          @default(LEAD)
+  offerReferenceDate DateTime
+  closedAt           DateTime?
+  archivedAt         DateTime?
+  archivedReason     String?
+  archivedByAgentId  String?
+  archiveAfterDays   Int                 @default(180)
+  lastActivityAt     DateTime?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  repc               Repc?
+  addendums          Addendum[]
+  signatureEnvelopes SignatureEnvelope[]
+  forms              FormInstance[]
+  events             DealEvent[]
+  tasks              Task[]
+
+  @@index([agentId, archivedAt, status])
+}
+
+enum DealStatus {
+  LEAD
+  ACTIVE
+  OFFER_SENT
+  UNDER_CONTRACT
+  DUE_DILIGENCE
+  FINANCING
+  SETTLEMENT_SCHEDULED
+  CLOSED
+  FELL_THROUGH
+}
+
+model Repc {
+  id                                    String                @id @default(uuid())
+  dealId                                String                @unique
+  deal                                  Deal                  @relation(fields: [dealId], references: [id])
+  buyerLegalNames                       String
+  sellerLegalNames                      String
+  earnestMoneyAmount                    Decimal
+  earnestMoneyForm                      String
+  additionalEarnestMoneyAmount          Decimal?
+  propertyCity                          String
+  propertyCounty                        String
+  propertyState                         String
+  propertyZip                           String
+  propertyTaxId                         String
+  otherIncludedItems                    String
+  excludedItems                         String
+  waterRightsIncludedNotes              String?
+  waterRightsExcludedNotes              String?
+  purchasePrice                         Decimal
+  newLoanAmount                         Decimal?
+  sellerFinancingAmount                 Decimal?
+  cashAtSettlement                      Decimal?
+  isSubjectToSaleOfBuyersProperty       Boolean
+  buyersPropertyDescription             String?
+  possessionTiming                      PossessionTiming
+  possessionOffset                      Int?
+  capitalImprovementsPayer              PayerType
+  capitalImprovementsPayerOther         String?
+  changeOfOwnershipFeePayer             PayerType
+  changeOfOwnershipFeePayerOther        String?
+  sellerCompensationContributionPercent Decimal?
+  sellerCompensationContributionFlat    Decimal?
+  hasDueDiligenceCondition              Boolean
+  hasAppraisalCondition                 Boolean
+  hasFinancingCondition                 Boolean
+  sellerDisclosureDeadline              DateTime
+  dueDiligenceDeadline                  DateTime
+  financingAppraisalDeadline            DateTime
+  settlementDeadline                    DateTime
+  hasHomeWarranty                       Boolean
+  homeWarrantyOrderedBy                 HomeWarrantyOrderedBy
+  homeWarrantyMaxCost                   Decimal?
+  offerExpirationDate                   DateTime
+  offerExpirationTime                   String
+  offerExpirationMeridiem               Meridiem
+  rawJson                               Json
+}
+
+enum PossessionTiming {
+  ON_RECORDING
+  HOURS_AFTER_RECORDING
+  DAYS_AFTER_RECORDING
+}
+
+enum PayerType {
+  SELLER
+  BUYER
+  SPLIT
+  OTHER
+}
+
+enum HomeWarrantyOrderedBy {
+  BUYER
+  SELLER
+  UNKNOWN
+}
+
+enum Meridiem {
+  AM
+  PM
+}
+
+model Addendum {
+  id                 String       @id @default(uuid())
+  dealId             String
+  deal               Deal         @relation(fields: [dealId], references: [id])
+  type               AddendumType
+  title              String
+  body               String
+  offerReferenceDate DateTime
+  buyerLabel         String
+  sellerLabel        String
+  propertySummary    String
+  expirationDate     DateTime?
+  expirationTime     String?
+  expirationMeridiem Meridiem?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+}
+
+enum AddendumType {
+  ADDENDUM
+  COUNTEROFFER
+}
+
+model Listing {
+  id              String           @id @default(uuid())
+  agentId         String
+  agent           Agent            @relation(fields: [agentId], references: [id])
+  dealId          String?
+  mlsId           String?
+  
+  // Address fields
+  addressLine1    String
+  city            String
+  state           String           @default("UT")
+  zipCode         String
+  
+  // Property details
+  headline        String
+  description     String
+  price           Int
+  beds            Int?
+  baths           Float?
+  sqft            Int?
+  
+  // Images
+  primaryImageUrl String?
+  heroImageUrl    String?
+  
+  // Status & marketing
+  status          ListingStatus    @default(ACTIVE)
+  isFeatured      Boolean          @default(false)
+  totalBlasts     Int              @default(0)
+  totalClicks     Int              @default(0)
+  
+  // Calendar v2: Key dates for listings
+  goLiveDate      DateTime?        // When listing goes active
+  nextOpenHouseAt DateTime?        // Next scheduled open house
+  
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  marketingBlasts MarketingBlast[]
+  mlsImports      MlsListing[]
+  tasks           Task[]
+  landingPages    LandingPage[]
+  leads           Lead[]
+  pageViews       PageView[]
+  leadActivities  LeadActivity[]
+  savedListings   SavedListing[]
+
+  @@index([agentId, status])
+  @@index([agentId, createdAt])
+}
+
+enum ListingStatus {
+  DRAFT
+  ACTIVE
+  ACTIVE_NO_SHOW
+  PENDING
+  UNDER_CONTRACT
+  BACKUP
+  SOLD
+  WITHDRAWN
+  CANCELED
+  EXPIRED
+  OFF_MARKET
+}
+
+model MarketingBlast {
+  id          String          @id @default(cuid())
+  agentId     String
+  agent       Agent           @relation(fields: [agentId], references: [id])
+  listingId   String?
+  listing     Listing?        @relation(fields: [listingId], references: [id])
+  title       String
+  playbook    BlastPlaybook   @default(NEW_LISTING)
+  status      BlastStatus     @default(DRAFT)
+  scheduledAt DateTime?
+  sentAt      DateTime?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @default(now()) @updatedAt
+  channels    BlastChannel[]
+  deliveryLogs MarketingDeliveryLog[]
+  emailEvents MarketingEmailEvent[]
+  tasks       Task[]
+
+  @@index([agentId, status])
+  @@index([agentId, scheduledAt])
+  @@index([agentId, sentAt])
+  @@index([agentId, createdAt])
+}
+
+model BlastChannel {
+  id           String           @id @default(cuid())
+  blastId      String
+  blast        MarketingBlast   @relation(fields: [blastId], references: [id])
+  channel      BlastChannelType
+  enabled      Boolean          @default(true)
+  status       BlastStatus      @default(DRAFT)
+  previewText  String?
+  previewHtml  String?
+  shortCode    String?          @unique
+  shortUrl     String?
+  externalId   String?
+  clicks       Int              @default(0)
+  uniqueClicks Int              @default(0)
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  hits         BlastHit[]
+  deliveryLogs MarketingDeliveryLog[]
+  emailEvents  MarketingEmailEvent[]
+}
+
+model BlastHit {
+  id         String        @id @default(cuid())
+  channelId  String
+  channel    BlastChannel  @relation(fields: [channelId], references: [id])
+  occurredAt DateTime      @default(now())
+  ip         String?
+  userAgent  String?
+}
+
+model MarketingDeliveryLog {
+  id              String        @id @default(cuid())
+  agentId         String
+  agent           Agent         @relation(fields: [agentId], references: [id])
+  blastId         String
+  blast           MarketingBlast @relation(fields: [blastId], references: [id])
+  channelId       String?
+  channel         BlastChannel? @relation(fields: [channelId], references: [id])
+  provider        String        @default("sendgrid")
+  status          String        // SENT | FAILED
+  messageId       String?
+  subject         String
+  recipientsCount Int           @default(0)
+  recipientsSample String[]     @default([])
+  audienceType    String?       // CLIENTS | LEADS | DEALS
+  error           String?
+  createdAt       DateTime      @default(now())
+
+  @@index([agentId, createdAt])
+  @@index([blastId, createdAt])
+  @@index([channelId, createdAt])
+  @@index([status, createdAt])
+}
+
+model MarketingEmailEvent {
+  id        String   @id @default(cuid())
+  provider  String   @default("sendgrid")
+  eventType String
+  email     String?
+  messageId String?
+  url       String?
+  ip        String?
+  userAgent String?
+  occurredAt DateTime
+  meta      Json?
+
+  agentId   String?
+  agent     Agent?  @relation(fields: [agentId], references: [id])
+  blastId   String?
+  blast     MarketingBlast? @relation(fields: [blastId], references: [id])
+  channelId String?
+  channel   BlastChannel? @relation(fields: [channelId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([agentId, occurredAt])
+  @@index([blastId, occurredAt])
+  @@index([channelId, occurredAt])
+  @@index([eventType, occurredAt])
+  @@index([messageId])
+}
+
+enum BlastPlaybook {
+  NEW_LISTING
+  PRICE_REDUCTION
+  OPEN_HOUSE
+  UNDER_CONTRACT
+  JUST_SOLD
+  CUSTOM
+}
+
+enum BlastChannelType {
+  FACEBOOK
+  INSTAGRAM
+  LINKEDIN
+  X
+  EMAIL
+  SMS
+  WEBSITE
+}
+
+enum BlastStatus {
+  DRAFT
+  SCHEDULED
+  SENT
+}
+
+model SignatureEnvelope {
+  id               String                @id @default(uuid())
+  dealId           String
+  deal             Deal                  @relation(fields: [dealId], references: [id])
+  type             SignatureEnvelopeType
+  documentVersion  Int
+  contractSnapshot Json
+  createdAt        DateTime              @default(now())
+  completedAt      DateTime?
+  signers          Signer[]
+}
+
+enum SignatureEnvelopeType {
+  REPC
+  ADDENDUM
+}
+
+model Signer {
+  id            String            @id @default(uuid())
+  envelopeId    String
+  envelope      SignatureEnvelope @relation(fields: [envelopeId], references: [id])
+  role          SignerRole
+  name          String
+  email         String
+  viewedAt      DateTime?
+  signedAt      DateTime?
+  signatureType SignatureType     @default(NONE)
+  ipAddress     String?
+  userAgent     String?
+  signatureData Json?
+  auditHash     String?
+}
+
+enum SignerRole {
+  BUYER
+  SELLER
+  AGENT
+  OTHER
+}
+
+enum SignatureType {
+  TYPED
+  DRAWN
+  UPLOADED
+  NONE
+}
+
+model FormDefinition {
+  id              String         @id @default(cuid())
+  code            String         @unique
+  displayName     String
+  category        String
+  version         String
+  isActive        Boolean        @default(true)
+  officialPdfPath String
+  schemaJson      Json
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  formInstances   FormInstance[]
+}
+
+model FormInstance {
+  id               String   @id @default(cuid())
+  dealId           String
+  formDefinitionId String
+  status           String   @default("DRAFT")
+  title            String
+  data             Json
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  deal       Deal           @relation(fields: [dealId], references: [id])
+  definition FormDefinition @relation(fields: [formDefinitionId], references: [id])
+}
+
+model DealEvent {
+  id          String           @id @default(cuid())
+  agentId     String
+  agent       Agent            @relation(fields: [agentId], references: [id])
+  dealId      String
+  deal        Deal             @relation(fields: [dealId], references: [id])
+  type        DealEventType
+  title       String
+  description String?
+  date        DateTime
+  createdFrom EventCreatedFrom @default(MANUAL)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@index([agentId, dealId])
+  @@index([agentId, date])
+  @@index([agentId, createdAt])
+}
+
+enum DealEventType {
+  SELLER_DISCLOSURE_DEADLINE
+  DUE_DILIGENCE_DEADLINE
+  FINANCING_DEADLINE
+  APPRAISAL_DEADLINE
+  SETTLEMENT_DEADLINE
+  POSSESSION
+  OTHER
+}
+
+enum EventCreatedFrom {
+  REPC
+  ADDENDUM
+  MANUAL
+}
+
+model Task {
+  id               String          @id @default(cuid())
+  agentId          String
+  agent            Agent           @relation(fields: [agentId], references: [id])
+  title            String
+  description      String?
+  category         TaskCategory    @default(GENERAL)
+  status           TaskStatus      @default(OPEN)
+  priority         TaskPriority    @default(NORMAL)
+  bucket           TaskBucket      @default(TODAY)
+  dueAt            DateTime?
+  
+  // Optional relationships
+  dealId           String?
+  deal             Deal?           @relation(fields: [dealId], references: [id])
+  clientId         String?
+  client           Client?         @relation("ClientTasks", fields: [clientId], references: [id])
+  listingId        String?
+  listing          Listing?        @relation(fields: [listingId], references: [id])
+  marketingBlastId String?
+  marketingBlast   MarketingBlast? @relation(fields: [marketingBlastId], references: [id])
+  
+  createdFrom      TaskCreatedFrom @default(MANUAL)
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  @@index([agentId, status])
+  @@index([agentId, dueAt])
+  @@index([agentId, createdAt])
+}
+
+enum TaskCategory {
+  GENERAL
+  CONTRACT
+  MARKETING
+  CALL
+  NOTE
+  POPBY
+  EVENT
+}
+
+model MlsListing {
+  id           String   @id @default(cuid())
+  agentId      String
+  agent        Agent    @relation(fields: [agentId], references: [id])
+  listingId    String?
+  listing      Listing? @relation(fields: [listingId], references: [id])
+  mlsNumber    String
+  headline     String?
+  addressLine1 String?
+  city         String?
+  state        String?
+  zip          String?
+  price        Decimal?
+  beds         Float?
+  baths        Float?
+  squareFeet   Int?
+  lotSize      Float?
+  yearBuilt    Int?
+  description  String?
+  photos       Json?
+  raw          Json?
+  sourceUrl    String?
+  lastFetchedAt DateTime @default(now())
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@unique([agentId, mlsNumber])
+}
+
+enum TaskStatus {
+  OPEN
+  DONE       // Keep for migration compatibility
+  COMPLETED
+}
+
+enum TaskPriority {
+  LOW
+  NORMAL
+  HIGH
+}
+
+enum TaskBucket {
+  TODAY
+  THIS_WEEK
+  LATER
+  DONE
+}
+
+enum TaskCreatedFrom {
+  MANUAL
+  AI_SUGGESTED
+  SYSTEM
+  AUTOMATION
+}
+
+model AutomationRule {
+  id        String                 @id @default(cuid())
+  agentId   String
+  agent     Agent                  @relation(fields: [agentId], references: [id])
+  name      String
+  eventType AutomationEventType
+  isEnabled Boolean                @default(true)
+  config    Json                   // JSON configuration for actions and conditions
+  createdAt DateTime               @default(now())
+  updatedAt DateTime               @updatedAt
+
+  @@index([agentId, eventType, isEnabled])
+}
+
+enum AutomationEventType {
+  LISTING_CREATED
+  DEAL_CREATED
+  REPC_CREATED
+  MARKETING_BLAST_SENT
+  CLIENT_STAGE_CHANGED
+}
+
+model AgentChannelConnection {
+  id        String                 @id @default(cuid())
+  agentId   String
+  agent     Agent                  @relation(fields: [agentId], references: [id])
+  type      ChannelConnectionType
+  config    Json
+  createdAt DateTime               @default(now())
+  updatedAt DateTime               @updatedAt
+
+  @@unique([agentId, type])
+}
+
+model LegalPolicy {
+  policyKey       String   @id
+  url             String
+  version         String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  updatedByAgentId String?
+  updatedByAgentName String?
+}
+
+enum ChannelConnectionType {
+  EMAIL
+  SMS
+  FACEBOOK
+  INSTAGRAM
+  LINKEDIN
+  X
+  WEBSITE
+}
+
+model DailyActivity {
+  id          String   @id @default(cuid())
+  agentId     String
+  agent       Agent    @relation(fields: [agentId], references: [id])
+  date        DateTime @db.Date
+  callsGoal   Int      @default(5)
+  callsMade   Int      @default(0)
+  notesGoal   Int      @default(2)
+  notesSent   Int      @default(0)
+  popbysGoal  Int      @default(1)
+  popbysDone  Int      @default(0)
+  referralsAskedGoal Int @default(3)
+  referralsAsked     Int @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([agentId, date])
+}
+
+// Calendar v2: Google Calendar OAuth integration
+model GoogleCalendarConnection {
+  id                String   @id @default(cuid())
+  agentId           String   @unique
+  agent             Agent    @relation(fields: [agentId], references: [id])
+  accessToken       String   // Encrypted OAuth access token
+  refreshToken      String   // Encrypted OAuth refresh token
+  tokenExpiry       DateTime // When the access token expires
+  calendarId        String?  // ID of the "AgentEasePro" calendar (created on first sync)
+  syncEnabled       Boolean  @default(true)
+  lastSyncAt        DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+// IDX / MLS connection settings
+model IdxConnection {
+  id            String          @id @default(cuid())
+  agentId       String          @unique
+  agent         Agent           @relation(fields: [agentId], references: [id])
+  providerType  IdxProviderType
+  vendorName    String?         // e.g., "UtahRealEstate.com", "SimplyRETS"
+  baseUrl       String          // API base URL
+  
+  // RESO Web API credentials (UtahRealEstate.com)
+  clientId      String?         // Encrypted
+  clientSecret  String?         // Encrypted
+  serverToken   String?         // Encrypted
+  browserToken  String?         // Encrypted
+  
+  // Generic API credentials
+  apiKey        String?         // Encrypted
+  
+  // Additional config
+  mlsAgentIds   String?         // Comma-separated agent IDs to filter listings
+  
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+}
+
+enum IdxProviderType {
+  UTAH_RESO_WEBAPI
+  GENERIC_API
+}
+
+// ==================== LEAD TRACKING & ANALYTICS ====================
+
+enum LeadSource {
+  WEBSITE
+  LANDING_PAGE
+  ZILLOW
+  REALTOR_COM
+  FACEBOOK
+  INSTAGRAM
+  GOOGLE_ADS
+  EMAIL
+  DIRECT
+  REFERRAL
+  OTHER
+}
+
+enum LeadPriority {
+  HOT
+  WARM
+  COLD
+  DEAD
+}
+
+model LandingPage {
+  id               String     @id @default(cuid())
+  agentId          String
+  agent            Agent      @relation(fields: [agentId], references: [id])
+  listingId        String?
+  listing          Listing?   @relation(fields: [listingId], references: [id])
+  slug             String     @unique
+  customDomain     String?
+  title            String
+  description      String?
+  heroImage        String?
+  templateId       String     @default("design-67")
+  isActive         Boolean    @default(true)
+  totalViews       Int        @default(0)
+  uniqueViews      Int        @default(0)
+  leadsGenerated   Int        @default(0)
+  customContent    Json?      // headline, subheadline, ctaText, features, agentBio
+  customStyles     Json?      // primaryColor, secondaryColor, heroOpacity
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+  leads            Lead[]
+  pageViews        PageView[]
+
+  @@index([agentId])
+  @@index([listingId])
+}
+
+model PageView {
+  id            String       @id @default(cuid())
+  landingPageId String?
+  landingPage   LandingPage? @relation(fields: [landingPageId], references: [id])
+  listingId     String?
+  listing       Listing?     @relation(fields: [listingId], references: [id])
+  visitorId     String
+  ipAddress     String?
+  userAgent     String?
+  referrer      String?
+  utmSource     String?
+  utmMedium     String?
+  utmCampaign   String?
+  utmContent    String?
+  utmTerm       String?
+  country       String?
+  city          String?
+  region        String?
+  device        String?
+  browser       String?
+  duration      Int?
+  createdAt     DateTime     @default(now())
+
+  @@index([landingPageId])
+  @@index([listingId])
+  @@index([visitorId])
+  @@index([createdAt])
+}
+
+model Lead {
+  id            String        @id @default(cuid())
+  agentId       String
+  agent         Agent         @relation(fields: [agentId], references: [id])
+  clientId      String?
+  client        Client?       @relation(fields: [clientId], references: [id])
+  listingId     String?
+  listing       Listing?      @relation(fields: [listingId], references: [id])
+  landingPageId String?
+  landingPage   LandingPage?  @relation(fields: [landingPageId], references: [id])
+  firstName     String
+  lastName      String
+  email         String
+  phone         String?
+  source        LeadSource    @default(WEBSITE)
+  priority      LeadPriority  @default(WARM)
+  averagePrice  Int?
+  homesViewed   Int           @default(0)
+  lastVisit     DateTime?
+  visitCount    Int           @default(0)
+  lastContact   DateTime?
+  nextTask      String?
+  assignedTo    String?
+  notes         String?
+  tags          String[]      @default([])
+  converted     Boolean       @default(false)
+  convertedAt   DateTime?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  activities    LeadActivity[]
+  savedListings SavedListing[]
+  searchCriteria SearchCriteria[]
+
+  @@index([agentId])
+  @@index([listingId])
+  @@index([landingPageId])
+  @@index([email])
+  @@index([createdAt])
+}
+
+model LeadActivity {
+  id           String   @id @default(cuid())
+  leadId       String
+  lead         Lead     @relation(fields: [leadId], references: [id])
+  activityType String
+  listingId    String?
+  listing      Listing? @relation(fields: [listingId], references: [id])
+  description  String?
+  metadata     Json?
+  createdAt    DateTime @default(now())
+
+  @@index([leadId])
+  @@index([createdAt])
+}
+
+model Client {
+  id              String      @id @default(uuid())
+  agentId         String
+  agent           Agent       @relation(fields: [agentId], references: [id])
+  role            ClientRole  @default(BUYER)
+  firstName       String
+  lastName        String
+  email           String?
+  phone           String?
+  leadSource      String?
+  stage           ClientStage @default(NEW_LEAD)
+  temperature     ClientTemperature @default(COLD)
+  referralRank    ReferralRank @default(C)
+  mailingAddress  String?
+  mailingCity     String?
+  mailingState    String?
+  mailingZip      String?
+  tags            String[]    @default([])
+  notes           String?
+  birthday        DateTime?
+  referralsGiven  Int         @default(0)
+  referralsClosed Int         @default(0)
+  lastContactAt   DateTime?
+  lastMarketingAt DateTime?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  buyerDeals      Deal[]      @relation("BuyerDeals")
+  sellerDeals     Deal[]      @relation("SellerDeals")
+  tasks           Task[]      @relation("ClientTasks")
+  leads           Lead[]
+  savedListings   SavedListing[]
+  searchCriteria  SearchCriteria[]
+
+  @@index([agentId, stage])
+  @@index([agentId, lastContactAt])
+  @@index([agentId, createdAt])
+}
+
+model SavedListing {
+  id        String   @id @default(cuid())
+  clientId  String?
+  client    Client?  @relation(fields: [clientId], references: [id])
+  leadId    String?
+  lead      Lead?    @relation(fields: [leadId], references: [id])
+  listingId String
+  listing   Listing  @relation(fields: [listingId], references: [id])
+  notes     String?
+  createdAt DateTime @default(now())
+
+  @@index([clientId])
+  @@index([leadId])
+  @@index([listingId])
+}
+
+model SearchCriteria {
+  id        String   @id @default(cuid())
+  clientId  String?
+  client    Client?  @relation(fields: [clientId], references: [id])
+  leadId    String?
+  lead      Lead?    @relation(fields: [leadId], references: [id])
+  
+  // Criteria
+  minPrice  Int?
+  maxPrice  Int?
+  minBeds   Int?
+  minBaths  Float?
+  cities    String[]
+  zipCodes  String[]
+  propertyTypes String[]
+  
+  lastAlertSentAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([clientId])
+  @@index([leadId])
+}
+
+// ==================== INTERNAL TELEMETRY ====================
+
+model InternalEvent {
+  id        String   @id @default(uuid())
+  agentId   String?
+  agent     Agent?   @relation(fields: [agentId], references: [id])
+  kind      String
+  path      String?
+  meta      Json?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([agentId, createdAt])
+  @@index([kind, createdAt])
+}
+
+model InternalError {
+  id        String   @id @default(uuid())
+  agentId   String?
+  agent     Agent?   @relation(fields: [agentId], references: [id])
+  source    String   @default("client")
+  message   String
+  stack     String?
+  path      String?
+  meta      Json?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([agentId, createdAt])
+  @@index([source, createdAt])
+}
