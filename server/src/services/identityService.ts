@@ -36,11 +36,28 @@ const VERIFICATION_CODE_TTL_MS = 15 * 60_000; // 15 minutes
 const PASSWORD_MIN_LENGTH = 8;
 const PASSWORD_MAX_LENGTH = 200;
 
-// In-memory lockout tracker (works per dyno; good enough for single-dyno Heroku)
+// In-memory lockout tracker — used as fast cache; DB is source of truth for persistence across deploys
 const loginAttempts = new Map<string, { count: number; lockedUntil: number | null }>();
 
-// In-memory refresh-token blacklist (invalidated tokens)
+// In-memory refresh-token blacklist — used as fast cache; DB is source of truth
 const revokedRefreshTokens = new Set<string>();
+
+// Boot: hydrate in-memory caches from DB (best-effort, async)
+(async function hydrateSecurityCaches() {
+  try {
+    // Load non-expired revoked tokens into memory
+    const tokens = await prisma.revokedToken.findMany({
+      where: { expiresAt: { gt: new Date() } },
+      select: { jti: true },
+    });
+    for (const t of tokens) revokedRefreshTokens.add(t.jti);
+
+    // Clean up expired revoked tokens from DB
+    await prisma.revokedToken.deleteMany({ where: { expiresAt: { lt: new Date() } } });
+  } catch {
+    // Startup hydration is best-effort
+  }
+})();
 
 // ── JWT helpers ───────────────────────────────────────────────────────
 
@@ -79,12 +96,12 @@ function signRefreshToken(agentId: string): string {
  * Verify and distinguish access vs refresh tokens.
  * Returns null when token is invalid / expired / revoked.
  */
-export function verifyToken(token: string): {
+export async function verifyToken(token: string): Promise<{
   agentId: string;
   email?: string;
   type: 'access' | 'refresh';
   jti?: string;
-} | null {
+} | null> {
   try {
     const secret = getJwtSecret();
     const payload = jwt.verify(token, secret) as any;
@@ -92,9 +109,17 @@ export function verifyToken(token: string): {
     // Backwards compat: tokens signed before this change have no `type`
     const type = payload.type === 'refresh' ? 'refresh' : 'access';
 
-    // Check revocation for refresh tokens
-    if (type === 'refresh' && payload.jti && revokedRefreshTokens.has(payload.jti)) {
-      return null;
+    // Check revocation for refresh tokens — check both in-memory cache & DB
+    if (type === 'refresh' && payload.jti) {
+      if (revokedRefreshTokens.has(payload.jti)) return null;
+      // Fall through to DB check for cross-dyno consistency
+      try {
+        const dbRevoked = await prisma.revokedToken.findUnique({ where: { jti: payload.jti } });
+        if (dbRevoked) {
+          revokedRefreshTokens.add(payload.jti); // Hydrate cache
+          return null;
+        }
+      } catch { /* best-effort DB check */ }
     }
 
     return { agentId: payload.agentId, email: payload.email, type, jti: payload.jti };
@@ -156,6 +181,29 @@ function isAccountLocked(email: string): boolean {
   return true;
 }
 
+// Also check DB for cross-dyno consistency
+async function isAccountLockedDb(email: string): Promise<boolean> {
+  if (isAccountLocked(email)) return true;
+  try {
+    const recentLocked = await prisma.loginAttemptRecord.findFirst({
+      where: {
+        email: getLockoutKey(email),
+        lockedUntil: { gt: new Date() },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (recentLocked) {
+      // Hydrate in-memory cache
+      loginAttempts.set(getLockoutKey(email), {
+        count: MAX_LOGIN_ATTEMPTS,
+        lockedUntil: recentLocked.lockedUntil!.getTime(),
+      });
+      return true;
+    }
+  } catch { /* best-effort */ }
+  return false;
+}
+
 function recordFailedAttempt(email: string): { locked: boolean; remainingAttempts: number } {
   const key = getLockoutKey(email);
   const record = loginAttempts.get(key) || { count: 0, lockedUntil: null };
@@ -164,6 +212,16 @@ function recordFailedAttempt(email: string): { locked: boolean; remainingAttempt
   if (record.count >= MAX_LOGIN_ATTEMPTS) {
     record.lockedUntil = Date.now() + LOCKOUT_DURATION_MS;
     loginAttempts.set(key, record);
+
+    // Persist lockout to DB
+    prisma.loginAttemptRecord.create({
+      data: {
+        email: key,
+        success: false,
+        lockedUntil: new Date(record.lockedUntil),
+      },
+    }).catch(() => { /* best-effort */ });
+
     return { locked: true, remainingAttempts: 0 };
   }
 
@@ -278,8 +336,8 @@ export async function login(
 ): Promise<AuthResult> {
   const normalized = email.trim().toLowerCase();
 
-  // Check lockout
-  if (isAccountLocked(normalized)) {
+  // Check lockout (in-memory + DB for cross-dyno persistence)
+  if (await isAccountLockedDb(normalized)) {
     await auditLog({
       action: 'AUTH_LOGIN_FAILED',
       email: normalized,
@@ -380,7 +438,7 @@ export async function refreshAccessToken(
   refreshTokenStr: string,
   ctx?: RequestContext,
 ): Promise<AuthResult> {
-  const payload = verifyToken(refreshTokenStr);
+  const payload = await verifyToken(refreshTokenStr);
   if (!payload || payload.type !== 'refresh') {
     return { success: false, error: 'Invalid or expired refresh token' };
   }
@@ -422,9 +480,27 @@ export async function revokeRefreshToken(
   refreshTokenStr: string,
   ctx?: RequestContext,
 ): Promise<void> {
-  const payload = verifyToken(refreshTokenStr);
+  const payload = await verifyToken(refreshTokenStr);
   if (payload?.jti) {
     revokedRefreshTokens.add(payload.jti);
+
+    // Persist to DB for cross-dyno consistency
+    try {
+      // Decode expiry from JWT for automatic cleanup
+      const decoded = jwt.decode(refreshTokenStr) as any;
+      const expiresAt = decoded?.exp ? new Date(decoded.exp * 1000) : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+      await prisma.revokedToken.upsert({
+        where: { jti: payload.jti },
+        create: {
+          agentId: payload.agentId,
+          jti: payload.jti,
+          expiresAt,
+        },
+        update: {},
+      });
+    } catch {
+      // Best-effort DB persistence
+    }
   }
 
   await auditLog({

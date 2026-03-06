@@ -307,7 +307,7 @@ export function DealsKanban() {
   const [activityItems, setActivityItems] = useState<DealActivityItem[]>([]);
   const [isActivityLoading, setIsActivityLoading] = useState(false);
   const [pipelineLayout, setPipelineLayout] = useState<'compact' | 'board'>('compact');
-  const { canvasRef, fire: fireConfetti } = useConfetti();
+  const { fire: fireConfetti } = useConfetti();
 
   const [editForm, setEditForm] = useState({
     title: '',
@@ -551,6 +551,16 @@ export function DealsKanban() {
     },
     { critical: 0, warning: 0, normal: 0 }
   );
+  const docsSummary = activeDeals.reduce(
+    (acc, deal) => {
+      const summary = getDealDocsSummary(deal);
+      acc.signed += summary.signed;
+      acc.pending += summary.pending;
+      acc.draft += summary.draft;
+      return acc;
+    },
+    { signed: 0, pending: 0, draft: 0 }
+  );
 
   if (loading) {
     return (
@@ -582,9 +592,9 @@ export function DealsKanban() {
   }
 
   return (
-    <div className="space-y-4 relative">
-      <canvas ref={canvasRef} className="pointer-events-none fixed inset-0 z-[9999]" />
-      <div className="rounded-[24px] border border-white/10 bg-slate-950/70 p-4 shadow-[0_18px_45px_rgba(0,0,0,0.5)]">
+    <div className="space-y-5 relative">
+      <canvas className="pointer-events-none fixed inset-0 z-[9999]" />
+      <div className="rounded-[24px] border border-white/10 bg-slate-950/70 px-5 py-5 md:px-6 md:py-6 shadow-[0_18px_45px_rgba(0,0,0,0.5)]">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <div className="text-[10px] uppercase tracking-[0.2em] text-slate-400">Deal Health Radar</div>
@@ -634,6 +644,29 @@ export function DealsKanban() {
         </div>
       </div>
 
+      <div className="rounded-[24px] border border-white/10 bg-slate-950/65 px-5 py-5 md:px-6 md:py-6 shadow-[0_14px_38px_rgba(0,0,0,0.45)]">
+        <div className="text-sm font-semibold text-white">Deal Overview</div>
+        <div className="text-xs text-slate-400 mt-1">Unified snapshot for pipeline, risks, and paperwork.</div>
+        <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 text-xs">
+          <div className="rounded-xl border border-white/10 bg-slate-900/40 px-3.5 py-3.5">
+            <div className="text-slate-500">Active deals</div>
+            <div className="mt-1 text-lg font-semibold text-white">{activeDeals.length}</div>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-slate-900/40 px-3.5 py-3.5">
+            <div className="text-slate-500">Critical deadlines</div>
+            <div className="mt-1 text-lg font-semibold text-red-300">{dealHealth.critical}</div>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-slate-900/40 px-3.5 py-3.5">
+            <div className="text-slate-500">Pending docs</div>
+            <div className="mt-1 text-lg font-semibold text-amber-300">{docsSummary.pending}</div>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-slate-900/40 px-3.5 py-3.5">
+            <div className="text-slate-500">Signed docs</div>
+            <div className="mt-1 text-lg font-semibold text-emerald-300">{docsSummary.signed}</div>
+          </div>
+        </div>
+      </div>
+
       <div
         className={
           pipelineLayout === 'compact'
@@ -655,7 +688,7 @@ export function DealsKanban() {
             onDrop={(e) => handleDrop(e, col.key)}
           >
             <div className={`absolute inset-0 pointer-events-none bg-gradient-to-b ${colorSet.glow} via-transparent to-transparent opacity-30`} />
-            <header className="flex items-center justify-between px-4 pt-3 pb-2 relative z-10">
+            <header className="flex items-center justify-between px-4 pt-3.5 pb-2.5 relative z-10">
               <div>
                 <p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">Pipeline</p>
                 <h3 className="text-sm font-semibold text-slate-50">{col.label}</h3>
@@ -685,7 +718,7 @@ export function DealsKanban() {
                     draggable
                     onDragStart={(e) => handleDragStart(e, deal.id)}
                     onDragEnd={handleDragEnd}
-                    className={`group rounded-2xl border ${urgencyStyle.border} bg-slate-950/80 px-3 py-3 ${urgencyStyle.glow} transition-transform duration-150 hover:-translate-y-0.5 hover:border-blue-400/60 cursor-move relative ${
+                    className={`group rounded-2xl border ${urgencyStyle.border} bg-slate-950/80 px-3 py-3.5 ${urgencyStyle.glow} transition-transform duration-150 hover:-translate-y-0.5 hover:border-blue-400/60 cursor-move relative ${
                       draggedDeal === deal.id ? 'opacity-50' : 'opacity-100'
                     }`}
                   >
@@ -908,7 +941,7 @@ export function DealsKanban() {
       {closedDeals.length > 0 && (
         <section className="flex w-[320px] flex-shrink-0 flex-col rounded-[28px] border border-white/10 bg-slate-900/80 backdrop-blur-xl shadow-[0_18px_45px_rgba(0,0,0,0.55)] relative overflow-hidden">
           <div className="absolute inset-0 pointer-events-none bg-gradient-to-b from-slate-500/20 via-transparent to-transparent opacity-30" />
-          <header className="flex items-center justify-between px-4 pt-3 pb-2 relative z-10">
+          <header className="flex items-center justify-between px-4 pt-3.5 pb-2.5 relative z-10">
             <div>
               <p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">Completed</p>
               <h3 className="text-sm font-semibold text-slate-50">Closed Deals</h3>
@@ -928,7 +961,7 @@ export function DealsKanban() {
                   return (
                 <article
                   key={deal.id}
-                  className="group rounded-2xl border border-white/10 bg-slate-950/60 px-3 py-3 shadow-[0_8px_18px_rgba(0,0,0,0.4)] transition-opacity duration-150 hover:opacity-80 cursor-pointer"
+                  className="group rounded-2xl border border-white/10 bg-slate-950/60 px-3 py-3.5 shadow-[0_8px_18px_rgba(0,0,0,0.4)] transition-opacity duration-150 hover:opacity-80 cursor-pointer"
                 >
                   <div className="mb-1 flex items-start justify-between gap-2">
                     <div>
@@ -1008,7 +1041,7 @@ export function DealsKanban() {
       {archivedDeals.length > 0 && (
         <section className="flex w-[340px] flex-shrink-0 flex-col rounded-[28px] border border-amber-400/20 bg-slate-900/80 backdrop-blur-xl shadow-[0_18px_45px_rgba(0,0,0,0.55)] relative overflow-hidden">
           <div className="absolute inset-0 pointer-events-none bg-gradient-to-b from-amber-500/20 via-transparent to-transparent opacity-40" />
-          <header className="flex items-center justify-between px-4 pt-3 pb-2 relative z-10">
+          <header className="flex items-center justify-between px-4 pt-3.5 pb-2.5 relative z-10">
             <div>
               <p className="text-[11px] uppercase tracking-[0.16em] text-amber-200/80">Long-Term Archive</p>
               <h3 className="text-sm font-semibold text-slate-50">Archived Deals</h3>
@@ -1025,7 +1058,7 @@ export function DealsKanban() {
               {archivedDeals.map((deal) => (
                 <article
                   key={deal.id}
-                  className="rounded-2xl border border-amber-400/20 bg-slate-950/70 px-3 py-3 shadow-[0_8px_18px_rgba(0,0,0,0.4)]"
+                  className="rounded-2xl border border-amber-400/20 bg-slate-950/70 px-3 py-3.5 shadow-[0_8px_18px_rgba(0,0,0,0.4)]"
                 >
                   <div className="mb-1 flex items-start justify-between gap-2">
                     <div>

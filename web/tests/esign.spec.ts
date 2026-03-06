@@ -10,7 +10,7 @@ test.describe('E-Sign Integration', () => {
   });
 
   test('should display documents list', async ({ page }) => {
-    await navigateTo(page, '/esign');
+    await navigateTo(page, '/contracts');
     await waitForLoadingToComplete(page);
     
     const documents = page.locator('[class*="document"], [class*="file"]');
@@ -19,7 +19,7 @@ test.describe('E-Sign Integration', () => {
   });
 
   test('should upload document for signing', async ({ page }) => {
-    await navigateTo(page, '/esign');
+    await navigateTo(page, '/contracts');
     await waitForLoadingToComplete(page);
     
     const uploadButton = page.locator('button, input[type="file"]').filter({ hasText: /upload|add/i }).first();
@@ -32,7 +32,7 @@ test.describe('E-Sign Integration', () => {
   });
 
   test('should display document status', async ({ page }) => {
-    await navigateTo(page, '/esign');
+    await navigateTo(page, '/contracts');
     await waitForLoadingToComplete(page);
     
     const documentCard = page.locator('[class*="document"]').first();
@@ -47,7 +47,7 @@ test.describe('E-Sign Integration', () => {
   });
 
   test('should send document for signature', async ({ page }) => {
-    await navigateTo(page, '/esign');
+    await navigateTo(page, '/contracts');
     await waitForLoadingToComplete(page);
     
     const documentCard = page.locator('[class*="document"]').first();
@@ -65,7 +65,7 @@ test.describe('E-Sign Integration', () => {
   });
 
   test('should view document preview', async ({ page }) => {
-    await navigateTo(page, '/esign');
+    await navigateTo(page, '/contracts');
     await waitForLoadingToComplete(page);
     
     const documentCard = page.locator('[class*="document"]').first();
@@ -83,7 +83,7 @@ test.describe('E-Sign Integration', () => {
   });
 
   test('should download signed document', async ({ page }) => {
-    await navigateTo(page, '/esign');
+    await navigateTo(page, '/contracts');
     await waitForLoadingToComplete(page);
     
     const downloadButton = page.locator('button, a').filter({ hasText: /download/i }).first();
@@ -100,7 +100,7 @@ test.describe('E-Sign Integration', () => {
   });
 
   test('should filter documents by status', async ({ page }) => {
-    await navigateTo(page, '/esign');
+    await navigateTo(page, '/contracts');
     await waitForLoadingToComplete(page);
     
     const filters = ['ALL', 'PENDING', 'SIGNED', 'COMPLETED'];
@@ -115,7 +115,7 @@ test.describe('E-Sign Integration', () => {
   });
 
   test('should display signature workflow', async ({ page }) => {
-    await navigateTo(page, '/esign');
+    await navigateTo(page, '/contracts');
     await waitForLoadingToComplete(page);
     
     const documentCard = page.locator('[class*="document"]').first();
@@ -133,7 +133,7 @@ test.describe('E-Sign Integration', () => {
   });
 
   test('should add signer to document', async ({ page }) => {
-    await navigateTo(page, '/esign');
+    await navigateTo(page, '/contracts');
     await waitForLoadingToComplete(page);
     
     const documentCard = page.locator('[class*="document"]').first();
@@ -162,7 +162,7 @@ test.describe('E-Sign Integration', () => {
   });
 
   test('should cancel signature request', async ({ page }) => {
-    await navigateTo(page, '/esign');
+    await navigateTo(page, '/contracts');
     await waitForLoadingToComplete(page);
     
     const documentCard = page.locator('[class*="document"]').first();

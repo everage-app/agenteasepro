@@ -1,9 +1,10 @@
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../../features/auth/authStore';
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { Logo } from '../ui/Logo';
 import api from '../../lib/api';
 import { formatPhoneDisplay } from '../../lib/phone';
+import { prefetchRoute } from '../../lib/prefetch';
 
 interface SidebarProps {
   isOpen?: boolean;
@@ -180,6 +181,8 @@ export function Sidebar({ isOpen = true, onClose, isMobile = false }: SidebarPro
                   key={item.name}
                   to={item.href}
                   onClick={handleNavClick}
+                  onMouseEnter={() => prefetchRoute(item.href)}
+                  onFocus={() => prefetchRoute(item.href)}
                   className={({ isActive }) =>
                     `group flex items-center gap-3 rounded-xl px-4 py-3 text-base font-medium transition-all ${
                       isActive
@@ -238,6 +241,8 @@ export function Sidebar({ isOpen = true, onClose, isMobile = false }: SidebarPro
           <NavLink
             key={item.name}
             to={item.href}
+            onMouseEnter={() => prefetchRoute(item.href)}
+            onFocus={() => prefetchRoute(item.href)}
             className={({ isActive }) =>
               `group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all ${
                 isActive

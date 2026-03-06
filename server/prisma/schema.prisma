@@ -99,6 +99,11 @@ model Agent {
   internalEvents    InternalEvent[]
   internalErrors    InternalError[]
   supportRequests   SupportRequest[]
+  teamMemberships   TeamMember[]
+  revokedTokens     RevokedToken[]
+  loginAttemptRecords LoginAttemptRecord[]
+  sequenceEnrollments SequenceEnrollment[]
+  outboundWebhooks  OutboundWebhook[]
 }
 
 model SupportRequest {
@@ -259,6 +264,7 @@ model Deal {
   archivedByAgentId  String?
   archiveAfterDays   Int                 @default(180)
   lastActivityAt     DateTime?
+  deletedAt          DateTime?           // Soft delete
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
   repc               Repc?
@@ -267,8 +273,10 @@ model Deal {
   forms              FormInstance[]
   events             DealEvent[]
   tasks              Task[]
+  checklists         TransactionChecklist[]
 
   @@index([agentId, archivedAt, status])
+  @@index([agentId, deletedAt])
 }
 
 enum DealStatus {
@@ -707,6 +715,13 @@ model Task {
   marketingBlast   MarketingBlast? @relation(fields: [marketingBlastId], references: [id])
   
   createdFrom      TaskCreatedFrom @default(MANUAL)
+  
+  // Recurrence support
+  isRecurring      Boolean         @default(false)
+  recurrenceRule   String?         // RRULE format (e.g., "FREQ=MONTHLY;INTERVAL=1")
+  recurrenceEndAt  DateTime?       // When recurrence stops
+  parentTaskId     String?         // Links to the original recurring task template
+  
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
 
@@ -1004,6 +1019,7 @@ model Lead {
   tags          String[]      @default([])
   converted     Boolean       @default(false)
   convertedAt   DateTime?
+  deletedAt     DateTime?           // Soft delete
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
   activities    LeadActivity[]
@@ -1015,6 +1031,7 @@ model Lead {
   @@index([landingPageId])
   @@index([email])
   @@index([createdAt])
+  @@index([agentId, deletedAt])
 }
 
 model LeadActivity {
@@ -1056,6 +1073,7 @@ model Client {
   referralsClosed Int         @default(0)
   lastContactAt   DateTime?
   lastMarketingAt DateTime?
+  deletedAt       DateTime?           // Soft delete
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
   buyerDeals      Deal[]      @relation("BuyerDeals")
@@ -1068,6 +1086,7 @@ model Client {
   @@index([agentId, stage])
   @@index([agentId, lastContactAt])
   @@index([agentId, createdAt])
+  @@index([agentId, deletedAt])
 }
 
 model SavedListing {
@@ -1140,4 +1159,320 @@ model InternalError {
   @@index([createdAt])
   @@index([agentId, createdAt])
   @@index([source, createdAt])
+}
+
+// ==================== TEAM / BROKERAGE / RBAC ====================
+
+enum TeamRole {
+  OWNER
+  MANAGER
+  AGENT
+  COORDINATOR
+  VIEWER
+}
+
+model Team {
+  id              String       @id @default(cuid())
+  name            String
+  slug            String       @unique
+  brokerageName   String?
+  brokerageLicense String?
+  logoUrl         String?
+  brandColor      String       @default("#3B82F6")
+  timezone        String       @default("America/Denver")
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  members         TeamMember[]
+  leadRoutingRules LeadRoutingRule[]
+  invitations     TeamInvitation[]
+
+  @@index([slug])
+}
+
+model TeamMember {
+  id        String   @id @default(cuid())
+  teamId    String
+  team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  agentId   String
+  agent     Agent    @relation(fields: [agentId], references: [id])
+  role      TeamRole @default(AGENT)
+  isActive  Boolean  @default(true)
+  joinedAt  DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([teamId, agentId])
+  @@index([agentId])
+  @@index([teamId, role])
+}
+
+model TeamInvitation {
+  id        String   @id @default(cuid())
+  teamId    String
+  team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  email     String
+  role      TeamRole @default(AGENT)
+  token     String   @unique
+  expiresAt DateTime
+  acceptedAt DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([teamId])
+  @@index([email])
+  @@index([token])
+}
+
+// ==================== LEAD ROUTING & DISTRIBUTION ====================
+
+enum LeadRoutingStrategy {
+  ROUND_ROBIN
+  WEIGHTED
+  ZIP_CODE
+  PRICE_RANGE
+  SOURCE_BASED
+  MANUAL
+}
+
+model LeadRoutingRule {
+  id            String              @id @default(cuid())
+  teamId        String
+  team          Team                @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  name          String
+  strategy      LeadRoutingStrategy @default(ROUND_ROBIN)
+  isActive      Boolean             @default(true)
+  priority      Int                 @default(0)  // Higher = checked first
+  conditions    Json?               // e.g., { zipCodes: ["84101"], sources: ["ZILLOW"], priceMin: 200000 }
+  assigneeIds   String[]            @default([])  // Agent IDs in rotation pool
+  currentIndex  Int                 @default(0)   // For round-robin pointer
+  weights       Json?               // e.g., { "agentId1": 60, "agentId2": 40 }
+  slaMinutes    Int?                // Max minutes before escalation
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  @@index([teamId, isActive])
+}
+
+// ==================== SECURITY: DB-BACKED TOKEN REVOCATION & LOCKOUT ====================
+
+model RevokedToken {
+  id        String   @id @default(cuid())
+  agentId   String
+  agent     Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  jti       String   @unique           // JWT token ID
+  expiresAt DateTime                   // When the original token would have expired
+  revokedAt DateTime @default(now())
+
+  @@index([jti])
+  @@index([expiresAt])
+}
+
+model LoginAttemptRecord {
+  id          String   @id @default(cuid())
+  agentId     String?
+  agent       Agent?   @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  email       String
+  ipAddress   String?
+  userAgent   String?
+  success     Boolean
+  lockedUntil DateTime?
+  createdAt   DateTime @default(now())
+
+  @@index([email, createdAt])
+  @@index([agentId, createdAt])
+}
+
+model OAuthState {
+  id        String   @id @default(cuid())
+  state     String   @unique
+  agentId   String
+  provider  String               // e.g., "google", "microsoft"
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+
+  @@index([state])
+  @@index([expiresAt])
+}
+
+// ==================== DISTRIBUTED LOCKS ====================
+
+model DistributedLock {
+  id        String   @id
+  lockedBy  String               // Instance identifier
+  lockedAt  DateTime @default(now())
+  expiresAt DateTime
+}
+
+// ==================== EMAIL / SMS SEQUENCES (Drip Campaigns) ====================
+
+enum SequenceStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+enum SequenceStepType {
+  EMAIL
+  SMS
+  TASK
+  WAIT
+}
+
+enum EnrollmentStatus {
+  ACTIVE
+  PAUSED
+  COMPLETED
+  UNSUBSCRIBED
+  BOUNCED
+}
+
+model Sequence {
+  id          String         @id @default(cuid())
+  agentId     String
+  name        String
+  description String?
+  status      SequenceStatus @default(DRAFT)
+  triggerType  String?        // e.g., "LEAD_CREATED", "CLIENT_STAGE_CHANGED", "MANUAL"
+  triggerConditions Json?     // e.g., { source: "WEBSITE", priority: "HOT" }
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  steps       SequenceStep[]
+  enrollments SequenceEnrollment[]
+
+  @@index([agentId, status])
+}
+
+model SequenceStep {
+  id            String           @id @default(cuid())
+  sequenceId    String
+  sequence      Sequence         @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
+  stepOrder     Int
+  type          SequenceStepType
+  delayMinutes  Int              @default(0)    // Delay from previous step
+  subject       String?          // For EMAIL type
+  body          String?          // Template body with {{merge_tags}}
+  taskTitle     String?          // For TASK type
+  meta          Json?            // Additional config per step type
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  @@unique([sequenceId, stepOrder])
+  @@index([sequenceId])
+}
+
+model SequenceEnrollment {
+  id              String           @id @default(cuid())
+  sequenceId      String
+  sequence        Sequence         @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
+  agentId         String
+  agent           Agent            @relation(fields: [agentId], references: [id])
+  contactType     String           // "LEAD" | "CLIENT"
+  contactId       String           // Lead or Client ID
+  status          EnrollmentStatus @default(ACTIVE)
+  currentStepOrder Int             @default(0)
+  nextStepAt      DateTime?
+  completedAt     DateTime?
+  unsubscribedAt  DateTime?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@index([sequenceId, status])
+  @@index([agentId])
+  @@index([nextStepAt, status])
+  @@index([contactType, contactId])
+}
+
+// ==================== TRANSACTION CHECKLISTS ====================
+
+enum ChecklistType {
+  PRE_LISTING
+  UNDER_CONTRACT
+  CLOSING
+  POST_CLOSING
+  CUSTOM
+}
+
+model TransactionChecklist {
+  id          String            @id @default(cuid())
+  dealId      String
+  deal        Deal              @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  name        String
+  type        ChecklistType     @default(CUSTOM)
+  isTemplate  Boolean           @default(false)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  items       ChecklistItem[]
+
+  @@index([dealId])
+}
+
+model ChecklistItem {
+  id            String                @id @default(cuid())
+  checklistId   String
+  checklist     TransactionChecklist  @relation(fields: [checklistId], references: [id], onDelete: Cascade)
+  title         String
+  description   String?
+  isRequired    Boolean               @default(false)
+  isCompleted   Boolean               @default(false)
+  completedAt   DateTime?
+  completedBy   String?               // Agent ID who completed it
+  dueAt         DateTime?
+  sortOrder     Int                   @default(0)
+  documentUrl   String?               // Attached document/file
+  notes         String?
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+
+  @@index([checklistId, sortOrder])
+}
+
+// ==================== OUTBOUND WEBHOOKS ====================
+
+enum WebhookEventType {
+  DEAL_CREATED
+  DEAL_STATUS_CHANGED
+  DEAL_CLOSED
+  CLIENT_CREATED
+  CLIENT_STAGE_CHANGED
+  LEAD_CREATED
+  LEAD_CONVERTED
+  TASK_COMPLETED
+  LISTING_CREATED
+  LISTING_STATUS_CHANGED
+  FORM_COMPLETED
+  SIGNATURE_COMPLETED
+}
+
+model OutboundWebhook {
+  id          String             @id @default(cuid())
+  agentId     String
+  agent       Agent              @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  name        String
+  url         String
+  secret      String?            // HMAC signing secret
+  events      WebhookEventType[]
+  isActive    Boolean            @default(true)
+  headers     Json?              // Custom headers
+  lastStatus  Int?               // Last HTTP response status
+  lastError   String?
+  lastFiredAt DateTime?
+  failCount   Int                @default(0)
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  @@index([agentId, isActive])
+}
+
+model WebhookDeliveryLog {
+  id          String   @id @default(cuid())
+  webhookId   String
+  event       String
+  payload     Json
+  statusCode  Int?
+  response    String?
+  error       String?
+  duration    Int?     // Ms
+  createdAt   DateTime @default(now())
+
+  @@index([webhookId, createdAt])
+  @@index([createdAt])
 }

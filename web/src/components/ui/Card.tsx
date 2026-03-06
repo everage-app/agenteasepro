@@ -29,7 +29,7 @@ export function Card({
   return (
     <div 
       className={cn(
-        'rounded-[28px] border transition-all duration-500',
+        'rounded-[28px] border transition-all duration-500 ae-motion-card',
         baseStyles,
         hover && 'hover:shadow-[0_16px_45px_rgba(59,130,246,0.18)] dark:hover:shadow-[0_12px_40px_rgba(0,0,0,0.5)] hover:-translate-y-0.5 cursor-pointer hover:border-indigo-300/80 dark:hover:border-white/20',
         onClick && 'cursor-pointer',
@@ -49,7 +49,7 @@ export function Card({
           {headerAction && <div className="flex-shrink-0">{headerAction}</div>}
         </div>
       )}
-      <div className="p-6">{children}</div>
+      <div className="px-6 py-6 md:py-7">{children}</div>
     </div>
   );
 }

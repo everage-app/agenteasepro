@@ -166,8 +166,8 @@ interface ManualReportingOverrides {
   deals?: Partial<ReportingStats['deals']>;
   properties?: Partial<ReportingStats['properties']>;
   goals?: Partial<ReportingStats['goals']>;
-  financials?: Partial<ReportingStats['financials']> & {
-    quarterlyGCI?: Partial<NonNullable<ReportingStats['financials']>['quarterlyGCI']>;
+  financials?: Partial<Omit<NonNullable<ReportingStats['financials']>, 'quarterlyGCI'>> & {
+    quarterlyGCI?: { q1?: number; q2?: number; q3?: number; q4?: number };
   };
 }
 
@@ -1103,7 +1103,7 @@ export function ReportingPage() {
                 <StatCard label="Active Listings" value={stats.properties.activeListings} color="cyan" />
                 <StatCard label="Total Views" value={formatNumber(stats.properties.totalViews)} color="purple" highlight />
                 <StatCard label="Avg Views/Listing" value={Math.round(stats.properties.totalViews / Math.max(1, stats.properties.activeListings))} color="blue" />
-                <StatCard label="Leads Generated" value={stats.properties.leadsGenerated ?? stats.agentActivity?.totalLeads ?? '—'} color="emerald" />
+                <StatCard label="Leads Generated" value={(stats.properties as any).leadsGenerated ?? stats.agentActivity?.totalLeads ?? '—'} color="emerald" />
               </div>
             </div>
           </div>

@@ -164,7 +164,7 @@ export async function sendgridInboundParseHandler(req: Request, res: Response) {
     let resolvedAgentId: string | null = null;
     let resolvedContactType: 'lead' | 'client' | null = null;
     let resolvedContactId: string | null = null;
-    let resolutionMethod: 'token' | 'fallback_sender' | null = null;
+    let resolutionMethod: 'token' | 'token_lookup' | 'fallback_sender' | null = null;
 
     if (token) {
       const decoded = verifyContactReplyToken(token);
@@ -173,6 +173,34 @@ export async function sendgridInboundParseHandler(req: Request, res: Response) {
         resolvedContactType = decoded.contactType;
         resolvedContactId = decoded.contactId;
         resolutionMethod = 'token';
+      }
+    }
+
+    if (token && (!resolvedAgentId || !resolvedContactType || !resolvedContactId)) {
+      const routedEvent = await prisma.internalEvent.findFirst({
+        where: {
+          kind: 'contact_email_sent',
+          meta: {
+            path: ['replyToken'],
+            equals: token,
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+        select: {
+          agentId: true,
+          meta: true,
+        },
+      });
+
+      const routedMeta = (routedEvent?.meta || {}) as any;
+      const routedType = routedMeta?.contactType === 'lead' || routedMeta?.contactType === 'client' ? routedMeta.contactType : null;
+      const routedId = typeof routedMeta?.contactId === 'string' ? routedMeta.contactId : null;
+
+      if (routedEvent?.agentId && routedType && routedId) {
+        resolvedAgentId = routedEvent.agentId;
+        resolvedContactType = routedType;
+        resolvedContactId = routedId;
+        resolutionMethod = 'token_lookup';
       }
     }
 

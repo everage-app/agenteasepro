@@ -134,7 +134,7 @@ export function AIDailyPlan() {
     const { type, id } = action.relatedTo;
     switch (type) {
       case 'deal':
-        navigate(`/deals/${id}`);
+        navigate(`/deals/${id}/cockpit`);
         break;
       case 'task':
         navigate('/tasks');

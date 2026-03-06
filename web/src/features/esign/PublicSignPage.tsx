@@ -39,6 +39,7 @@ export function PublicSignPage() {
   const [submitting, setSubmitting] = useState(false);
   const [hash, setHash] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
   const [pdfReady, setPdfReady] = useState(false);
   const [showAdoptModal, setShowAdoptModal] = useState(false);
   const [initials, setInitials] = useState('');
@@ -103,6 +104,41 @@ export function PublicSignPage() {
     requiredAssignedFields.length === 0
       ? 100
       : Math.round(((requiredAssignedFields.length - missingRequiredFields.length) / requiredAssignedFields.length) * 100);
+
+  const interactionLocked = !rulesAcknowledged;
+  const signerNameEntered = !!name.trim();
+
+  const signerTasks = [
+    {
+      id: 'ack',
+      label: 'Acknowledge e-sign disclosure',
+      done: rulesAcknowledged,
+      detail: 'Required first to unlock signer actions.',
+    },
+    {
+      id: 'fields',
+      label: 'Complete required fields',
+      done: requiredAssignedFields.length > 0 ? missingRequiredFields.length === 0 : true,
+      detail:
+        requiredAssignedFields.length > 0
+          ? `${requiredAssignedFields.length - missingRequiredFields.length}/${requiredAssignedFields.length} complete`
+          : 'No required fields assigned',
+    },
+    {
+      id: 'identity',
+      label: 'Confirm signer identity',
+      done: confirmed && signerNameEntered,
+      detail: 'Check agreement box and confirm legal name.',
+    },
+    {
+      id: 'adopt',
+      label: 'Adopt and complete signature',
+      done: !!hash,
+      detail: 'Final DocuSign-style confirmation step.',
+    },
+  ];
+
+  const nextSignerTask = signerTasks.find((task) => !task.done);
 
   const focusField = (field: EnvelopeField) => {
     setActiveRequiredFieldId(field.id);
@@ -205,7 +241,7 @@ export function PublicSignPage() {
   const performSubmit = async () => {
     if (!envelopeId || !signerId || !token) return;
     setSubmitting(true);
-    setError(null);
+    setFormError(null);
     try {
       const res = await api.post(`/esign-public/sign/${envelopeId}/${signerId}/${token}`, {
         name,
@@ -228,11 +264,11 @@ export function PublicSignPage() {
       const serverError = err?.response?.data?.error;
 
       if (status === 409 && serverError === 'Already signed') {
-        setError('This document has already been signed with this link.');
+        setFormError('This document has already been signed with this link.');
       } else if (status === 401) {
-        setError('This signing link is invalid or has expired.');
+        setFormError('This signing link is invalid or has expired.');
       } else {
-        setError(serverError || 'Unable to capture signature. Please try again.');
+        setFormError(serverError || 'Unable to capture signature. Please try again.');
       }
     } finally {
       setSubmitting(false);
@@ -240,13 +276,13 @@ export function PublicSignPage() {
   };
 
   const handleSubmit = async () => {
-    setError(null);
+    setFormError(null);
     if (!rulesAcknowledged) {
-      setError('Please acknowledge the e-sign rules before continuing.');
+      setFormError('Please acknowledge the e-sign disclosure first to unlock signing actions.');
       return;
     }
     if (missingRequiredFields.length > 0) {
-      setError(`Please complete all required fields before signing (${missingRequiredFields.length} remaining).`);
+      setFormError(`Please complete all required fields before signing (${missingRequiredFields.length} remaining).`);
       return;
     }
     if (!confirmed || !name) return;
@@ -255,7 +291,7 @@ export function PublicSignPage() {
 
   const handleConfirmAdoptAndSign = async () => {
     if (!initials.trim()) {
-      setError('Please set your initials before signing.');
+      setFormError('Please set your initials before signing.');
       return;
     }
     setShowAdoptModal(false);
@@ -333,8 +369,10 @@ export function PublicSignPage() {
           </label>
         </div>
 
-        <div className="text-xs text-blue-200/90 bg-blue-500/10 border border-blue-500/30 rounded-xl px-3 py-2">
-          Signing tip: switch to Focus PDF or Full Screen to zoom in and verify every highlighted sign/initial marker.
+        <div className={`text-xs rounded-xl px-3 py-2 border ${interactionLocked ? 'text-amber-100 bg-amber-500/10 border-amber-500/30' : 'text-blue-200/90 bg-blue-500/10 border-blue-500/30'}`}>
+          {interactionLocked
+            ? 'Step 1 required: acknowledge the e-sign disclosure above to unlock signer actions and required tabs.'
+            : 'Signing tip: switch to Focus PDF or Full Screen to zoom in and verify every highlighted sign/initial marker.'}
         </div>
 
         <div className={`grid gap-4 ${focusPdf ? 'grid-cols-1' : 'md:grid-cols-[2.25fr_1fr]'}`}>
@@ -344,10 +382,10 @@ export function PublicSignPage() {
                 Zoom tip: use PDF controls (+/-) for exact line review.
               </div>
               <div className="flex items-center gap-2">
-                <Button type="button" variant="outline" size="sm" onClick={() => setFocusPdf((v) => !v)}>
+                <Button type="button" variant="outline" size="sm" disabled={interactionLocked} onClick={() => setFocusPdf((v) => !v)}>
                   {focusPdf ? 'Show Signing Panel' : 'Focus PDF'}
                 </Button>
-                <Button type="button" variant="outline" size="sm" onClick={() => setShowPdfFullscreen(true)}>
+                <Button type="button" variant="outline" size="sm" disabled={interactionLocked} onClick={() => setShowPdfFullscreen(true)}>
                   Full Screen
                 </Button>
               </div>
@@ -402,20 +440,40 @@ export function PublicSignPage() {
                       href={packetPdfPath}
                       target="_blank"
                       rel="noreferrer"
-                      className="text-xs font-semibold text-blue-200 underline"
+                      className={`text-xs font-semibold underline ${interactionLocked ? 'text-slate-400 pointer-events-none' : 'text-blue-200'}`}
                     >
                       Open PDF in new tab
                     </a>
                     {packetPdfDownloadPath && (
                       <a
                         href={packetPdfDownloadPath}
-                        className="text-xs font-semibold text-blue-200 underline"
+                        className={`text-xs font-semibold underline ${interactionLocked ? 'text-slate-400 pointer-events-none' : 'text-blue-200'}`}
                       >
                         Download PDF
                       </a>
                     )}
                   </div>
                 )}
+              </div>
+
+              <div className="rounded-xl border border-cyan-500/25 bg-cyan-500/10 p-3">
+                <div className="text-[10px] uppercase tracking-wide text-cyan-200 font-bold mb-2">Signer action required</div>
+                <div className="space-y-2">
+                  {signerTasks.map((task, idx) => (
+                    <div key={task.id} className="flex items-start gap-2 text-xs">
+                      <div className={`mt-0.5 inline-flex h-5 w-5 items-center justify-center rounded-full border text-[10px] font-bold ${task.done ? 'border-emerald-400/50 bg-emerald-500/20 text-emerald-200' : 'border-white/20 bg-white/5 text-slate-300'}`}>
+                        {task.done ? '✓' : idx + 1}
+                      </div>
+                      <div className="min-w-0">
+                        <div className={`${task.done ? 'text-emerald-200' : 'text-slate-100'} font-semibold`}>{task.label}</div>
+                        <div className="text-slate-400">{task.detail}</div>
+                      </div>
+                    </div>
+                  ))}
+                  {nextSignerTask && (
+                    <div className="pt-1 text-[11px] text-cyan-100">Next step: {nextSignerTask.label}</div>
+                  )}
+                </div>
               </div>
 
               <div className="space-y-3 rounded-xl border border-white/10 bg-white/5 p-3">
@@ -432,7 +490,7 @@ export function PublicSignPage() {
                         <button
                           type="button"
                           onClick={goToNextMissingField}
-                          disabled={missingRequiredFields.length === 0}
+                          disabled={interactionLocked || missingRequiredFields.length === 0}
                           className="rounded-md border border-white/10 px-2 py-1 text-[10px] font-semibold text-slate-200 hover:bg-white/10 disabled:opacity-50"
                         >
                           Next Required
@@ -469,6 +527,7 @@ export function PublicSignPage() {
                                 ref={(el) => {
                                   fieldInputRefs.current[field.id] = el;
                                 }}
+                                disabled={interactionLocked}
                                 checked={fieldValues[field.id] === true}
                                 onChange={(e) => setFieldValues((prev) => ({ ...prev, [field.id]: e.target.checked }))}
                                 className="mt-0.5 rounded border-slate-600 bg-slate-800 text-blue-500 focus:ring-blue-500"
@@ -483,6 +542,7 @@ export function PublicSignPage() {
                               <button
                                 type="button"
                                 className="ml-auto text-[10px] text-cyan-200 underline"
+                                disabled={interactionLocked}
                                 onClick={(e) => {
                                   e.preventDefault();
                                   focusField(field);
@@ -514,6 +574,7 @@ export function PublicSignPage() {
                                   <button
                                     type="button"
                                     className="text-[10px] text-cyan-200 underline"
+                                    disabled={interactionLocked}
                                     onClick={() => focusField(field)}
                                   >
                                     Jump
@@ -544,6 +605,7 @@ export function PublicSignPage() {
                                 ref={(el) => {
                                   fieldInputRefs.current[field.id] = el;
                                 }}
+                                disabled={interactionLocked}
                                 value={typeof fieldValues[field.id] === 'string' ? String(fieldValues[field.id]) : ''}
                                 onChange={(e) => {
                                   const next = e.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4);
@@ -575,6 +637,7 @@ export function PublicSignPage() {
                               ref={(el) => {
                                 fieldInputRefs.current[field.id] = el;
                               }}
+                              disabled={interactionLocked}
                               value={typeof fieldValues[field.id] === 'string' ? String(fieldValues[field.id]) : ''}
                               onChange={(e) => setFieldValues((prev) => ({ ...prev, [field.id]: e.target.value }))}
                               placeholder={field.placeholder || 'Enter value'}
@@ -590,6 +653,7 @@ export function PublicSignPage() {
                 <label className="flex items-start gap-3 p-3 rounded-xl bg-white/5 border border-white/5 cursor-pointer hover:bg-white/10 transition">
                   <input
                     type="checkbox"
+                    disabled={interactionLocked}
                     checked={confirmed}
                     onChange={(e) => setConfirmed(e.target.checked)}
                     className="mt-0.5 rounded border-slate-600 bg-slate-800 text-blue-500 focus:ring-2 focus:ring-blue-500 focus:ring-offset-slate-900"
@@ -601,12 +665,19 @@ export function PublicSignPage() {
                   <label className="block text-xs font-bold text-slate-400 uppercase tracking-wide">Type your full legal name</label>
                   <input
                     ref={nameInputRef}
+                    disabled={interactionLocked}
                     className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     placeholder="e.g. John Doe"
                   />
                 </div>
+
+                {formError && (
+                  <div className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-100">
+                    {formError}
+                  </div>
+                )}
 
                 <Button
                   type="button"

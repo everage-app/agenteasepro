@@ -42,6 +42,11 @@ router.get('/', async (req: AuthenticatedRequest, res) => {
   try {
     const { stage, search } = req.query;
 
+    // Pagination: ?page=1&limit=50 (defaults: page 1, limit 50, max 200)
+    const page = Math.max(1, parseInt(String(req.query.page || '1'), 10) || 1);
+    const limit = Math.min(200, Math.max(1, parseInt(String(req.query.limit || '50'), 10) || 50));
+    const skip = (page - 1) * limit;
+
     const where: Prisma.ClientWhereInput = {
       agentId: req.agentId,
       ...(stage && { stage: stage as ClientStage }),
@@ -75,7 +80,11 @@ router.get('/', async (req: AuthenticatedRequest, res) => {
         },
       },
       orderBy: { createdAt: 'desc' },
+      skip,
+      take: limit,
     });
+
+    const total = await prisma.client.count({ where });
 
     // Enrich with computed fields
     const enrichedClients = clients.map(client => {
@@ -106,23 +115,35 @@ router.get('/', async (req: AuthenticatedRequest, res) => {
 
       return {
         id: client.id,
+        firstName: client.firstName,
+        lastName: client.lastName,
         name: `${client.firstName} ${client.lastName}`,
         email: client.email,
         phone: client.phone,
         stage: client.stage,
         role: client.role,
         tags: client.tags,
+        referralRank: client.referralRank,
+        referralsGiven: client.referralsGiven,
+        referralsClosed: client.referralsClosed,
         primaryProperty: primaryDeal?.property ? `${primaryDeal.property.street}, ${primaryDeal.property.city}` : undefined,
         primaryDealStage: primaryDeal?.status,
         nextDeadline: nextDeadline?.toISOString() || null,
         openTasksCount: client.tasks.length,
+        dealCount: allDeals.length,
         lastContactAt: client.lastContactAt?.toISOString() || null,
         lastMarketingAt: client.lastMarketingAt?.toISOString() || null,
         temperature: client.temperature,
+        createdAt: client.createdAt.toISOString(),
       };
     });
 
-    res.json(enrichedClients);
+    // Backward-compatible: return raw array when no page param, paginated envelope when page is explicit
+    if (req.query.page) {
+      res.json({ data: enrichedClients, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } });
+    } else {
+      res.json(enrichedClients);
+    }
   } catch (error) {
     console.error('Error fetching clients:', error);
     res.status(500).json({ error: 'Failed to fetch clients' });

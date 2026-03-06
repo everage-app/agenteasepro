@@ -13,7 +13,9 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:generate": "prisma generate",
     "seed": "ts-node prisma/seed.ts",
-    "seed:forms": "ts-node prisma/seed-forms.ts"
+    "seed:forms": "ts-node prisma/seed-forms.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@prisma/client": "^5.20.0",
@@ -33,6 +35,8 @@
     "openai": "^6.9.1",
     "pdf-lib": "^1.17.1",
     "pdf-parse": "^1.1.4",
+    "pino": "^10.3.1",
+    "pino-pretty": "^13.1.3",
     "stripe": "^20.2.0",
     "utahcontracts-monorepo": "file:..",
     "zod": "^3.23.8"
@@ -49,6 +53,7 @@
     "prisma": "^5.20.0",
     "ts-node": "^10.9.2",
     "ts-node-dev": "^2.0.0",
-    "typescript": "^5.6.3"
+    "typescript": "^5.6.3",
+    "vitest": "^4.0.18"
   }
 }

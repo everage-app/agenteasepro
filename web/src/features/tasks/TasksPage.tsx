@@ -169,6 +169,22 @@ export function TasksPage() {
 
   const totalTasks = tasks.length;
   const hasNoTasks = totalTasks === 0 && !loading;
+  const todayStart = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate());
+  const openTasksCount = tasks.filter((task) => task.status === 'OPEN').length;
+  const completedTasksCount = tasks.filter((task) => task.status === 'COMPLETED').length;
+  const dueTodayCount = tasks.filter((task) => {
+    if (task.status !== 'OPEN' || !task.dueAt) return false;
+    const due = new Date(task.dueAt);
+    const dueDate = new Date(due.getFullYear(), due.getMonth(), due.getDate());
+    return dueDate.getTime() === todayStart.getTime();
+  }).length;
+  const overdueCount = tasks.filter((task) => {
+    if (task.status !== 'OPEN' || !task.dueAt) return false;
+    const due = new Date(task.dueAt);
+    const dueDate = new Date(due.getFullYear(), due.getMonth(), due.getDate());
+    return dueDate < todayStart;
+  }).length;
+  const upcomingWeekItems = agenda.reduce((total, day) => total + day.events.length + day.tasks.length, 0);
 
   return (
     <PageLayout
@@ -191,7 +207,7 @@ export function TasksPage() {
 
 
 
-      <div className="mb-4 sm:mb-6 rounded-3xl border border-white/10 bg-slate-950/50 backdrop-blur-xl p-4 sm:p-5">
+      <div className="mb-5 sm:mb-7 rounded-3xl border border-white/10 bg-slate-950/50 backdrop-blur-xl p-5 sm:p-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <div className="text-xs font-semibold text-cyan-200 uppercase tracking-wider">Task guidance</div>
@@ -208,9 +224,38 @@ export function TasksPage() {
         </div>
       </div>
 
+      <div className="mb-5 sm:mb-7 rounded-3xl border border-cyan-400/20 bg-slate-950/50 backdrop-blur-xl p-5 sm:p-6 shadow-[0_20px_50px_rgba(0,0,0,0.55)]">
+        <div className="mb-3 sm:mb-4">
+          <div className="text-xs font-semibold text-cyan-200 uppercase tracking-wider">Task overview</div>
+          <div className="text-sm text-slate-300 mt-1">A quick snapshot of what needs attention right now.</div>
+        </div>
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+          <div className="rounded-2xl border border-cyan-400/25 bg-cyan-500/10 px-4 py-3.5">
+            <div className="text-2xl font-bold text-cyan-200">{openTasksCount}</div>
+            <div className="text-xs text-cyan-100/90 mt-1">Open tasks</div>
+          </div>
+          <div className="rounded-2xl border border-amber-400/25 bg-amber-500/10 px-4 py-3.5">
+            <div className="text-2xl font-bold text-amber-200">{dueTodayCount}</div>
+            <div className="text-xs text-amber-100/90 mt-1">Due today</div>
+          </div>
+          <div className="rounded-2xl border border-rose-400/25 bg-rose-500/10 px-4 py-3.5">
+            <div className="text-2xl font-bold text-rose-200">{overdueCount}</div>
+            <div className="text-xs text-rose-100/90 mt-1">Overdue</div>
+          </div>
+          <div className="rounded-2xl border border-emerald-400/25 bg-emerald-500/10 px-4 py-3.5">
+            <div className="text-2xl font-bold text-emerald-200">{completedTasksCount}</div>
+            <div className="text-xs text-emerald-100/90 mt-1">Completed</div>
+          </div>
+          <div className="rounded-2xl border border-violet-400/25 bg-violet-500/10 px-4 py-3.5 col-span-2 lg:col-span-1">
+            <div className="text-2xl font-bold text-violet-200">{upcomingWeekItems}</div>
+            <div className="text-xs text-violet-100/90 mt-1">Next 7 days</div>
+          </div>
+        </div>
+      </div>
+
       {/* Upcoming week */}
-      <div className="mb-4 sm:mb-6 rounded-3xl border border-cyan-400/20 bg-slate-950/50 backdrop-blur-xl p-5 shadow-[0_22px_50px_rgba(0,0,0,0.6)]">
-        <div className="flex items-center justify-between mb-3">
+      <div className="mb-5 sm:mb-7 rounded-3xl border border-cyan-400/20 bg-slate-950/50 backdrop-blur-xl p-6 sm:p-7 shadow-[0_22px_50px_rgba(0,0,0,0.6)]">
+        <div className="flex items-center justify-between mb-4">
           <div>
             <div className="text-xs font-semibold text-cyan-200 uppercase tracking-wider">Upcoming week</div>
             <div className="text-sm text-slate-300">Deadlines and follow-ups from your calendar</div>
@@ -232,14 +277,14 @@ export function TasksPage() {
         ) : (
           <div className="space-y-3">
             {agenda.slice(0, 4).map((day) => (
-              <div key={day.date} className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+              <div key={day.date} className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3.5">
                 <div className="flex items-center justify-between gap-2">
                   <div className="text-xs font-semibold text-slate-200">
                     {new Date(`${day.date}T00:00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
                   </div>
                   <button
                     onClick={() => window.location.assign(`/calendar?date=${day.date}`)}
-                    className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-[10px] text-slate-200 hover:bg-white/10"
+                    className="rounded-md border border-white/10 bg-white/5 px-2 py-1.5 text-[10px] text-slate-200 hover:bg-white/10"
                   >
                     Open day
                   </button>
@@ -265,7 +310,7 @@ export function TasksPage() {
       </div>
 
       {/* Filter Tabs */}
-      <div className="mb-4 sm:mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      <div className="mb-5 sm:mb-7 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <nav className="flex gap-4 sm:gap-6 text-xs font-semibold text-slate-300 border-b border-white/10 pb-3 overflow-x-auto">
           {(['OPEN', 'COMPLETED', 'ALL'] as const).map((f) => (
             <button
@@ -306,10 +351,10 @@ export function TasksPage() {
         </div>
       </div>
 
-      <div className="mb-4 flex flex-wrap gap-2">
+      <div className="mb-5 sm:mb-6 flex flex-wrap gap-2">
         <button
           onClick={() => setQuickFilter('ALL')}
-          className={`px-3 py-1.5 rounded-full text-xs font-semibold border ${
+          className={`px-3 py-2 rounded-full text-xs font-semibold border ${
             quickFilter === 'ALL' ? 'bg-cyan-500/20 border-cyan-400/40 text-cyan-200' : 'bg-white/5 border-white/10 text-slate-300'
           }`}
         >
@@ -317,7 +362,7 @@ export function TasksPage() {
         </button>
         <button
           onClick={() => setQuickFilter('DUE_TODAY')}
-          className={`px-3 py-1.5 rounded-full text-xs font-semibold border ${
+          className={`px-3 py-2 rounded-full text-xs font-semibold border ${
             quickFilter === 'DUE_TODAY' ? 'bg-amber-500/20 border-amber-400/40 text-amber-200' : 'bg-white/5 border-white/10 text-slate-300'
           }`}
         >
@@ -325,7 +370,7 @@ export function TasksPage() {
         </button>
         <button
           onClick={() => setQuickFilter('OVERDUE')}
-          className={`px-3 py-1.5 rounded-full text-xs font-semibold border ${
+          className={`px-3 py-2 rounded-full text-xs font-semibold border ${
             quickFilter === 'OVERDUE' ? 'bg-rose-500/20 border-rose-400/40 text-rose-200' : 'bg-white/5 border-white/10 text-slate-300'
           }`}
         >
@@ -333,11 +378,13 @@ export function TasksPage() {
         </button>
       </div>
 
-      {/* Client Status Dashboard */}
-      <ClientStatusDashboard />
+      <div className="mb-5 sm:mb-7 space-y-5 sm:space-y-6">
+        {/* Client Status Dashboard */}
+        <ClientStatusDashboard />
 
-      {/* Marketing Activity Tracker */}
-      <MarketingActivityTracker />
+        {/* Marketing Activity Tracker */}
+        <MarketingActivityTracker />
+      </div>
 
       {/* Empty State / Board */}
       {loading ? (
@@ -363,7 +410,7 @@ export function TasksPage() {
         <section>
           <div className="rounded-3xl border border-white/14 bg-slate-950/60 backdrop-blur-xl shadow-[0_22px_60px_rgba(0,0,0,0.85)] overflow-hidden">
             {/* Desktop: Horizontal Kanban */}
-            <div className="px-6 py-6">
+            <div className="px-6 py-7">
               <div className="mb-4 flex items-center justify-between gap-3">
                 <p className="text-xs text-slate-300">
                   Organize tasks by when you plan to work them. Drag cards between columns as things move.

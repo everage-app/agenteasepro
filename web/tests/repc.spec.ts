@@ -17,11 +17,11 @@ test.describe('REPC Features', () => {
     // Look for contracts/REPC related elements
     const contractElement = page.locator('text=/contract|REPC|document/i').first();
     const isVisible = await contractElement.isVisible();
-    expect(isVisible || true).toBeTruthy();
+    expect(isVisible).toBeTruthy();
   });
 
   test('should display AI REPC assistant', async ({ page }) => {
-    await navigateTo(page, '/repc');
+    await navigateTo(page, '/contracts');
     await waitForLoadingToComplete(page);
     
     // Look for AI Assistant component
@@ -32,7 +32,7 @@ test.describe('REPC Features', () => {
   });
 
   test('should fill property information', async ({ page }) => {
-    await navigateTo(page, '/repc');
+    await navigateTo(page, '/contracts');
     await waitForLoadingToComplete(page);
     
     // Fill property address
@@ -61,7 +61,7 @@ test.describe('REPC Features', () => {
   });
 
   test('should fill financial information', async ({ page }) => {
-    await navigateTo(page, '/repc');
+    await navigateTo(page, '/contracts');
     await waitForLoadingToComplete(page);
     
     // Purchase price
@@ -78,7 +78,7 @@ test.describe('REPC Features', () => {
   });
 
   test('should fill buyer/seller information', async ({ page }) => {
-    await navigateTo(page, '/repc');
+    await navigateTo(page, '/contracts');
     await waitForLoadingToComplete(page);
     
     // Buyer name
@@ -96,7 +96,7 @@ test.describe('REPC Features', () => {
 
   test('should navigate between form steps', async ({ page }) => {
     test.setTimeout(60_000);
-    await navigateTo(page, '/repc');
+    await navigateTo(page, '/contracts');
     await waitForLoadingToComplete(page);
     
     // Find next/continue button
@@ -116,7 +116,7 @@ test.describe('REPC Features', () => {
   });
 
   test('should analyze REPC with AI assistant', async ({ page }) => {
-    await navigateTo(page, '/repc');
+    await navigateTo(page, '/contracts');
     await waitForLoadingToComplete(page);
     
     // Fill in some data first
@@ -140,7 +140,7 @@ test.describe('REPC Features', () => {
   });
 
   test('should display validation errors', async ({ page }) => {
-    await navigateTo(page, '/repc');
+    await navigateTo(page, '/contracts');
     await waitForLoadingToComplete(page);
     
     // Try to proceed without required fields
@@ -160,7 +160,7 @@ test.describe('REPC Features', () => {
   });
 
   test('should save REPC as draft', async ({ page }) => {
-    await navigateTo(page, '/repc');
+    await navigateTo(page, '/contracts');
     await waitForLoadingToComplete(page);
     
     // Fill minimal data
@@ -178,7 +178,7 @@ test.describe('REPC Features', () => {
   });
 
   test('should complete and submit REPC', async ({ page }) => {
-    await navigateTo(page, '/repc');
+    await navigateTo(page, '/contracts');
     await waitForLoadingToComplete(page);
     
     // Fill all required fields (simplified)
@@ -201,7 +201,7 @@ test.describe('REPC Features', () => {
   });
 
   test('should download REPC document', async ({ page }) => {
-    await navigateTo(page, '/repc');
+    await navigateTo(page, '/contracts');
     await waitForLoadingToComplete(page);
     
     // Look for download button
@@ -220,7 +220,7 @@ test.describe('REPC Features', () => {
   });
 
   test('should send REPC for e-signature', async ({ page }) => {
-    await navigateTo(page, '/repc');
+    await navigateTo(page, '/contracts');
     await waitForLoadingToComplete(page);
     
     // Look for e-sign button
@@ -239,7 +239,7 @@ test.describe('REPC Features', () => {
   });
 
   test('should load saved REPC', async ({ page }) => {
-    await navigateTo(page, '/repc');
+    await navigateTo(page, '/contracts');
     await waitForLoadingToComplete(page);
     
     // Look for "Load" or "Open" button

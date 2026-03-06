@@ -1951,7 +1951,11 @@ router.get('/system', async (_req, res) => {
     nodeEnv: process.env.NODE_ENV,
     databaseUrl: Boolean(process.env.DATABASE_URL),
     stripeSecret: Boolean(process.env.STRIPE_SECRET_KEY),
-    stripePublic: Boolean(process.env.VITE_STRIPE_PUBLIC_KEY || process.env.STRIPE_PUBLIC_KEY),
+    stripePublic: Boolean(
+      process.env.STRIPE_PUBLISHABLE_KEY ||
+      process.env.STRIPE_PUBLIC_KEY ||
+      process.env.VITE_STRIPE_PUBLIC_KEY
+    ),
     idxApi: Boolean(process.env.IDX_API_KEY),
     openaiKey: Boolean(process.env.OPENAI_API_KEY),
     sendgridKey: Boolean(process.env.SENDGRID_API_KEY),

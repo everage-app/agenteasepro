@@ -3,11 +3,34 @@ import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { authenticateToken, AuthenticatedRequest } from '../middleware/auth';
 import { sendEmail } from '../services/emailService';
-import { buildContactReplyToAddress } from '../services/contactReplyToken';
+import { buildContactReplyToAddress, generateContactReplyToken } from '../services/contactReplyToken';
 
 export const router = Router();
 
 router.use(authenticateToken);
+
+function isTransientPrismaError(error: any): boolean {
+  const code = String(error?.code || '');
+  return code === 'P1001' || code === 'P1002';
+}
+
+async function withPrismaRetry<T>(operation: () => Promise<T>, attempts = 3, delayMs = 250): Promise<T> {
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      if (!isTransientPrismaError(error) || attempt === attempts) {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, delayMs * attempt));
+    }
+  }
+
+  throw lastError;
+}
 
 const sendContactEmailSchema = z
   .object({
@@ -81,22 +104,27 @@ router.post('/send', async (req: AuthenticatedRequest, res) => {
     const { contactType, contactId, subject, body, ccAgent } = parsed.data;
     const agentId = req.agentId;
 
-    const [agent, contact] = await Promise.all([
-      prisma.agent.findUnique({
-        where: { id: agentId },
-        select: { id: true, email: true, name: true },
-      }),
-      getContact({ agentId, contactType, contactId }),
-    ]);
+    const [agent, contact] = await withPrismaRetry(() =>
+      Promise.all([
+        prisma.agent.findUnique({
+          where: { id: agentId },
+          select: { id: true, email: true, name: true },
+        }),
+        getContact({ agentId, contactType, contactId }),
+      ]),
+    );
 
     if (!agent) return res.status(401).json({ error: 'Unauthorized' });
     if (!contact) return res.status(404).json({ error: 'Contact not found' });
     if (!contact.email) return res.status(400).json({ error: 'Contact does not have an email address' });
 
+    const replyToken = generateContactReplyToken();
+
     const replyTo = buildContactReplyToAddress({
       agentId,
       contactType,
       contactId,
+      replyToken,
     }) || agent.email;
 
     const sendResult = await sendEmail({
@@ -131,6 +159,7 @@ router.post('/send', async (req: AuthenticatedRequest, res) => {
           body,
           ccAgent,
           replyTo,
+          replyToken,
           messageId: sendResult.messageId || null,
           error: sendResult.error || null,
         },

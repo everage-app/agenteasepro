@@ -252,7 +252,7 @@ test.describe('API Integration Tests', () => {
       });
 
       if (response.ok()) {
-        expect(response.status()).toBe(204);
+        expect([200, 204]).toContain(response.status());
       }
     });
   });

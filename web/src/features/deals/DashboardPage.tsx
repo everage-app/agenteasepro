@@ -84,24 +84,28 @@ export function DashboardPage() {
     >
       <div className="space-y-4 sm:space-y-6 pb-10">
 
-        <div className="rounded-2xl sm:rounded-[28px] bg-slate-950/40 border border-white/10 backdrop-blur-xl p-4 sm:p-5">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-xs uppercase tracking-[0.18em] text-cyan-300">Daily guidance</div>
-              <div className="mt-2 text-sm text-slate-300">
-                Start with today&apos;s schedule, clear priority actions, then launch your top follow-up from Tasks or Marketing.
+        <div className="rounded-2xl sm:rounded-[28px] bg-slate-950/40 border border-white/10 backdrop-blur-xl p-3 sm:p-4">
+          <div className="grid grid-cols-1 lg:grid-cols-[1.15fr_1fr] gap-3 sm:gap-4 items-start">
+            <div className="min-w-0">
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-xs uppercase tracking-[0.18em] text-cyan-300">Daily guidance</div>
+                {streak > 1 && (
+                  <div className="shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-gradient-to-r from-orange-500/20 to-amber-500/10 border border-amber-400/30">
+                    <span className="text-xs">&#128293;</span>
+                    <span className="text-[11px] font-bold text-amber-300">{streak} day streak</span>
+                  </div>
+                )}
+              </div>
+              <div className="mt-1 text-xs sm:text-sm text-slate-300">
+                Start with today&apos;s schedule, clear priority actions, then launch your top follow-up.
               </div>
             </div>
-            {streak > 1 && (
-              <div className="shrink-0 flex items-center gap-2 px-3 py-1.5 rounded-full bg-gradient-to-r from-orange-500/20 to-amber-500/10 border border-amber-400/30">
-                <span className="text-base">&#128293;</span>
-                <span className="text-xs font-bold text-amber-300">{streak} day streak</span>
-              </div>
-            )}
+
+            <div className="min-w-0 border-t border-white/10 pt-3 lg:pt-0 lg:border-t-0 lg:border-l lg:border-white/10 lg:pl-4">
+              <NextBestActionRail compact maxItems={3} />
+            </div>
           </div>
         </div>
-
-        <NextBestActionRail />
 
         {/* ROW 1: Active Deals — the hero section */}
         <div className="w-full">

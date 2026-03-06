@@ -99,14 +99,16 @@ test.describe('Contracts • Form Templates', () => {
       await page.waitForTimeout(250);
     }
 
-    // Ensure templates panel is open (layout uses a "Templates" toggle in current UX).
-    const templatesToggle = page.getByRole('button', { name: /^templates$/i }).first();
-    if (await templatesToggle.isVisible()) {
-      const classes = (await templatesToggle.getAttribute('class')) || '';
-      if (!classes.includes('bg-purple-500/20')) {
+    // Ensure templates panel is open (avoid brittle class checks; assert on section heading).
+    const templatesHeading = page.getByRole('heading', { name: /templates\s*&\s*pdfs/i }).first();
+    const templatesVisible = await templatesHeading.isVisible({ timeout: 2500 }).catch(() => false);
+    if (!templatesVisible) {
+      const templatesToggle = page.getByRole('button', { name: /^templates$/i }).first();
+      if (await templatesToggle.isVisible({ timeout: 2500 }).catch(() => false)) {
         await templatesToggle.click();
       }
     }
+    await expect(templatesHeading).toBeVisible({ timeout: 30000 });
 
     // Wait for templates grid/cards to appear
     const previewButtons = page.getByRole('button', { name: /^preview$/i });

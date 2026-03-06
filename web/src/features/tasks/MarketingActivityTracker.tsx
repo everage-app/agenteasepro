@@ -128,9 +128,9 @@ export default function MarketingActivityTracker() {
   }
 
   return (
-    <div className="rounded-2xl border border-white/10 bg-slate-900/40 backdrop-blur-xl p-6 space-y-4">
+    <div className="rounded-2xl border border-white/10 bg-slate-900/40 backdrop-blur-xl p-6 md:p-7 space-y-5">
       {/* Header */}
-      <div className="flex items-center gap-3 mb-4">
+      <div className="flex items-center gap-3 mb-5">
         <div className="p-2 bg-gradient-to-br from-blue-500 to-cyan-600 rounded-lg">
           <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z" />
@@ -153,28 +153,28 @@ export default function MarketingActivityTracker() {
 
       {/* Stats Grid */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <div className="bg-slate-900/60 backdrop-blur-sm rounded-xl p-4 border border-cyan-400/30 relative overflow-hidden">
+        <div className="bg-slate-900/60 backdrop-blur-sm rounded-xl p-5 border border-cyan-400/30 relative overflow-hidden">
           <div className="absolute inset-0 bg-gradient-to-br from-cyan-500/20 to-blue-500/10"></div>
           <div className="relative">
             <div className="text-2xl font-bold text-cyan-400">{stats.totalBlasts}</div>
             <div className="text-xs text-cyan-300 font-medium mt-1">Total Campaigns</div>
           </div>
         </div>
-        <div className="bg-slate-900/60 backdrop-blur-sm rounded-xl p-4 border border-amber-400/30 relative overflow-hidden">
+        <div className="bg-slate-900/60 backdrop-blur-sm rounded-xl p-5 border border-amber-400/30 relative overflow-hidden">
           <div className="absolute inset-0 bg-gradient-to-br from-amber-500/20 to-orange-500/10"></div>
           <div className="relative">
             <div className="text-2xl font-bold text-amber-400">{stats.scheduledBlasts}</div>
             <div className="text-xs text-amber-300 font-medium mt-1">Scheduled</div>
           </div>
         </div>
-        <div className="bg-slate-900/60 backdrop-blur-sm rounded-xl p-4 border border-emerald-400/30 relative overflow-hidden">
+        <div className="bg-slate-900/60 backdrop-blur-sm rounded-xl p-5 border border-emerald-400/30 relative overflow-hidden">
           <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/20 to-teal-500/10"></div>
           <div className="relative">
             <div className="text-2xl font-bold text-emerald-400">{stats.sentBlasts}</div>
             <div className="text-xs text-emerald-300 font-medium mt-1">Sent</div>
           </div>
         </div>
-        <div className="bg-slate-900/60 backdrop-blur-sm rounded-xl p-4 border border-violet-400/30 relative overflow-hidden">
+        <div className="bg-slate-900/60 backdrop-blur-sm rounded-xl p-5 border border-violet-400/30 relative overflow-hidden">
           <div className="absolute inset-0 bg-gradient-to-br from-violet-500/20 to-purple-500/10"></div>
           <div className="relative">
             <div className="text-2xl font-bold text-violet-400">{stats.totalClicks}</div>
@@ -187,7 +187,7 @@ export default function MarketingActivityTracker() {
       <div className="flex gap-2 overflow-x-auto pb-1">
         <button
           onClick={() => setSelectedStatus('ALL')}
-          className={`px-4 py-2 rounded-xl text-sm font-medium transition-all whitespace-nowrap ${
+          className={`px-4 py-2.5 rounded-xl text-sm font-medium transition-all whitespace-nowrap ${
             selectedStatus === 'ALL'
               ? 'bg-cyan-600 text-white shadow-lg shadow-cyan-500/30'
               : 'bg-white/5 text-slate-300 hover:bg-white/10 hover:text-white border border-white/10 hover:border-cyan-400/30'
@@ -199,7 +199,7 @@ export default function MarketingActivityTracker() {
           <button
             key={status}
             onClick={() => setSelectedStatus(status)}
-            className={`px-4 py-2 rounded-xl text-sm font-medium transition-all whitespace-nowrap ${
+            className={`px-4 py-2.5 rounded-xl text-sm font-medium transition-all whitespace-nowrap ${
               selectedStatus === status
                 ? 'bg-cyan-600 text-white shadow-lg shadow-cyan-500/30'
                 : 'bg-white/5 text-slate-300 hover:bg-white/10 hover:text-white border border-white/10 hover:border-cyan-400/30'
@@ -222,7 +222,7 @@ export default function MarketingActivityTracker() {
               <div
                 key={blast.id}
                 onClick={() => handleBlastClick(blast.id)}
-                className="bg-slate-900/60 backdrop-blur-sm rounded-lg p-4 shadow-sm hover:shadow-md transition-all cursor-pointer border border-white/10 hover:border-cyan-400/30"
+                className="bg-slate-900/60 backdrop-blur-sm rounded-lg p-5 shadow-sm hover:shadow-md transition-all cursor-pointer border border-white/10 hover:border-cyan-400/30"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex-1 min-w-0">

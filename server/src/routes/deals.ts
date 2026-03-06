@@ -117,15 +117,33 @@ router.get('/', async (req: AuthenticatedRequest, res) => {
   const includeArchived = parseBooleanFlag(req.query.includeArchived);
   await autoArchiveEligibleDeals(req.agentId);
 
-  const deals = await prisma.deal.findMany({
-    where: {
-      agentId: req.agentId,
-      ...(includeArchived ? {} : { archivedAt: null }),
-    },
-    include: dealInclude,
-    orderBy: { createdAt: 'desc' },
-  });
-  res.json(deals);
+  // Pagination: ?page=1&limit=50 (defaults: page 1, limit 50, max 200)
+  const page = Math.max(1, parseInt(String(req.query.page || '1'), 10) || 1);
+  const limit = Math.min(200, Math.max(1, parseInt(String(req.query.limit || '50'), 10) || 50));
+  const skip = (page - 1) * limit;
+
+  const where = {
+    agentId: req.agentId,
+    ...(includeArchived ? {} : { archivedAt: null }),
+  };
+
+  const [deals, total] = await Promise.all([
+    prisma.deal.findMany({
+      where,
+      include: dealInclude,
+      orderBy: { createdAt: 'desc' },
+      skip,
+      take: limit,
+    }),
+    prisma.deal.count({ where }),
+  ]);
+
+  // Backward-compatible: return raw array when no page param, paginated envelope when page is explicit
+  if (req.query.page) {
+    res.json({ data: deals, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } });
+  } else {
+    res.json(deals);
+  }
 });
 
 router.get('/:id', async (req: AuthenticatedRequest, res) => {

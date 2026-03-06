@@ -35,10 +35,17 @@ export function buildContactReplyToAddress(params: {
   agentId: string;
   contactType: ContactType;
   contactId: string;
+  replyToken?: string;
 }): string | null {
-  const secret = getReplySecret();
   const domain = getReplyDomain();
-  if (!secret || !domain) return null;
+  if (!domain) return null;
+
+  if (params.replyToken) {
+    return `reply+${params.replyToken}@${domain}`;
+  }
+
+  const secret = getReplySecret();
+  if (!secret) return null;
 
   const payload: ReplyTokenPayload = {
     a: params.agentId,
@@ -52,6 +59,10 @@ export function buildContactReplyToAddress(params: {
   const token = `${payloadB64}.${sig}`;
 
   return `reply+${token}@${domain}`;
+}
+
+export function generateContactReplyToken(): string {
+  return crypto.randomBytes(12).toString('base64url');
 }
 
 export function verifyContactReplyToken(token: string): {
@@ -97,7 +108,7 @@ export function extractReplyTokenFromAddressList(raw: string | null | undefined)
   const value = String(raw || '').trim();
   if (!value) return null;
 
-  const regex = /reply\+([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)@/g;
+  const regex = /reply\+([A-Za-z0-9._-]+)@/g;
   const match = regex.exec(value);
   if (!match || !match[1]) return null;
   return match[1];

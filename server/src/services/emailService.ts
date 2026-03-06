@@ -40,12 +40,16 @@ interface SendResult {
 
 const SENDGRID_API_URL = 'https://api.sendgrid.com/v3/mail/send';
 
+function normalizeEmail(value: unknown): string {
+  return String(value || '').trim().toLowerCase();
+}
+
 /**
  * Send an email via SendGrid
  */
 export async function sendEmail(params: EmailParams): Promise<SendResult> {
   const apiKey = process.env.SENDGRID_API_KEY;
-  const fromEmail = params.fromEmail || process.env.SENDGRID_FROM_EMAIL || process.env.SENDER_EMAIL;
+  const fromEmail = (params.fromEmail || process.env.SENDGRID_FROM_EMAIL || process.env.SENDER_EMAIL || '').trim();
 
   if (!apiKey) {
     console.warn('⚠️ SENDGRID_API_KEY not configured - email not sent');
@@ -58,14 +62,28 @@ export async function sendEmail(params: EmailParams): Promise<SendResult> {
   }
 
   // Normalize recipients to array
-  const recipients = (Array.isArray(params.to) ? params.to : [params.to])
-    .map((email) => String(email).trim())
-    .filter(Boolean);
+  const recipients = Array.from(
+    new Set(
+      (Array.isArray(params.to) ? params.to : [params.to])
+        .map((email) => normalizeEmail(email))
+        .filter(Boolean),
+    ),
+  );
+
+  if (recipients.length === 0) {
+    return { success: false, error: 'No valid recipients provided' };
+  }
 
   try {
     // Normalize CC/BCC to arrays
-    const ccRecipients = params.cc ? (Array.isArray(params.cc) ? params.cc : [params.cc]) : [];
-    const bccRecipients = params.bcc ? (Array.isArray(params.bcc) ? params.bcc : [params.bcc]) : [];
+    const rawCc = params.cc ? (Array.isArray(params.cc) ? params.cc : [params.cc]) : [];
+    const rawBcc = params.bcc ? (Array.isArray(params.bcc) ? params.bcc : [params.bcc]) : [];
+    const normalizedCc = Array.from(new Set(rawCc.map((c) => normalizeEmail(c)).filter(Boolean)));
+    const normalizedBcc = Array.from(new Set(rawBcc.map((b) => normalizeEmail(b)).filter(Boolean)));
+
+    // Filter duplicates to prevent SendGrid 400 errors
+    const ccRecipients = normalizedCc.filter((c) => !recipients.includes(c));
+    const bccRecipients = normalizedBcc.filter((b) => !recipients.includes(b) && !ccRecipients.includes(b));
 
     const personalizations =
       ccRecipients.length > 0 || bccRecipients.length > 0

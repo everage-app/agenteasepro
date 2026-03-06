@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../../lib/api';
 import { PageHeader } from '../../components/ui/PageHeader';
@@ -147,25 +147,25 @@ export function ClientDetailPage() {
   if (!data) return <div className="p-8 text-slate-400">Client not found.</div>;
 
   const { client, deals, tasks, marketing, forms, timeline } = data;
-  const openTasksCount = tasks.filter(t => t.status !== 'DONE').length;
+  const openTasksCount = (tasks || []).filter(t => t.status !== 'DONE').length;
   const now = new Date();
-  const overdueTasks = tasks.filter(task => task.dueAt && new Date(task.dueAt) < now && task.status !== 'DONE').length;
-  const dueSoonTasks = tasks.filter(task => {
+  const overdueTasks = (tasks || []).filter(task => task.dueAt && new Date(task.dueAt) < now && task.status !== 'DONE').length;
+  const dueSoonTasks = (tasks || []).filter(task => {
     if (!task.dueAt || task.status === 'DONE') return false;
     const due = new Date(task.dueAt).getTime();
     const soon = now.getTime() + 3 * 24 * 60 * 60 * 1000;
     return due >= now.getTime() && due <= soon;
   }).length;
-  const completedTasks = tasks.filter(task => task.status === 'DONE').length;
-  const signedFormsCount = forms.filter((form) => form.status === 'SIGNED').length;
-  const pendingFormsCount = forms.filter((form) => ['SENT', 'VIEWED', 'PARTIALLY_SIGNED'].includes(form.status)).length;
-  const draftFormsCount = forms.filter((form) => form.status === 'DRAFT').length;
+  const completedTasks = (tasks || []).filter(task => task.status === 'DONE').length;
+  const signedFormsCount = (forms || []).filter((form) => form.status === 'SIGNED').length;
+  const pendingFormsCount = (forms || []).filter((form) => ['SENT', 'VIEWED', 'PARTIALLY_SIGNED'].includes(form.status)).length;
+  const draftFormsCount = (forms || []).filter((form) => form.status === 'DRAFT').length;
   const lastContactLabel = marketing.lastContactAt
     ? new Date(marketing.lastContactAt).toLocaleDateString()
     : 'No contact logged';
 
-  const conversationBrief = useMemo(() => {
-    const sortedTimeline = timeline.slice().sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
+  const conversationBrief = (() => {
+    const sortedTimeline = (timeline || []).slice().sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
     const latest = sortedTimeline[0];
     const recentReply = sortedTimeline.find((item) => (item.label || '').toLowerCase().includes('reply'));
     const daysSinceContact = marketing.lastContactAt
@@ -184,7 +184,7 @@ export function ClientDetailPage() {
       hasRecentReply: Boolean(recentReply),
       nextStep,
     };
-  }, [marketing.lastContactAt, overdueTasks, timeline]);
+  })();
 
   const getFormStatusClass = (status: string) => {
     if (status === 'SIGNED') return 'bg-emerald-500/20 text-emerald-300 border-emerald-400/40';
@@ -200,6 +200,19 @@ export function ClientDetailPage() {
       .replace(/_/g, ' ')
       .toLowerCase()
       .replace(/\b\w/g, (char) => char.toUpperCase());
+
+  const openDealDetail = (dealId: string) => {
+    navigate(`/deals/${dealId}/detail`);
+  };
+
+  const openDealWorkspace = (dealId: string, formCode?: string | null) => {
+    if (formCode) {
+      navigate(`/deals/${dealId}/forms/${encodeURIComponent(formCode)}`);
+      return;
+    }
+
+    openDealDetail(dealId);
+  };
 
   const copyToClipboard = async (text: string, kind: 'phone' | 'email' | 'address') => {
     try {
@@ -387,7 +400,7 @@ export function ClientDetailPage() {
                 </h1>
                 <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
                   <Badge variant="default" className={`bg-${stageColors[client.stage] || 'slate'}-500/10 text-${stageColors[client.stage] || 'slate'}-300 border-${stageColors[client.stage] || 'slate'}-500/30` }>
-                    {client.stage.replace('_', ' ')}
+                    {(client?.stage || '').replace('_', ' ')}
                   </Badge>
                   <Badge variant="default" className="text-slate-300 border-slate-600/60 bg-white/5 shadow-none">
                     {client.role}
@@ -536,9 +549,9 @@ export function ClientDetailPage() {
               </Badge>
             </div>
           )}
-          {client.tags.length > 0 && (
+          {(client?.tags?.length || 0) > 0 && (
             <div className="flex gap-2 mt-3">
-              {client.tags.map(tag => (
+              {(client?.tags || []).map(tag => (
                 <span key={tag} className="px-2 py-0.5 rounded-full bg-white/5 text-xs text-slate-400 border border-white/5">
                   {tag}
                 </span>
@@ -651,6 +664,33 @@ export function ClientDetailPage() {
         </div>
       </div>
 
+      <Card className="bg-slate-950/60 border border-white/10 rounded-2xl p-5">
+        <div className="flex items-center justify-between gap-3 mb-4">
+          <div>
+            <div className="text-sm font-semibold text-white">Client Overview</div>
+            <div className="text-xs text-slate-400">Everything important in one scanable view.</div>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+          <div className="rounded-xl border border-white/10 bg-slate-900/40 px-3 py-3.5">
+            <div className="text-slate-500">Deals</div>
+            <div className="mt-1 text-slate-100 text-base font-semibold">{deals.length}</div>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-slate-900/40 px-3 py-3.5">
+            <div className="text-slate-500">Open tasks</div>
+            <div className="mt-1 text-slate-100 text-base font-semibold">{openTasksCount}</div>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-slate-900/40 px-3 py-3.5">
+            <div className="text-slate-500">Forms in progress</div>
+            <div className="mt-1 text-slate-100 text-base font-semibold">{pendingFormsCount}</div>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-slate-900/40 px-3 py-3.5">
+            <div className="text-slate-500">Last contact</div>
+            <div className="mt-1 text-slate-100 text-sm font-semibold">{lastContactLabel}</div>
+          </div>
+        </div>
+      </Card>
+
       <Card className="bg-slate-950/60 border border-white/10 rounded-2xl p-4">
         <div className="flex items-center justify-between gap-2 mb-3">
           <div className="text-sm font-semibold text-white">Conversation Brief</div>
@@ -750,6 +790,7 @@ export function ClientDetailPage() {
           {[
             { key: 'timeline', label: 'Timeline', count: timeline.length },
             { key: 'deals', label: 'Deals', count: deals.length },
+            { key: 'forms', label: 'Forms', count: forms.length },
             { key: 'marketing', label: 'Marketing', count: marketing.blasts.length },
             { key: 'tasks', label: 'Tasks', count: tasks.length },
           ].map((tab) => (
@@ -795,7 +836,7 @@ export function ClientDetailPage() {
                     className="w-full rounded-xl border border-white/10 bg-slate-900/60 px-4 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/40"
                   >
                     <option value="">Choose a deal</option>
-                    {allDeals.map((deal) => (
+                    {(allDeals || []).map((deal: any) => (
                       <option key={deal.id} value={deal.id}>
                         {deal.title}
                       </option>
@@ -903,7 +944,7 @@ export function ClientDetailPage() {
                 type="button"
                 onClick={jumpToTimelineFeed}
                 aria-label="Jump to client timeline"
-                className="group w-full sm:w-[210px] md:w-[216px] flex items-center justify-between gap-3 rounded-2xl border border-white/15 bg-slate-900/35 px-3 py-2.5 backdrop-blur-xl transition-all shadow-[0_10px_28px_rgba(2,6,23,0.45)] hover:shadow-[0_14px_34px_rgba(34,211,238,0.18)] hover:bg-slate-900/50 hover:border-cyan-300/35 focus:outline-none focus:ring-2 focus:ring-cyan-400/35"
+                className="group w-full sm:w-[210px] md:w-[216px] flex items-center justify-between gap-3 rounded-2xl border border-white/15 bg-slate-900/35 px-3 py-3.5 backdrop-blur-xl transition-all shadow-[0_10px_28px_rgba(2,6,23,0.45)] hover:shadow-[0_14px_34px_rgba(34,211,238,0.18)] hover:bg-slate-900/50 hover:border-cyan-300/35 focus:outline-none focus:ring-2 focus:ring-cyan-400/35"
               >
                 <div className="flex items-center gap-2.5 min-w-0">
                   <div className="w-8 h-8 rounded-xl bg-cyan-500/20 border border-cyan-300/25 flex items-center justify-center shadow-sm group-hover:bg-cyan-500/30 transition-colors">
@@ -924,7 +965,7 @@ export function ClientDetailPage() {
                 type="button"
                 onClick={() => jumpToTab('deals')}
                 aria-label="Jump to client deals"
-                className="group w-full sm:w-[210px] md:w-[216px] flex items-center justify-between gap-3 rounded-2xl border border-white/15 bg-slate-900/35 px-3 py-2.5 backdrop-blur-xl transition-all shadow-[0_10px_28px_rgba(2,6,23,0.45)] hover:shadow-[0_14px_34px_rgba(52,211,153,0.18)] hover:bg-slate-900/50 hover:border-emerald-300/35 focus:outline-none focus:ring-2 focus:ring-emerald-400/35"
+                className="group w-full sm:w-[210px] md:w-[216px] flex items-center justify-between gap-3 rounded-2xl border border-white/15 bg-slate-900/35 px-3 py-3.5 backdrop-blur-xl transition-all shadow-[0_10px_28px_rgba(2,6,23,0.45)] hover:shadow-[0_14px_34px_rgba(52,211,153,0.18)] hover:bg-slate-900/50 hover:border-emerald-300/35 focus:outline-none focus:ring-2 focus:ring-emerald-400/35"
               >
                 <div className="flex items-center gap-2.5 min-w-0">
                   <div className="w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-300/25 flex items-center justify-center shadow-sm group-hover:bg-emerald-500/30 transition-colors">
@@ -945,7 +986,7 @@ export function ClientDetailPage() {
                 type="button"
                 onClick={() => jumpToTab('tasks')}
                 aria-label="Jump to client tasks"
-                className="group w-full sm:w-[210px] md:w-[216px] flex items-center justify-between gap-3 rounded-2xl border border-white/15 bg-slate-900/35 px-3 py-2.5 backdrop-blur-xl transition-all shadow-[0_10px_28px_rgba(2,6,23,0.45)] hover:shadow-[0_14px_34px_rgba(251,191,36,0.18)] hover:bg-slate-900/50 hover:border-amber-300/35 focus:outline-none focus:ring-2 focus:ring-amber-400/35"
+                className="group w-full sm:w-[210px] md:w-[216px] flex items-center justify-between gap-3 rounded-2xl border border-white/15 bg-slate-900/35 px-3 py-3.5 backdrop-blur-xl transition-all shadow-[0_10px_28px_rgba(2,6,23,0.45)] hover:shadow-[0_14px_34px_rgba(251,191,36,0.18)] hover:bg-slate-900/50 hover:border-amber-300/35 focus:outline-none focus:ring-2 focus:ring-amber-400/35"
               >
                 <div className="flex items-center gap-2.5 min-w-0">
                   <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-300/25 flex items-center justify-center shadow-sm group-hover:bg-amber-500/30 transition-colors">
@@ -966,7 +1007,7 @@ export function ClientDetailPage() {
                 type="button"
                 onClick={() => jumpToTab('forms')}
                 aria-label="Jump to client forms"
-                className="group w-full sm:w-[210px] md:w-[216px] flex items-center justify-between gap-3 rounded-2xl border border-white/15 bg-slate-900/35 px-3 py-2.5 backdrop-blur-xl transition-all shadow-[0_10px_28px_rgba(2,6,23,0.45)] hover:shadow-[0_14px_34px_rgba(59,130,246,0.18)] hover:bg-slate-900/50 hover:border-blue-300/35 focus:outline-none focus:ring-2 focus:ring-blue-400/35"
+                className="group w-full sm:w-[210px] md:w-[216px] flex items-center justify-between gap-3 rounded-2xl border border-white/15 bg-slate-900/35 px-3 py-3.5 backdrop-blur-xl transition-all shadow-[0_10px_28px_rgba(2,6,23,0.45)] hover:shadow-[0_14px_34px_rgba(59,130,246,0.18)] hover:bg-slate-900/50 hover:border-blue-300/35 focus:outline-none focus:ring-2 focus:ring-blue-400/35"
               >
                 <div className="flex items-center gap-2.5 min-w-0">
                   <div className="w-8 h-8 rounded-xl bg-blue-500/20 border border-blue-300/25 flex items-center justify-center shadow-sm group-hover:bg-blue-500/30 transition-colors">
@@ -987,7 +1028,7 @@ export function ClientDetailPage() {
                 type="button"
                 onClick={() => jumpToTab('marketing')}
                 aria-label="Jump to client marketing"
-                className="group w-full sm:w-[210px] md:w-[216px] flex items-center justify-between gap-3 rounded-2xl border border-white/15 bg-slate-900/35 px-3 py-2.5 backdrop-blur-xl transition-all shadow-[0_10px_28px_rgba(2,6,23,0.45)] hover:shadow-[0_14px_34px_rgba(168,85,247,0.18)] hover:bg-slate-900/50 hover:border-purple-300/35 focus:outline-none focus:ring-2 focus:ring-purple-400/35"
+                className="group w-full sm:w-[210px] md:w-[216px] flex items-center justify-between gap-3 rounded-2xl border border-white/15 bg-slate-900/35 px-3 py-3.5 backdrop-blur-xl transition-all shadow-[0_10px_28px_rgba(2,6,23,0.45)] hover:shadow-[0_14px_34px_rgba(168,85,247,0.18)] hover:bg-slate-900/50 hover:border-purple-300/35 focus:outline-none focus:ring-2 focus:ring-purple-400/35"
               >
                 <div className="flex items-center gap-2.5 min-w-0">
                   <div className="w-8 h-8 rounded-xl bg-purple-500/20 border border-purple-300/25 flex items-center justify-center shadow-sm group-hover:bg-purple-500/30 transition-colors">
@@ -1083,7 +1124,7 @@ export function ClientDetailPage() {
               <div className="relative pl-4 sm:pl-6">
                 <div className="absolute left-1 sm:left-2 top-0 bottom-0 w-px bg-gradient-to-b from-cyan-400/60 via-slate-600/40 to-transparent" />
                 <div className="space-y-4">
-                  {timeline.map((item, index) => {
+                  {(timeline || []).map((item, index) => {
                     const isDeal = item.type === 'deal';
                     const isTask = item.type === 'task';
                     const isNote = item.type === 'note';
@@ -1169,7 +1210,7 @@ export function ClientDetailPage() {
                               )}
                               {!item.meta.dealTitle && typeof item.meta === 'object' && (
                                 <div className="space-y-1">
-                                  {Object.entries(item.meta)
+                                  {Object.entries(item?.meta || {})
                                     .slice(0, 3)
                                     .map(([k, v]) => (
                                       <div key={k} className="flex items-start gap-2">
@@ -1208,7 +1249,7 @@ export function ClientDetailPage() {
             {deals.length === 0 ? (
               <div className="col-span-full text-slate-500 italic">No deals found.</div>
             ) : (
-              deals.map(deal => (
+              (deals || []).map(deal => (
                 <Card key={deal.id} tone="solid" className="p-4 bg-slate-900/40 border-white/10">
                   <div className="font-bold text-white mb-1">{deal.title}</div>
                   <div className="text-sm text-slate-400 mb-3">{deal.address}</div>
@@ -1261,7 +1302,7 @@ export function ClientDetailPage() {
               </Card>
             ) : (
               <div className="space-y-2">
-                {forms.map((form) => (
+                {(forms || []).map((form) => (
                   <Card key={`${form.kind}-${form.id}`} tone="solid" className="p-4 bg-slate-900/60 border border-white/10">
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div className="min-w-0">
@@ -1301,10 +1342,19 @@ export function ClientDetailPage() {
                             Open PDF
                           </a>
                         )}
+                        {form.formCode && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => openDealWorkspace(form.dealId, form.formCode)}
+                          >
+                            Open Form
+                          </Button>
+                        )}
                         <Button
                           size="sm"
                           variant="secondary"
-                          onClick={() => navigate(`/deals/${form.dealId}`)}
+                          onClick={() => openDealDetail(form.dealId)}
                         >
                           Open Deal
                         </Button>
@@ -1439,7 +1489,7 @@ export function ClientDetailPage() {
               </Card>
             ) : (
               <div className="space-y-2">
-                {tasks.map(task => {
+                {(tasks || []).map(task => {
                   const isDone = task.status === 'DONE';
                   const isOverdue = task.dueAt && new Date(task.dueAt) < now && !isDone;
                   return (

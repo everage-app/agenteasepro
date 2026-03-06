@@ -2,6 +2,8 @@ import { test, expect } from '@playwright/test';
 import { navigateTo, waitForLoadingToComplete, clickAndWait } from './helpers/test-utils';
 
 test.describe('Authentication', () => {
+  test.use({ storageState: { cookies: [], origins: [] } });
+
   test('should display login page', async ({ page }) => {
     await page.goto('/login');
     // Just verify login page has the form elements
@@ -46,7 +48,7 @@ test.describe('Dashboard', () => {
     await navigateTo(page, '/dashboard');
     await waitForLoadingToComplete(page);
     await expect(page).toHaveURL(/\/dashboard/);
-    await expect(page.getByText(/welcome back/i).first()).toBeVisible();
+    await expect(page.getByText(/good morning|good afternoon|good evening/i).first()).toBeVisible();
   });
 
   test('should display key metrics', async ({ page }) => {
@@ -118,7 +120,7 @@ test.describe('Dashboard', () => {
     await waitForLoadingToComplete(page);
     
     // Look for activity feed or recent items
-    const activitySection = page.locator('text=/recent|activity|updates/i');
+    const activitySection = page.locator('text=/recent|activity|updates/i').first();
     if (await activitySection.isVisible()) {
       await expect(activitySection).toBeVisible();
     }

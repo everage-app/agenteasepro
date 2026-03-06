@@ -56,18 +56,48 @@ function decrypt(text: string): string {
   }
 }
 
-// Store OAuth state in memory (in production, use Redis or DB)
-const oauthStates = new Map<string, { agentId: string; provider: string; createdAt: Date }>();
+// Store OAuth state in DB for multi-dyno safety; in-memory cache for fast lookups
+const oauthStatesCache = new Map<string, { agentId: string; provider: string; createdAt: Date }>();
 
-// Clean up old states every 5 minutes
-setInterval(() => {
+// Clean up expired states every 5 minutes (both cache and DB)
+setInterval(async () => {
   const now = new Date();
-  for (const [state, data] of oauthStates.entries()) {
+  for (const [state, data] of oauthStatesCache.entries()) {
     if (now.getTime() - data.createdAt.getTime() > 10 * 60 * 1000) {
-      oauthStates.delete(state);
+      oauthStatesCache.delete(state);
     }
   }
+  try {
+    await prisma.oAuthState.deleteMany({ where: { expiresAt: { lt: now } } });
+  } catch { /* best-effort cleanup */ }
 }, 5 * 60 * 1000);
+
+async function storeOAuthState(state: string, agentId: string, provider: string): Promise<void> {
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+  oauthStatesCache.set(state, { agentId, provider, createdAt: new Date() });
+  try {
+    await prisma.oAuthState.create({ data: { state, agentId, provider, expiresAt } });
+  } catch { /* best-effort */ }
+}
+
+async function consumeOAuthState(state: string): Promise<{ agentId: string; provider: string } | null> {
+  // Check cache first
+  const cached = oauthStatesCache.get(state);
+  if (cached) {
+    oauthStatesCache.delete(state);
+    prisma.oAuthState.deleteMany({ where: { state } }).catch(() => {});
+    return { agentId: cached.agentId, provider: cached.provider };
+  }
+  // Fall back to DB for cross-dyno consistency
+  try {
+    const record = await prisma.oAuthState.findUnique({ where: { state } });
+    if (record && record.expiresAt > new Date()) {
+      await prisma.oAuthState.delete({ where: { state } });
+      return { agentId: record.agentId, provider: record.provider };
+    }
+  } catch { /* best-effort */ }
+  return null;
+}
 
 // Get base URL for callbacks
 function getBaseUrl(): string {
@@ -94,7 +124,7 @@ router.get('/google/connect', authMiddleware, async (req: AuthenticatedRequest, 
 
     // Generate state for CSRF protection
     const state = crypto.randomBytes(32).toString('hex');
-    oauthStates.set(state, { agentId, provider: 'google', createdAt: new Date() });
+    await storeOAuthState(state, agentId, 'google');
 
     const params = new URLSearchParams({
       client_id: clientId,
@@ -125,12 +155,11 @@ router.get('/google/callback', async (req: Request, res: Response) => {
     return res.redirect('/settings/integrations?error=missing_params');
   }
 
-  const stateData = oauthStates.get(state);
+  const stateData = await consumeOAuthState(state);
   if (!stateData || stateData.provider !== 'google') {
     return res.redirect('/settings/integrations?error=invalid_state');
   }
 
-  oauthStates.delete(state);
   const { agentId } = stateData;
 
   try {
@@ -233,7 +262,7 @@ router.get('/facebook/connect', authMiddleware, async (req: AuthenticatedRequest
     const redirectUri = `${baseUrl}/api/oauth/facebook/callback`;
 
     const state = crypto.randomBytes(32).toString('hex');
-    oauthStates.set(state, { agentId, provider: 'facebook', createdAt: new Date() });
+    await storeOAuthState(state, agentId, 'facebook');
 
     const params = new URLSearchParams({
       client_id: clientId,
@@ -262,12 +291,11 @@ router.get('/facebook/callback', async (req: Request, res: Response) => {
     return res.redirect('/settings/integrations?error=missing_params');
   }
 
-  const stateData = oauthStates.get(state);
+  const stateData = await consumeOAuthState(state);
   if (!stateData || stateData.provider !== 'facebook') {
     return res.redirect('/settings/integrations?error=invalid_state');
   }
 
-  oauthStates.delete(state);
   const { agentId } = stateData;
 
   try {
@@ -358,7 +386,7 @@ router.get('/instagram/connect', authMiddleware, async (req: AuthenticatedReques
     const redirectUri = `${baseUrl}/api/oauth/instagram/callback`;
 
     const state = crypto.randomBytes(32).toString('hex');
-    oauthStates.set(state, { agentId, provider: 'instagram', createdAt: new Date() });
+    await storeOAuthState(state, agentId, 'instagram');
 
     const params = new URLSearchParams({
       client_id: clientId,
@@ -387,12 +415,11 @@ router.get('/instagram/callback', async (req: Request, res: Response) => {
     return res.redirect('/settings/integrations?error=missing_params');
   }
 
-  const stateData = oauthStates.get(state);
+  const stateData = await consumeOAuthState(state);
   if (!stateData || stateData.provider !== 'instagram') {
     return res.redirect('/settings/integrations?error=invalid_state');
   }
 
-  oauthStates.delete(state);
   const { agentId } = stateData;
 
   try {
@@ -482,7 +509,7 @@ router.get('/linkedin/connect', authMiddleware, async (req: AuthenticatedRequest
     const redirectUri = `${baseUrl}/api/oauth/linkedin/callback`;
 
     const state = crypto.randomBytes(32).toString('hex');
-    oauthStates.set(state, { agentId, provider: 'linkedin', createdAt: new Date() });
+    await storeOAuthState(state, agentId, 'linkedin');
 
     const params = new URLSearchParams({
       response_type: 'code',
@@ -511,12 +538,11 @@ router.get('/linkedin/callback', async (req: Request, res: Response) => {
     return res.redirect('/settings/integrations?error=missing_params');
   }
 
-  const stateData = oauthStates.get(state);
+  const stateData = await consumeOAuthState(state);
   if (!stateData || stateData.provider !== 'linkedin') {
     return res.redirect('/settings/integrations?error=invalid_state');
   }
 
-  oauthStates.delete(state);
   const { agentId } = stateData;
 
   try {

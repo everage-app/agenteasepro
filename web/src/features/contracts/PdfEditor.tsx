@@ -24,6 +24,12 @@ import PdfAnnotator, { type Annotation as EsignFieldPlacement } from './PdfAnnot
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
+const SAFE_PDFJS_OPTIONS = {
+  enableScripting: false,
+  isEvalSupported: false,
+  stopAtErrors: true,
+} as const;
+
 interface PdfFile {
   id: string;
   name: string;
@@ -54,6 +60,7 @@ interface DealSummary {
     taxId?: string;
   };
   repc?: {
+    id?: string;
     purchasePrice?: number;
     settlementDeadline?: string;
     dueDiligenceDeadline?: string;
@@ -238,7 +245,7 @@ export function PdfEditor() {
   // Generate page thumbnails using PDF.js
   const generateThumbnails = async (pdfFile: PdfFile) => {
     try {
-      const loadingTask = pdfjsLib.getDocument({ data: pdfFile.data });
+      const loadingTask = pdfjsLib.getDocument({ data: pdfFile.data, ...SAFE_PDFJS_OPTIONS });
       const pdfDoc = await loadingTask.promise;
       const previews: PagePreview[] = [];
 

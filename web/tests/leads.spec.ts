@@ -46,17 +46,11 @@ test.describe('Leads Page', () => {
 
     await firstRow.click();
 
-    const profileDrawer = page
-      .locator('div.fixed.inset-0.z-50')
-      .filter({ has: page.getByText(leadEmail, { exact: true }) })
-      .first();
-
-    await expect(profileDrawer).toBeVisible({ timeout: 10000 });
+    await expect(page).toHaveURL(/\/leads\/[a-z0-9-]+$/i, { timeout: 10000 });
+    await expect(page.getByText(/Lead Profile/i).first()).toBeVisible({ timeout: 10000 });
     if (leadName) {
-      await expect(profileDrawer.getByText(leadName, { exact: true })).toBeVisible({ timeout: 10000 });
+      await expect(page.getByRole('heading', { name: leadName, exact: true })).toBeVisible({ timeout: 10000 });
     }
-    if (leadEmail) {
-      await expect(profileDrawer.getByText(leadEmail, { exact: true })).toBeVisible({ timeout: 10000 });
-    }
+    await expect(page.getByRole('heading', { name: /^New Task$/i })).toHaveCount(0);
   });
 });

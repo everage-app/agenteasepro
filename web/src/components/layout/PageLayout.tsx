@@ -1,10 +1,12 @@
 import { ReactNode } from 'react';
+import { Link } from 'react-router-dom';
 
-interface PageLayoutProps {
+export interface PageLayoutProps {
   children: ReactNode;
   title: string;
   subtitle?: string;
   actions?: ReactNode;
+  headerActions?: ReactNode;
   breadcrumbs?: Array<{ label: string; href?: string }>;
   maxWidth?: 'xl' | '2xl' | '4xl' | '6xl' | '7xl' | 'full';
 }
@@ -14,6 +16,7 @@ export function PageLayout({
   title,
   subtitle,
   actions,
+  headerActions,
   breadcrumbs,
   maxWidth = '7xl',
 }: PageLayoutProps) {
@@ -42,9 +45,9 @@ export function PageLayout({
                     </svg>
                   )}
                   {crumb.href ? (
-                    <a href={crumb.href} className="text-slate-400 hover:text-white transition-colors">
+                    <Link to={crumb.href} className="text-slate-400 hover:text-white transition-colors">
                       {crumb.label}
-                    </a>
+                    </Link>
                   ) : (
                     <span className="font-medium ae-text">{crumb.label}</span>
                   )}
@@ -65,9 +68,9 @@ export function PageLayout({
                 </p>
               )}
             </div>
-            {actions && (
+            {(actions || headerActions) && (
               <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
-                {actions}
+                {actions || headerActions}
               </div>
             )}
           </div>

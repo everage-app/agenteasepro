@@ -323,6 +323,11 @@ router.get('/', async (req: AuthenticatedRequest, res) => {
     const { listingId, priority, source, converted, search } = req.query;
     const archived = parseArchivedQuery(req.query.archived);
 
+    // Pagination: ?page=1&limit=50 (defaults: page 1, limit 50, max 200)
+    const page = Math.max(1, parseInt(String(req.query.page || '1'), 10) || 1);
+    const limit = Math.min(200, Math.max(1, parseInt(String(req.query.limit || '50'), 10) || 50));
+    const skip = (page - 1) * limit;
+
     const where: any = {
       agentId: req.user!.id,
       listingId: listingId as string | undefined,
@@ -345,40 +350,50 @@ router.get('/', async (req: AuthenticatedRequest, res) => {
       where.NOT = [{ tags: { has: ARCHIVED_TAG } }];
     }
 
-    const leads = await prisma.lead.findMany({
-      where,
-      include: {
-        listing: {
-          select: {
-            id: true,
-            addressLine1: true,
-            city: true,
-            state: true,
-            price: true,
+    const [leads, total] = await Promise.all([
+      prisma.lead.findMany({
+        where,
+        include: {
+          listing: {
+            select: {
+              id: true,
+              addressLine1: true,
+              city: true,
+              state: true,
+              price: true,
+            },
+          },
+          landingPage: {
+            select: {
+              id: true,
+              slug: true,
+              title: true,
+            },
+          },
+          client: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+            },
           },
         },
-        landingPage: {
-          select: {
-            id: true,
-            slug: true,
-            title: true,
-          },
-        },
-        client: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-          },
-        },
-      },
-      orderBy: [
-        { priority: 'asc' },
-        { lastVisit: 'desc' },
-      ],
-    });
+        orderBy: [
+          { priority: 'asc' },
+          { lastVisit: 'desc' },
+        ],
+        skip,
+        take: limit,
+      }),
+      prisma.lead.count({ where }),
+    ]);
 
-    res.json(leads);
+    // Backward-compatible: return raw array when no page param, paginated envelope when page is explicit
+    if (req.query.page) {
+      res.json({ data: leads, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } });
+    } else {
+      res.json(leads);
+    }
   } catch (error) {
     console.error('Error fetching leads:', error);
     res.status(500).json({ error: 'Failed to fetch leads' });
@@ -1222,11 +1237,20 @@ router.post('/track/view', async (req: AuthenticatedRequest, res) => {
 
     // Update landing page view counts
     if (landingPageId) {
+      // Check if this visitor has already been counted
+      const existingView = await prisma.pageView.findFirst({
+        where: {
+          landingPageId,
+          visitorId,
+          id: { not: pageView.id }, // Exclude the view we just created
+        },
+      });
+
       await prisma.landingPage.update({
         where: { id: landingPageId },
         data: {
           totalViews: { increment: 1 },
-          uniqueViews: { increment: 1 }, // TODO: Check if visitor is unique
+          ...(existingView ? {} : { uniqueViews: { increment: 1 } }),
         },
       });
     }

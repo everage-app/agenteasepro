@@ -51,26 +51,53 @@ export function securityHeadersMiddleware(_req: Request, res: Response, next: Ne
 }
 
 /**
- * Detect and log common attack patterns (path traversal, SQL injection probes,
- * suspicious user agents) without blocking — SOC 2 CC7.2 anomaly monitoring.
+ * Detect and block common attack patterns (path traversal, SQL injection probes,
+ * suspicious user agents).  Scanner UAs and blatant attacks get 403; subtler
+ * probes are logged without blocking — SOC 2 CC7.2 anomaly monitoring.
  */
-export function suspiciousActivityDetector(req: Request, _res: Response, next: NextFunction) {
+export function suspiciousActivityDetector(req: Request, res: Response, next: NextFunction) {
   const path = req.path || '';
   const ua = req.get('user-agent') || '';
 
-  // Path traversal attempts
+  // ── Block: Scanner / bot user agents (auto-reject) ──
+  const scannerPatterns = /nikto|sqlmap|nmap|nessus|masscan|nuclei|dirbuster|gobuster|wfuzz|ffuf|hydra|burpsuite/i;
+  if (scannerPatterns.test(ua)) {
+    auditLog({
+      action: 'SUSPICIOUS_ACTIVITY',
+      ip: extractIp(req),
+      userAgent: ua,
+      detail: `Blocked scanner user agent: ${ua.slice(0, 100)}`,
+      meta: { type: 'scanner', blocked: true },
+    }).catch(() => {});
+    return res.status(403).end();
+  }
+
+  // ── Block: Path traversal attempts ──
   if (path.includes('..') || path.includes('%2e%2e') || path.includes('%252e')) {
     auditLog({
       action: 'SUSPICIOUS_ACTIVITY',
       ip: extractIp(req),
       userAgent: ua,
-      detail: `Path traversal attempt: ${path.slice(0, 200)}`,
-      meta: { type: 'path_traversal' },
+      detail: `Blocked path traversal attempt: ${path.slice(0, 200)}`,
+      meta: { type: 'path_traversal', blocked: true },
     }).catch(() => {});
-    // Don't block — let existing handlers respond with 404
+    return res.status(403).end();
   }
 
-  // Common injection probes in URL
+  // ── Block: Well-known exploit paths ──
+  const exploitPaths = /\.(env|git|aws|htpasswd|htaccess|DS_Store)$|\/wp-admin|\/wp-login|\/phpmyadmin|\/cgi-bin|\/\.well-known\/security\.txt/i;
+  if (exploitPaths.test(path)) {
+    auditLog({
+      action: 'SUSPICIOUS_ACTIVITY',
+      ip: extractIp(req),
+      userAgent: ua,
+      detail: `Blocked exploit probe: ${path.slice(0, 200)}`,
+      meta: { type: 'exploit_probe', blocked: true },
+    }).catch(() => {});
+    return res.status(404).end();
+  }
+
+  // ── Log-only: Common injection probes in URL ──
   const injectionPatterns = /['";]|UNION\s+SELECT|<script|eval\(|javascript:/i;
   const queryString = req.originalUrl?.split('?')[1] || '';
   if (injectionPatterns.test(queryString) || injectionPatterns.test(path)) {
@@ -80,18 +107,6 @@ export function suspiciousActivityDetector(req: Request, _res: Response, next: N
       userAgent: ua,
       detail: `Injection probe detected in URL: ${req.originalUrl?.slice(0, 200)}`,
       meta: { type: 'injection_probe' },
-    }).catch(() => {});
-  }
-
-  // Scanner/bot user agents
-  const scannerPatterns = /nikto|sqlmap|nmap|nessus|masscan|nuclei|dirbuster/i;
-  if (scannerPatterns.test(ua)) {
-    auditLog({
-      action: 'SUSPICIOUS_ACTIVITY',
-      ip: extractIp(req),
-      userAgent: ua,
-      detail: `Scanner user agent detected: ${ua.slice(0, 100)}`,
-      meta: { type: 'scanner' },
     }).catch(() => {});
   }
 

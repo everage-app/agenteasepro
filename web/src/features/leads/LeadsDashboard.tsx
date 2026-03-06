@@ -135,6 +135,9 @@ export default function LeadsDashboard() {
     source: LeadSource.WEBSITE as LeadSource,
     priority: LeadPriority.WARM as LeadPriority,
   });
+  const [importTouchedEmails, setImportTouchedEmails] = useState<string[]>([]);
+  const [showImportedOnly, setShowImportedOnly] = useState(false);
+  const leadDetailOpenedAtRef = useRef(0);
 
   const archivedParam = archivedView === 'archived' ? 'true' : 'false';
 
@@ -213,7 +216,6 @@ export default function LeadsDashboard() {
           phone: detail.phone,
           source: detail.source,
           priority: detail.priority,
-          status: detail.status,
           notes: detail.notes,
           nextTask: detail.nextTask,
           assignedTo: detail.assignedTo,
@@ -290,6 +292,19 @@ export default function LeadsDashboard() {
     },
     Boolean(quickNoteLead || selectedLead),
   );
+
+  // Safety reset in case any nested modal leaves body scroll locked.
+  useEffect(() => {
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!showNewTask && !showMarketingCampaign && !quickNoteLead && !showAddToDeal && !showMergeLead && !emailLead && !selectedLead) {
+      document.body.style.overflow = '';
+    }
+  }, [showNewTask, showMarketingCampaign, quickNoteLead, showAddToDeal, showMergeLead, emailLead, selectedLead]);
 
   const resetPanels = () => {
     setShowNewLead(false);
@@ -556,6 +571,10 @@ export default function LeadsDashboard() {
   };
 
   const openLeadTask = (lead: Lead) => {
+    const elapsedSinceProfileOpen = Date.now() - leadDetailOpenedAtRef.current;
+    if (elapsedSinceProfileOpen >= 0 && elapsedSinceProfileOpen < 450) {
+      return;
+    }
     const clientId = lead.clientId || lead.client?.id || undefined;
     setTaskDefaultClientId(clientId || undefined);
     setTaskDefaultTitle(`Follow up: ${lead.firstName} ${lead.lastName}`.trim());
@@ -563,6 +582,7 @@ export default function LeadsDashboard() {
   };
 
   const openLeadDetail = (lead: Lead) => {
+    leadDetailOpenedAtRef.current = Date.now();
     setShowNewTask(false);
     setTaskDefaultClientId(undefined);
     setTaskDefaultTitle('');
@@ -628,6 +648,7 @@ export default function LeadsDashboard() {
     try {
       const rowsToImport = importRows;
       const BATCH_SIZE = 500;
+      const touchedEmailSet = new Set<string>();
 
       let created = 0;
       let updated = 0;
@@ -651,6 +672,7 @@ export default function LeadsDashboard() {
               skippedMissingEmail += 1;
               return null;
             }
+            touchedEmailSet.add(email.trim().toLowerCase());
 
             const phone = normalizeCsvField(row, ['phone', 'mobile']);
             const firstName = normalizeCsvField(row, ['firstname', 'first_name', 'first']);
@@ -720,6 +742,11 @@ export default function LeadsDashboard() {
 
       await loadData();
 
+      if (touchedEmailSet.size > 0) {
+        setImportTouchedEmails(Array.from(touchedEmailSet));
+        setShowImportedOnly(true);
+      }
+
       if (!importCancelRef.current) {
         setActionError(`Import complete: ${created} created, ${updated} updated, ${skipped} skipped.`);
         setShowImport(false);
@@ -781,6 +808,106 @@ export default function LeadsDashboard() {
       hasRecentReply: Boolean(recentReply),
     };
   }, [leadDetail?.activities, selectedLead?.createdAt, selectedLead?.lastContact, selectedLead?.phone]);
+
+  const selectedClientId = leadDetail?.clientId || selectedLead?.clientId || leadDetail?.client?.id || selectedLead?.client?.id || null;
+  const latestDrawerForm = leadDetail?.forms?.[0] || null;
+
+  const openDrawerClient = () => {
+    if (selectedClientId) navigate(`/clients/${selectedClientId}`);
+  };
+
+  const openDrawerDealDetail = (dealId: string) => {
+    navigate(`/deals/${dealId}/detail`);
+  };
+
+  const openDrawerDealWorkspace = (dealId: string, formCode?: string | null) => {
+    if (formCode) {
+      navigate(`/deals/${dealId}/forms/${encodeURIComponent(formCode)}`);
+      return;
+    }
+
+    openDrawerDealDetail(dealId);
+  };
+
+  const startDrawerDeal = () => {
+    if (selectedClientId) navigate(`/deals/new?clientId=${selectedClientId}`);
+  };
+
+  const leadCommandCenter = useMemo(() => {
+    const now = Date.now();
+    const activeLeads = leads.filter((lead) => !(lead.tags || []).includes(ARCHIVED_TAG));
+
+    const noPhoneLeads = activeLeads.filter((lead) => !String(lead.phone || '').trim());
+    const staleLeads = activeLeads.filter((lead) => {
+      if (!lead.lastContact) return true;
+      return now - new Date(lead.lastContact).getTime() > 1000 * 60 * 60 * 24 * 3;
+    });
+    const highIntentLeads = activeLeads.filter((lead) => (lead.visitCount || 0) >= 3 || (lead.homesViewed || 0) >= 2);
+    const taskGapLeads = activeLeads.filter((lead) => !String(lead.nextTask || '').trim());
+
+    const firstHotCallable = activeLeads.find((lead) => lead.priority === LeadPriority.HOT && String(lead.phone || '').trim());
+    const firstNoPhone = noPhoneLeads[0] || null;
+    const firstStale = staleLeads[0] || null;
+
+    let headline = 'Pipeline in motion';
+    let subline = 'Use these actions to keep momentum and lift conversion this week.';
+    if (staleLeads.length >= 10) {
+      headline = 'Re-engagement sprint needed';
+      subline = `${staleLeads.length} leads have gone cold. Start with a fast warm-back sequence.`;
+    } else if (highIntentLeads.length >= 5) {
+      headline = 'High-intent window open';
+      subline = `${highIntentLeads.length} leads show strong buying signals. Prioritize same-day contact.`;
+    }
+
+    return {
+      headline,
+      subline,
+      staleCount: staleLeads.length,
+      highIntentCount: highIntentLeads.length,
+      noPhoneCount: noPhoneLeads.length,
+      taskGapCount: taskGapLeads.length,
+      firstHotCallable,
+      firstNoPhone,
+      firstStale,
+    };
+  }, [leads]);
+
+  const importedEmailSet = useMemo(() => new Set(importTouchedEmails.map((v) => v.trim().toLowerCase())), [importTouchedEmails]);
+
+  const displayedLeads = useMemo(() => {
+    if (!showImportedOnly || importedEmailSet.size === 0) return leads;
+    return leads.filter((lead) => importedEmailSet.has(String(lead.email || '').trim().toLowerCase()));
+  }, [leads, showImportedOnly, importedEmailSet]);
+
+  const smartQueue = useMemo(() => {
+    const queue: Array<{ lead: Lead; reason: string }> = [];
+    const used = new Set<string>();
+
+    const activeLeads = leads.filter((lead) => !(lead.tags || []).includes(ARCHIVED_TAG));
+    const add = (candidate: Lead | undefined, reason: string) => {
+      if (!candidate || used.has(candidate.id) || queue.length >= 3) return;
+      used.add(candidate.id);
+      queue.push({ lead: candidate, reason });
+    };
+
+    add(
+      activeLeads.find((lead) => lead.priority === LeadPriority.HOT && !String(lead.nextTask || '').trim()),
+      'HOT lead missing a defined next task',
+    );
+    add(
+      activeLeads.find((lead) => {
+        if (!lead.lastContact) return true;
+        return Date.now() - new Date(lead.lastContact).getTime() > 1000 * 60 * 60 * 24 * 3;
+      }),
+      'No recent contact in 3+ days',
+    );
+    add(
+      activeLeads.find((lead) => !String(lead.phone || '').trim()),
+      'Missing phone number, reduce friction now',
+    );
+
+    return queue;
+  }, [leads]);
 
   return (
     <PageLayout
@@ -1057,6 +1184,132 @@ export default function LeadsDashboard() {
           </div>
         )}
 
+        <div className="mb-6 rounded-[24px] border border-cyan-400/20 bg-gradient-to-r from-cyan-500/10 via-blue-500/10 to-slate-950/30 p-4 sm:p-5 backdrop-blur-xl">
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+            <div className="min-w-0">
+              <div className="text-[11px] uppercase tracking-[0.2em] text-cyan-300">Lead Command Center</div>
+              <div className="mt-1 text-lg font-bold text-white truncate">{leadCommandCenter.headline}</div>
+              <div className="mt-1 text-sm text-slate-300">{leadCommandCenter.subline}</div>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 min-w-0">
+              <MiniStat label="Stale" value={leadCommandCenter.staleCount} />
+              <MiniStat label="High Intent" value={leadCommandCenter.highIntentCount} />
+              <MiniStat label="Missing Phone" value={leadCommandCenter.noPhoneCount} />
+              <MiniStat label="No Next Task" value={leadCommandCenter.taskGapCount} />
+            </div>
+          </div>
+
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={!leadCommandCenter.firstHotCallable}
+              onClick={() => leadCommandCenter.firstHotCallable && navigate(`/leads/${leadCommandCenter.firstHotCallable.id}`)}
+              className="px-3 py-1.5 rounded-xl text-xs font-semibold border border-emerald-400/30 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-40"
+            >
+              Start with hottest lead
+            </button>
+            <button
+              type="button"
+              disabled={!leadCommandCenter.firstNoPhone}
+              onClick={() => leadCommandCenter.firstNoPhone && navigate(`/leads/${leadCommandCenter.firstNoPhone.id}`)}
+              className="px-3 py-1.5 rounded-xl text-xs font-semibold border border-amber-400/30 bg-amber-500/10 text-amber-200 hover:bg-amber-500/20 disabled:opacity-40"
+            >
+              Fix contact gaps
+            </button>
+            <button
+              type="button"
+              disabled={!leadCommandCenter.firstStale}
+              onClick={() => leadCommandCenter.firstStale && navigate(`/leads/${leadCommandCenter.firstStale.id}`)}
+              className="px-3 py-1.5 rounded-xl text-xs font-semibold border border-blue-400/30 bg-blue-500/10 text-blue-200 hover:bg-blue-500/20 disabled:opacity-40"
+            >
+              Re-engage stale lead
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setArchivedView('active');
+                setPriorityFilter('HOT');
+              }}
+              className="px-3 py-1.5 rounded-xl text-xs font-semibold border border-cyan-400/30 bg-cyan-500/10 text-cyan-200 hover:bg-cyan-500/20"
+            >
+              Focus HOT pipeline
+            </button>
+            {importTouchedEmails.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowImportedOnly((v) => !v)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold border transition-colors ${
+                  showImportedOnly
+                    ? 'border-blue-300/40 bg-blue-500/20 text-blue-100'
+                    : 'border-blue-400/30 bg-blue-500/10 text-blue-200 hover:bg-blue-500/20'
+                }`}
+              >
+                {showImportedOnly ? 'Showing imported only' : 'Review imported in this session'}
+              </button>
+            )}
+          </div>
+
+          {smartQueue.length > 0 && (
+            <div className="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-3">
+              {smartQueue.map((item) => (
+                <div key={item.lead.id} className="rounded-2xl border border-white/10 bg-slate-950/35 p-3">
+                  <div className="text-xs text-slate-400">Smart next lead</div>
+                  <div className="text-sm font-semibold text-white truncate mt-0.5">
+                    {item.lead.firstName} {item.lead.lastName}
+                  </div>
+                  <div className="text-[11px] text-slate-300 mt-1 line-clamp-2">{item.reason}</div>
+                  <div className="mt-2 text-[10px] text-slate-500">
+                    {item.lead.priority} • {prettyEnum(item.lead.source)} • {item.lead.visitCount || 0} visits
+                  </div>
+                  <div className="mt-3 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/leads/${item.lead.id}`)}
+                      className="px-2.5 py-1.5 rounded-lg border border-white/15 text-xs text-slate-100 hover:bg-white/10"
+                    >
+                      Open profile
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openLeadTask(item.lead)}
+                      className="px-2.5 py-1.5 rounded-lg border border-cyan-400/30 text-xs text-cyan-200 hover:bg-cyan-500/10"
+                    >
+                      Add task
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {importTouchedEmails.length > 0 && (
+          <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-blue-400/20 bg-blue-500/5 px-4 py-2.5">
+            <div className="text-xs text-blue-200">
+              Imported session memory active: {importTouchedEmails.length} lead email{importTouchedEmails.length === 1 ? '' : 's'}.
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowImportedOnly((v) => !v)}
+                className="px-2.5 py-1 rounded-lg border border-blue-300/30 text-[11px] text-blue-100 hover:bg-blue-500/20"
+              >
+                {showImportedOnly ? 'Show all leads' : 'Show imported only'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setImportTouchedEmails([]);
+                  setShowImportedOnly(false);
+                }}
+                className="px-2.5 py-1 rounded-lg border border-slate-400/30 text-[11px] text-slate-200 hover:bg-slate-500/20"
+              >
+                Clear
+              </button>
+            </div>
+          </div>
+        )}
+
         {analytics && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4 mb-8">
             <StatCard label="Total" value={analytics.summary.totalLeads} />
@@ -1132,7 +1385,7 @@ export default function LeadsDashboard() {
 
           {loading ? (
             <div className="text-slate-300">Loading…</div>
-          ) : leads.length === 0 ? (
+          ) : displayedLeads.length === 0 ? (
             <div className="text-center py-12">
               <div className="inline-flex items-center justify-center w-16 h-16 bg-slate-800/50 rounded-2xl mb-4">
                 <Icons.Users className="w-8 h-8 text-slate-400" />
@@ -1141,16 +1394,18 @@ export default function LeadsDashboard() {
               <p className="text-slate-400 mb-5">
                 {searchQuery || priorityFilter || sourceFilter
                   ? 'Try adjusting your filters'
+                  : showImportedOnly
+                    ? 'No imported leads match the current filters'
                   : archivedView === 'archived'
                     ? 'No archived leads found'
                     : 'Start capturing leads to see them here'}
               </p>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-slate-500">
+            <div className="rounded-2xl border border-slate-800/30 overflow-x-auto overflow-y-auto max-h-[68vh] overscroll-contain">
+              <table className="w-full min-w-[900px] text-sm">
+                <thead className="sticky top-0 z-10 bg-slate-950/95 backdrop-blur-xl">
+                  <tr className="text-slate-500 border-b border-slate-800/40">
                     <th className="text-left py-3 pr-4">Lead</th>
                     <th className="text-left py-3 pr-4">Priority</th>
                     <th className="text-left py-3 pr-4">Source</th>
@@ -1160,15 +1415,20 @@ export default function LeadsDashboard() {
                   </tr>
                 </thead>
                 <tbody>
-                  {leads.map((lead) => (
+                  {displayedLeads.map((lead) => (
                     <tr
                       key={lead.id}
                       className="border-t border-slate-800/40 hover:bg-slate-900/20 cursor-pointer"
-                      onClick={() => openLeadDetail(lead)}
+                      onClick={() => navigate(`/leads/${lead.id}`)}
                     >
                       <td className="py-3 pr-4">
                         <div className="text-slate-100 font-semibold">
                           {lead.firstName} {lead.lastName}
+                          {importedEmailSet.has(String(lead.email || '').trim().toLowerCase()) && (
+                            <span className="ml-2 px-1.5 py-0.5 rounded-md border border-blue-400/40 bg-blue-500/10 text-[10px] text-blue-200 align-middle">
+                              Imported
+                            </span>
+                          )}
                         </div>
                         <div className="text-xs text-slate-500 truncate">{lead.email}</div>
                       </td>
@@ -1497,6 +1757,37 @@ export default function LeadsDashboard() {
                   <div className="text-sm text-slate-600 dark:text-slate-400 truncate">{selectedLead.email}</div>
                 </div>
                 <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => navigate(`/leads/${selectedLead.id}`)}
+                    className="px-3 py-2 rounded-xl bg-blue-500 text-white hover:bg-blue-600 transition-colors text-xs font-semibold"
+                  >
+                    Open Full Profile
+                  </button>
+                  {selectedClientId && (
+                    <button
+                      onClick={openDrawerClient}
+                      className="px-3 py-2 rounded-xl bg-emerald-500/15 text-emerald-200 hover:bg-emerald-500/25 transition-colors border border-emerald-400/30 text-xs font-semibold"
+                    >
+                      Open Client
+                    </button>
+                  )}
+                  {selectedClientId && (
+                    latestDrawerForm ? (
+                      <button
+                        onClick={() => openDrawerDealDetail(latestDrawerForm.dealId)}
+                        className="px-3 py-2 rounded-xl bg-white/10 text-slate-200 hover:bg-white/15 transition-colors border border-white/10 text-xs font-semibold"
+                      >
+                        Open Deal
+                      </button>
+                    ) : (
+                      <button
+                        onClick={startDrawerDeal}
+                        className="px-3 py-2 rounded-xl bg-white/10 text-slate-200 hover:bg-white/15 transition-colors border border-white/10 text-xs font-semibold"
+                      >
+                        Start Deal
+                      </button>
+                    )
+                  )}
                   <LeadActionsMenu
                     leadName={`${selectedLead.firstName} ${selectedLead.lastName}`}
                     isArchived={(leadDetail?.tags || selectedLead.tags || []).includes(ARCHIVED_TAG)}
@@ -1539,16 +1830,70 @@ export default function LeadsDashboard() {
                 ) : (
                   <div className="space-y-5">
                     <div className="bg-slate-900/40 border border-slate-800/30 rounded-2xl p-4">
-                      <div className="flex flex-wrap items-center justify-end gap-2 mb-3">
-                        <button
-                          onClick={() => openLeadTask(selectedLead)}
-                          className="px-3 py-2 rounded-xl bg-blue-500/20 text-blue-200 hover:bg-blue-500/30 border border-blue-400/30 text-xs font-semibold"
-                        >
-                          + Add Task
-                        </button>
+                      <div className="flex items-center justify-between gap-3 mb-3">
+                        <div>
+                          <div className="text-sm font-semibold text-white">Agent Snapshot</div>
+                          <div className="text-xs text-slate-400">High-signal context without opening the full profile editor.</div>
+                        </div>
+                        {(leadDetail?.clientId || selectedLead.clientId || leadDetail?.client?.id || selectedLead.client?.id) && (
+                          <span className="text-[10px] px-2 py-1 rounded-md border border-emerald-400/30 text-emerald-300">
+                            Client linked
+                          </span>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-2 gap-2.5 text-xs">
+                        <OverviewItem label="Priority" value={leadDetail?.priority || selectedLead.priority || '—'} />
+                        <OverviewItem label="Source" value={prettyEnum(leadDetail?.source || selectedLead.source || '—')} />
+                        <OverviewItem label="Visits" value={String(leadDetail?.visitCount ?? selectedLead.visitCount ?? 0)} />
+                        <OverviewItem label="Homes viewed" value={String(leadDetail?.homesViewed ?? selectedLead.homesViewed ?? 0)} />
+                        <OverviewItem
+                          label="Last visit"
+                          value={
+                            leadDetail?.lastVisit || selectedLead.lastVisit
+                              ? new Date(leadDetail?.lastVisit || selectedLead.lastVisit || '').toLocaleString()
+                              : '—'
+                          }
+                        />
+                        <OverviewItem
+                          label="Client"
+                          value={
+                            leadDetail?.client
+                              ? `${leadDetail.client.firstName} ${leadDetail.client.lastName}`
+                              : selectedLead.client
+                                ? `${selectedLead.client.firstName} ${selectedLead.client.lastName}`
+                                : leadDetail?.clientId || selectedLead.clientId
+                                  ? `Linked (${(leadDetail?.clientId || selectedLead.clientId || '').slice(0, 8)}…)`
+                                  : 'Not linked'
+                          }
+                          onClick={selectedClientId ? openDrawerClient : undefined}
+                          actionLabel={selectedClientId ? 'Open client' : undefined}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="bg-slate-900/40 border border-slate-800/30 rounded-2xl p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                        <div className="text-sm font-semibold text-white">Next best step</div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            onClick={() => openLeadTask(selectedLead)}
+                            className="px-3 py-2 rounded-xl bg-blue-500/20 text-blue-200 hover:bg-blue-500/30 border border-blue-400/30 text-xs font-semibold"
+                          >
+                            + Add Task
+                          </button>
+                          {selectedLead.email && (
+                            <button
+                              type="button"
+                              onClick={() => openLeadEmail(selectedLead)}
+                              className="px-3 py-2 rounded-xl bg-slate-800/50 hover:bg-slate-800 transition-colors border border-slate-700/50 text-xs font-semibold text-slate-200"
+                            >
+                              Email
+                            </button>
+                          )}
+                        </div>
                       </div>
                       <div className="flex items-center justify-between gap-3 mb-2">
-                        <div className="text-sm font-semibold text-white">Conversation Brief</div>
+                        <div className="text-xs text-slate-400">Conversation brief</div>
                         {leadConversationBrief.hasRecentReply && (
                           <span className="text-[10px] px-2 py-1 rounded-md border border-emerald-400/30 text-emerald-300">
                             Fresh reply
@@ -1611,103 +1956,24 @@ export default function LeadsDashboard() {
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <Field label="First name">
-                        <input
-                          value={detailDraft.firstName}
-                          onChange={(e) => setDetailDraft({ ...detailDraft, firstName: e.target.value })}
-                          className={inputClass}
-                        />
-                      </Field>
-                      <Field label="Last name">
-                        <input
-                          value={detailDraft.lastName}
-                          onChange={(e) => setDetailDraft({ ...detailDraft, lastName: e.target.value })}
-                          className={inputClass}
-                        />
-                      </Field>
-                      <div className="sm:col-span-2">
-                        <Field label="Email">
-                          <input
-                            type="email"
-                            value={detailDraft.email}
-                            onChange={(e) => setDetailDraft({ ...detailDraft, email: e.target.value })}
-                            className={inputClass}
-                          />
-                        </Field>
-                      </div>
-                      <Field label="Phone">
-                        <input
-                          value={detailDraft.phone}
-                          onChange={(e) => setDetailDraft({ ...detailDraft, phone: e.target.value })}
-                          className={inputClass}
-                        />
-                      </Field>
-                      <Field label="Priority">
-                        <select
-                          value={detailDraft.priority}
-                          onChange={(e) => setDetailDraft({ ...detailDraft, priority: e.target.value as LeadPriority })}
-                          className={inputClass}
-                        >
-                          {Object.values(LeadPriority).map((p) => (
-                            <option key={p} value={p}>
-                              {p}
-                            </option>
-                          ))}
-                        </select>
-                      </Field>
-                      <div className="sm:col-span-2">
-                        <Field label="Source">
-                          <select
-                            value={detailDraft.source}
-                            onChange={(e) => setDetailDraft({ ...detailDraft, source: e.target.value as LeadSource })}
-                            className={inputClass}
-                          >
-                            {Object.values(LeadSource).map((s) => (
-                              <option key={s} value={s}>
-                                {prettyEnum(s)}
-                              </option>
-                            ))}
-                          </select>
-                        </Field>
-                      </div>
-                      <div className="sm:col-span-2">
-                        <Field label="Next task">
-                          <input
-                            value={detailDraft.nextTask}
-                            onChange={(e) => setDetailDraft({ ...detailDraft, nextTask: e.target.value })}
-                            className={inputClass}
-                          />
-                        </Field>
-                      </div>
-                      <div className="sm:col-span-2">
-                        <Field label="Tags (comma-separated)">
-                          <input
-                            value={detailDraft.tags}
-                            onChange={(e) => setDetailDraft({ ...detailDraft, tags: e.target.value })}
-                            className={inputClass}
-                          />
-                        </Field>
-                      </div>
-                      <div className="sm:col-span-2">
-                        <Field label="Profile notes (long-form)">
-                          <textarea
-                            value={detailDraft.notes}
-                            onChange={(e) => setDetailDraft({ ...detailDraft, notes: e.target.value })}
-                            rows={5}
-                            className={inputClass}
-                          />
-                        </Field>
-                        <div className="mt-2 text-[11px] text-slate-500">
-                          Use profile notes for durable context. Use the Create Note box for timeline updates.
+                    <div className="bg-slate-900/40 border border-slate-800/30 rounded-2xl p-4">
+                      <div className="text-sm font-semibold text-white mb-3">Relationship context</div>
+                      <div className="space-y-3 text-sm">
+                        <div>
+                          <div className="text-xs uppercase tracking-wide text-slate-500">Next task</div>
+                          <div className="text-slate-200 mt-1">{detailDraft.nextTask || 'No task set yet.'}</div>
                         </div>
-                      </div>
-                      <div className="sm:col-span-2 flex items-center justify-between">
-                        <div className="text-sm text-slate-300">
-                          {leadDetail?.clientId || leadDetail?.client?.id ? 'Converted to client' : detailDraft.converted ? 'Converted' : 'Not converted'}
+                        <div>
+                          <div className="text-xs uppercase tracking-wide text-slate-500">Tags</div>
+                          <div className="text-slate-200 mt-1">{detailDraft.tags || 'No tags yet.'}</div>
                         </div>
-                        <div className="text-xs text-slate-500">
-                          {(leadDetail?.tags || []).includes(ARCHIVED_TAG) ? 'Archived' : 'Active'}
+                        <div>
+                          <div className="text-xs uppercase tracking-wide text-slate-500">Profile notes</div>
+                          <div className="text-slate-300 mt-1 whitespace-pre-line">{detailDraft.notes || 'No long-form notes yet.'}</div>
+                        </div>
+                        <div className="flex items-center justify-between text-xs text-slate-500">
+                          <span>{leadDetail?.clientId || leadDetail?.client?.id ? 'Converted to client' : detailDraft.converted ? 'Converted' : 'Not converted'}</span>
+                          <span>{(leadDetail?.tags || []).includes(ARCHIVED_TAG) ? 'Archived' : 'Active'}</span>
                         </div>
                       </div>
                     </div>
@@ -1768,6 +2034,22 @@ export default function LeadsDashboard() {
                                   <span className={`px-2 py-1 text-[11px] rounded-md border ${formStatusClass(form.status)}`}>
                                     {formatFormStatus(form.status)}
                                   </span>
+                                  {form.formCode && (
+                                    <button
+                                      type="button"
+                                      onClick={() => openDrawerDealWorkspace(form.dealId, form.formCode)}
+                                      className="px-2 py-1 text-[11px] rounded-md bg-cyan-500/20 border border-cyan-400/40 text-cyan-200 hover:bg-cyan-500/30"
+                                    >
+                                      Form
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => openDrawerDealDetail(form.dealId)}
+                                    className="px-2 py-1 text-[11px] rounded-md bg-white/10 border border-white/10 text-slate-200 hover:bg-white/15"
+                                  >
+                                    Deal
+                                  </button>
                                   {form.kind === 'ESIGN_ENVELOPE' && form.downloadUrl && (
                                     <a
                                       href={`/api${form.downloadUrl}`}
@@ -1792,7 +2074,7 @@ export default function LeadsDashboard() {
                         <div className="text-sm text-slate-400">No activity yet.</div>
                       ) : (
                         <div className="space-y-3">
-                          {(leadDetail?.activities || []).slice(0, 30).map((a) => (
+                          {(leadDetail?.activities || []).slice(0, 8).map((a) => (
                             <div key={a.id} className="border border-slate-800/40 rounded-xl p-3 bg-slate-950/20">
                               <div className="flex items-center justify-between gap-2">
                                 <div className="text-xs text-slate-400">{a.activityType}</div>
@@ -1812,13 +2094,13 @@ export default function LeadsDashboard() {
                 )}
               </div>
 
-              <div className="p-6 border-t border-slate-800/50 flex items-center justify-end gap-2">
+              <div className="p-6 border-t border-slate-800/50 flex items-center justify-between gap-2">
+                <div className="text-xs text-slate-500">Use the full profile for deeper editing and lead intelligence.</div>
                 <button
-                  onClick={() => void handleSaveDetail()}
-                  disabled={savingDetail || leadDetailLoading || !detailDraft}
-                  className="px-4 py-2 rounded-xl bg-blue-500 text-white hover:bg-blue-600 transition-colors disabled:opacity-60"
+                  onClick={() => navigate(`/leads/${selectedLead.id}`)}
+                  className="px-4 py-2 rounded-xl bg-blue-500 text-white hover:bg-blue-600 transition-colors"
                 >
-                  {savingDetail ? 'Saving…' : 'Save'}
+                  Open Full Profile
                 </button>
               </div>
             </div>
@@ -1847,6 +2129,32 @@ function StatCard({ label, value, accent }: { label: string; value: React.ReactN
       <div className="text-xs text-slate-500">{label}</div>
       <div className={`mt-1 text-2xl font-bold ${accent || 'text-white'}`}>{value}</div>
     </div>
+  );
+}
+
+function MiniStat({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 min-w-0">
+      <div className="text-[10px] uppercase tracking-wide text-slate-400 truncate">{label}</div>
+      <div className="text-base font-bold text-white">{value}</div>
+    </div>
+  );
+}
+
+function OverviewItem({ label, value, onClick, actionLabel }: { label: string; value: React.ReactNode; onClick?: () => void; actionLabel?: string }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={!onClick}
+      className={`rounded-xl border border-slate-800/40 bg-slate-950/20 p-2.5 text-left ${onClick ? 'transition hover:border-cyan-400/40 hover:bg-slate-900/40' : 'cursor-default'}`}
+    >
+      <div className="text-slate-500">{label}</div>
+      <div className="text-slate-200 mt-1 truncate" title={typeof value === 'string' ? value : undefined}>
+        {value}
+      </div>
+      {actionLabel && <div className="mt-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-cyan-300">{actionLabel}</div>}
+    </button>
   );
 }
 

@@ -170,12 +170,12 @@ export function NewTaskModal({
       style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0 }}
     >
       {/* Backdrop with blur */}
-      <div className="absolute inset-0 bg-slate-900/50 dark:bg-black/80 backdrop-blur-xl" onClick={handleClose} />
+      <div className="absolute inset-0 bg-slate-950/60 dark:bg-black/88 backdrop-blur-xl" onClick={handleClose} />
 
       {/* Floating particles/glow effects */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-1/4 left-1/3 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl" />
-        <div className="absolute bottom-1/4 right-1/3 w-96 h-96 bg-indigo-500/10 rounded-full blur-3xl" />
+        <div className="absolute top-1/4 left-1/3 w-96 h-96 bg-blue-500/12 rounded-full blur-3xl dark:bg-blue-500/18" />
+        <div className="absolute bottom-1/4 right-1/3 w-96 h-96 bg-indigo-500/10 rounded-full blur-3xl dark:bg-indigo-500/20" />
       </div>
 
       {/* Modal Container */}
@@ -187,10 +187,10 @@ export function NewTaskModal({
           onClick={(e) => e.stopPropagation()}
         >
           {/* Outer glow ring */}
-          <div className="absolute -inset-1 bg-gradient-to-r from-blue-500/20 via-indigo-500/20 to-blue-500/20 rounded-[28px] blur-xl opacity-75" />
+          <div className="absolute -inset-1 bg-gradient-to-r from-blue-500/20 via-indigo-500/20 to-blue-500/20 rounded-[28px] blur-xl opacity-75 dark:opacity-95" />
 
           {/* Main Modal */}
-          <div className="relative rounded-[24px] border border-slate-200/80 dark:border-white/20 bg-gradient-to-b from-white via-slate-50 to-white dark:from-slate-900/98 dark:via-slate-900/95 dark:to-slate-950/98 shadow-2xl overflow-hidden">
+          <div className="relative rounded-[24px] border border-slate-200/80 dark:border-white/12 bg-gradient-to-b from-white via-slate-50 to-white dark:from-[#061126] dark:via-[#08142c] dark:to-[#040b19] shadow-2xl overflow-hidden">
             {/* Decorative top gradient line */}
             <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-blue-400/50 to-transparent" />
 
@@ -207,8 +207,8 @@ export function NewTaskModal({
                     </div>
                   </div>
                   <div>
-                    <h3 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">New Task</h3>
-                    <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">Add a task to your workflow</p>
+                    <h3 className="text-xl font-bold text-slate-900 dark:text-slate-100 tracking-tight">New Task</h3>
+                    <p className="text-xs text-slate-600 dark:text-slate-300 mt-0.5">Add a task to your workflow</p>
                   </div>
                 </div>
                 <button
@@ -235,7 +235,7 @@ export function NewTaskModal({
                 )}
                 {/* Title */}
                 <div>
-                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200 mb-2">
                     Task Title <span className="text-red-400">*</span>
                   </label>
                   <input
@@ -243,7 +243,7 @@ export function NewTaskModal({
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
                     placeholder="e.g., Follow up with client about inspection"
-                    className="w-full rounded-xl border border-slate-200/80 bg-white px-4 py-3 text-slate-900 placeholder-slate-400 focus:border-blue-500/50 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all dark:border-white/10 dark:bg-slate-900/50 dark:text-white dark:placeholder-slate-500"
+                    className="w-full rounded-xl border border-slate-200/80 bg-white px-4 py-3 text-slate-900 placeholder-slate-400 focus:border-blue-500/50 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all dark:border-white/12 dark:bg-slate-900/75 dark:text-slate-100 dark:placeholder-slate-400"
                     required
                     autoFocus
                   />
@@ -251,19 +251,19 @@ export function NewTaskModal({
 
                 {/* Description */}
                 <div>
-                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Description</label>
+                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200 mb-2">Description</label>
                   <textarea
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
                     placeholder="Add details about this task..."
                     rows={2}
-                    className="w-full rounded-xl border border-slate-200/80 bg-white px-4 py-3 text-slate-900 placeholder-slate-400 focus:border-blue-500/50 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all resize-none dark:border-white/10 dark:bg-slate-900/50 dark:text-white dark:placeholder-slate-500"
+                    className="w-full rounded-xl border border-slate-200/80 bg-white px-4 py-3 text-slate-900 placeholder-slate-400 focus:border-blue-500/50 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all resize-none dark:border-white/12 dark:bg-slate-900/75 dark:text-slate-100 dark:placeholder-slate-400"
                   />
                 </div>
 
                 {/* Category */}
                 <div>
-                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Category</label>
+                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200 mb-2">Category</label>
                   <div className="grid grid-cols-2 gap-2">
                     {([
                       { value: 'GENERAL', label: 'General' },
@@ -280,8 +280,8 @@ export function NewTaskModal({
                         onClick={() => setCategory(opt.value)}
                         className={`px-3 py-2 rounded-xl border text-xs font-semibold transition-all duration-200 ${
                           category === opt.value
-                            ? 'border-cyan-400/40 bg-cyan-500/15 text-cyan-700 dark:text-cyan-200'
-                            : 'border-slate-200/80 bg-white text-slate-600 hover:bg-slate-50 dark:border-white/10 dark:bg-white/5 dark:text-slate-400 dark:hover:bg-white/10'
+                            ? 'border-cyan-400/45 bg-cyan-500/15 text-cyan-700 dark:text-cyan-200 dark:bg-cyan-500/20'
+                            : 'border-slate-200/80 bg-white text-slate-600 hover:bg-slate-50 dark:border-white/12 dark:bg-slate-900/65 dark:text-slate-300 dark:hover:bg-slate-900/85'
                         }`}
                       >
                         {opt.label}
@@ -292,7 +292,7 @@ export function NewTaskModal({
 
                 {/* Bucket Selection - Visual Pills */}
                 <div>
-                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">When</label>
+                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200 mb-2">When</label>
                   <div className="grid grid-cols-3 gap-2">
                     {bucketOptions.map((opt) => (
                       <button
@@ -302,7 +302,7 @@ export function NewTaskModal({
                         className={`relative p-3 rounded-xl border transition-all duration-200 ${
                           bucket === opt.value
                             ? 'border-blue-500/50 bg-blue-500/10'
-                            : 'border-slate-200/80 bg-white hover:bg-slate-50 dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10'
+                            : 'border-slate-200/80 bg-white hover:bg-slate-50 dark:border-white/12 dark:bg-slate-900/65 dark:hover:bg-slate-900/85'
                         }`}
                       >
                         <div className="flex flex-col items-center gap-1">
@@ -325,7 +325,7 @@ export function NewTaskModal({
 
                 {/* Priority Selection - Visual Pills */}
                 <div>
-                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Priority</label>
+                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200 mb-2">Priority</label>
                   <div className="flex gap-2">
                     {priorityOptions.map((opt) => (
                       <button
@@ -335,7 +335,7 @@ export function NewTaskModal({
                         className={`flex-1 px-4 py-2.5 rounded-xl border text-sm font-semibold transition-all duration-200 ${
                           priority === opt.value
                             ? opt.color
-                            : 'border-slate-200/80 bg-white text-slate-600 hover:bg-slate-50 dark:border-white/10 dark:bg-white/5 dark:text-slate-400 dark:hover:bg-white/10'
+                            : 'border-slate-200/80 bg-white text-slate-600 hover:bg-slate-50 dark:border-white/12 dark:bg-slate-900/65 dark:text-slate-300 dark:hover:bg-slate-900/85'
                         }`}
                       >
                         {opt.label}
@@ -346,26 +346,26 @@ export function NewTaskModal({
 
                 {/* Due Date */}
                 <div>
-                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Due Date</label>
+                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200 mb-2">Due Date</label>
                   <input
                     type="datetime-local"
                     value={dueAt}
                     onChange={(e) => setDueAt(e.target.value)}
-                    className="w-full rounded-xl border border-slate-200/80 bg-white px-4 py-3 text-slate-900 focus:border-blue-500/50 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all dark:border-white/10 dark:bg-slate-900/50 dark:text-white"
+                    className="w-full rounded-xl border border-slate-200/80 bg-white px-4 py-3 text-slate-900 focus:border-blue-500/50 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all dark:border-white/12 dark:bg-slate-900/75 dark:text-slate-100"
                   />
                 </div>
 
                 {/* Link to Section */}
-                <div className="pt-2 border-t border-slate-200/80 dark:border-white/10">
+                <div className="pt-2 border-t border-slate-200/80 dark:border-white/12">
                   <p className="text-xs uppercase tracking-wider text-slate-500 font-bold mb-3">Link to (optional)</p>
                   <div className="grid grid-cols-2 gap-3">
                     {/* Deal */}
                     <div>
-                      <label className="block text-xs text-slate-500 dark:text-slate-400 mb-1.5">Deal</label>
+                      <label className="block text-xs text-slate-500 dark:text-slate-300 mb-1.5">Deal</label>
                       <select
                         value={dealId}
                         onChange={(e) => setDealId(e.target.value)}
-                        className="w-full rounded-lg border border-slate-200/80 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-500/50 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all dark:border-white/10 dark:bg-slate-900/50 dark:text-white dark:[&>option]:bg-slate-900"
+                        className="w-full rounded-lg border border-slate-200/80 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-500/50 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all dark:border-white/12 dark:bg-slate-900/75 dark:text-slate-100 dark:[&>option]:bg-slate-900"
                       >
                         <option value="">-- None --</option>
                         {deals.map((deal) => (
@@ -376,12 +376,12 @@ export function NewTaskModal({
 
                     {/* Client */}
                     <div>
-                      <label className="block text-xs text-slate-500 dark:text-slate-400 mb-1.5">Client</label>
+                      <label className="block text-xs text-slate-500 dark:text-slate-300 mb-1.5">Client</label>
                       <select
                         value={clientId}
                         onChange={(e) => setClientId(e.target.value)}
                         disabled={isClientLocked}
-                        className={`w-full rounded-lg border border-slate-200/80 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-500/50 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all dark:border-white/10 dark:bg-slate-900/50 dark:text-white dark:[&>option]:bg-slate-900 ${
+                        className={`w-full rounded-lg border border-slate-200/80 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-500/50 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all dark:border-white/12 dark:bg-slate-900/75 dark:text-slate-100 dark:[&>option]:bg-slate-900 ${
                           isClientLocked ? 'opacity-70 cursor-not-allowed' : ''
                         }`}
                       >
@@ -394,11 +394,11 @@ export function NewTaskModal({
 
                     {/* Listing */}
                     <div>
-                      <label className="block text-xs text-slate-500 dark:text-slate-400 mb-1.5">Listing</label>
+                      <label className="block text-xs text-slate-500 dark:text-slate-300 mb-1.5">Listing</label>
                       <select
                         value={listingId}
                         onChange={(e) => setListingId(e.target.value)}
-                        className="w-full rounded-lg border border-slate-200/80 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-500/50 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all dark:border-white/10 dark:bg-slate-900/50 dark:text-white dark:[&>option]:bg-slate-900"
+                        className="w-full rounded-lg border border-slate-200/80 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-500/50 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all dark:border-white/12 dark:bg-slate-900/75 dark:text-slate-100 dark:[&>option]:bg-slate-900"
                       >
                         <option value="">-- None --</option>
                         {listings.map((listing) => (
@@ -409,11 +409,11 @@ export function NewTaskModal({
 
                     {/* Marketing Blast */}
                     <div>
-                      <label className="block text-xs text-slate-500 dark:text-slate-400 mb-1.5">Marketing Blast</label>
+                      <label className="block text-xs text-slate-500 dark:text-slate-300 mb-1.5">Marketing Blast</label>
                       <select
                         value={marketingBlastId}
                         onChange={(e) => setMarketingBlastId(e.target.value)}
-                        className="w-full rounded-lg border border-slate-200/80 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-500/50 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all dark:border-white/10 dark:bg-slate-900/50 dark:text-white dark:[&>option]:bg-slate-900"
+                        className="w-full rounded-lg border border-slate-200/80 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-500/50 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all dark:border-white/12 dark:bg-slate-900/75 dark:text-slate-100 dark:[&>option]:bg-slate-900"
                       >
                         <option value="">-- None --</option>
                         {blasts.map((blast) => (
@@ -426,7 +426,7 @@ export function NewTaskModal({
               </div>
 
               {/* Footer */}
-              <div className="relative px-6 py-5 bg-slate-100/80 border-t border-slate-200/70 dark:bg-slate-950/60 dark:border-white/5">
+              <div className="relative px-6 py-5 bg-slate-100/80 border-t border-slate-200/70 dark:bg-[#040b1a] dark:border-white/10">
                 <div className="flex items-center gap-3">
                   <button
                     type="button"

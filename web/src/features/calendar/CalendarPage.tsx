@@ -77,6 +77,10 @@ export function CalendarPage() {
     })
     .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
     .slice(0, 6);
+  const todayKey = new Date().toISOString().split('T')[0];
+  const todayEventsCount = events.filter((event) => event.date.startsWith(todayKey)).length;
+  const taskEventsCount = events.filter((event) => event.type === 'TASK').length;
+  const externalEventsCount = events.filter((event) => event.type === 'GOOGLE_CALENDAR').length;
 
   useEffect(() => {
     const dateParam = searchParams.get('date');
@@ -394,7 +398,7 @@ export function CalendarPage() {
       subtitle="Unified view of tasks, deadlines, listings, and marketing"
       maxWidth="full"
     >
-      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_340px] gap-4 lg:gap-6 min-h-0 pt-3 sm:pt-4">
+      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_340px] gap-4 lg:gap-6 min-h-0 pt-4 sm:pt-5">
         {/* Main Calendar */}
         <div className="flex-1 flex flex-col min-w-0 min-h-0">
           {/* Header Controls */}
@@ -481,6 +485,31 @@ export function CalendarPage() {
               >
                 Week
               </button>
+            </div>
+          </div>
+
+          <div className="mb-4 sm:mb-6 rounded-3xl border border-cyan-400/20 bg-slate-950/50 backdrop-blur-xl p-5 sm:p-6 shadow-[0_20px_50px_rgba(0,0,0,0.55)]">
+            <div className="mb-3 sm:mb-4">
+              <div className="text-xs font-semibold text-cyan-200 uppercase tracking-wider">Calendar overview</div>
+              <div className="text-sm text-slate-300 mt-1">See current scheduling load before drilling into day details.</div>
+            </div>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="rounded-2xl border border-cyan-400/25 bg-cyan-500/10 px-4 py-3.5">
+                <div className="text-2xl font-bold text-cyan-200">{events.length}</div>
+                <div className="text-xs text-cyan-100/90 mt-1">Visible items</div>
+              </div>
+              <div className="rounded-2xl border border-blue-400/25 bg-blue-500/10 px-4 py-3.5">
+                <div className="text-2xl font-bold text-blue-200">{todayEventsCount}</div>
+                <div className="text-xs text-blue-100/90 mt-1">Today</div>
+              </div>
+              <div className="rounded-2xl border border-violet-400/25 bg-violet-500/10 px-4 py-3.5">
+                <div className="text-2xl font-bold text-violet-200">{taskEventsCount}</div>
+                <div className="text-xs text-violet-100/90 mt-1">Task items</div>
+              </div>
+              <div className="rounded-2xl border border-emerald-400/25 bg-emerald-500/10 px-4 py-3.5">
+                <div className="text-2xl font-bold text-emerald-200">{externalEventsCount}</div>
+                <div className="text-xs text-emerald-100/90 mt-1">Google sync</div>
+              </div>
             </div>
           </div>
 
@@ -682,12 +711,12 @@ export function CalendarPage() {
               <h3 className="text-sm font-semibold text-slate-50">Upcoming (7 days)</h3>
               <p className="text-xs text-slate-400 mt-1">Deadlines and tasks you should watch</p>
             </div>
-            <div className="p-4 pb-5 space-y-3 max-h-[290px] overflow-y-auto">
+            <div className="p-5 pb-6 space-y-3 max-h-[290px] overflow-y-auto">
               {upcomingEvents.length === 0 ? (
                 <div className="text-xs text-slate-400">Nothing scheduled yet.</div>
               ) : (
                 upcomingEvents.map((evt) => (
-                  <div key={evt.id} className="rounded-xl border border-white/10 bg-white/5 px-3 py-2">
+                  <div key={evt.id} className="rounded-xl border border-white/10 bg-white/5 px-3 py-3">
                     <div className="text-[11px] text-slate-400">
                       {new Date(evt.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                     </div>
@@ -759,19 +788,19 @@ export function CalendarPage() {
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     onClick={() => openTaskModal({ date: selectedDate, category: 'GENERAL' })}
-                    className="rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 px-3 py-2 text-xs font-semibold text-slate-200"
+                    className="rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 px-3 py-2.5 text-xs font-semibold text-slate-200"
                   >
                     + Task
                   </button>
                   <button
                     onClick={() => openTaskModal({ date: selectedDate, category: 'EVENT' })}
-                    className="rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-400/30 px-3 py-2 text-xs font-semibold text-cyan-200"
+                    className="rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-400/30 px-3 py-2.5 text-xs font-semibold text-cyan-200"
                   >
                     + Event
                   </button>
                   <button
                     onClick={() => openTaskModal({ date: selectedDate, category: 'CALL' })}
-                    className="rounded-xl bg-blue-500/10 hover:bg-blue-500/20 border border-blue-400/30 px-3 py-2 text-xs font-semibold text-blue-200 col-span-2"
+                    className="rounded-xl bg-blue-500/10 hover:bg-blue-500/20 border border-blue-400/30 px-3 py-2.5 text-xs font-semibold text-blue-200 col-span-2"
                   >
                     + Call follow‑up
                   </button>

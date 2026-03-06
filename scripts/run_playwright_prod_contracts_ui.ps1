@@ -12,7 +12,16 @@ $logPath = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\\playwrigh
 
 Push-Location 'web'
 try {
-  if (Test-Path $logPath) { Remove-Item $logPath -Force }
+  if (Test-Path $logPath) {
+    try {
+      Remove-Item $logPath -Force -ErrorAction Stop
+    } catch {
+      $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+      $logPath = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\\playwright-contracts-ui-$timestamp.log"))
+      Write-Warning "Default log file locked; using $logPath"
+    }
+  }
+
   npx playwright test tests/contracts-templates.spec.ts -g "UI: can open preview modal for each template" --project=chromium --reporter=list *>&1 | Tee-Object -FilePath $logPath
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 } finally {

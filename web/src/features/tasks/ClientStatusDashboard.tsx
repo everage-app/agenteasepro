@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import api from '../../lib/api';
 
 type ClientStage = 'NEW_LEAD' | 'NURTURE' | 'ACTIVE' | 'UNDER_CONTRACT' | 'CLOSED' | 'PAST_CLIENT' | 'DEAD';
 type ReferralRank = 'A' | 'B' | 'C';
@@ -93,8 +94,8 @@ export default function ClientStatusDashboard() {
 
   const fetchClientStats = async () => {
     try {
-      const response = await fetch('/api/clients');
-      const data = await response.json();
+      const response = await api.get('/clients');
+      const data = response.data;
       const clients: Client[] = Array.isArray(data) ? data : [];
 
       // Group by stage
@@ -140,9 +141,9 @@ export default function ClientStatusDashboard() {
   }
 
   return (
-    <div className="rounded-2xl border border-white/10 bg-slate-900/40 backdrop-blur-xl p-6 space-y-4">
+    <div className="rounded-2xl border border-white/10 bg-slate-900/40 backdrop-blur-xl p-6 md:p-7 space-y-5">
       {/* Header */}
-      <div className="flex items-center gap-3 mb-4">
+      <div className="flex items-center gap-3 mb-5">
         <div className="p-2 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-lg">
           <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
@@ -182,7 +183,7 @@ export default function ClientStatusDashboard() {
                 <div className={`absolute inset-0 bg-gradient-to-br ${config.gradient} opacity-20`}></div>
 
                 {/* Content */}
-                <div className="relative p-4 space-y-3">
+                <div className="relative p-5 space-y-3">
                   {/* Header */}
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
@@ -235,7 +236,7 @@ export default function ClientStatusDashboard() {
                         e.stopPropagation();
                         handleClientClick(client.id);
                       }}
-                      className="bg-slate-900/60 rounded-lg p-3 shadow-sm hover:shadow-md transition-all cursor-pointer border border-white/10 hover:border-cyan-400/30 backdrop-blur-sm"
+                      className="bg-slate-900/60 rounded-lg p-4 shadow-sm hover:shadow-md transition-all cursor-pointer border border-white/10 hover:border-cyan-400/30 backdrop-blur-sm"
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex-1 min-w-0">

@@ -41,20 +41,20 @@ export function formatPhoneDisplay(raw: string | null | undefined): string {
   return raw;
 }
 
-export function phoneToTelHref(raw: string | null | undefined): string | null {
-  if (!raw) return null;
+export function phoneToTelHref(raw: string | null | undefined): string | undefined {
+  if (!raw) return undefined;
   const digits = stripPhone(raw);
-  if (!digits) return null;
+  if (!digits) return undefined;
 
   if (digits.length === 10) return `tel:+1${digits}`;
   if (digits.length === 11 && digits.startsWith('1')) return `tel:+${digits}`;
   return `tel:${digits}`;
 }
 
-export function phoneToSmsHref(raw: string | null | undefined): string | null {
-  if (!raw) return null;
+export function phoneToSmsHref(raw: string | null | undefined): string | undefined {
+  if (!raw) return undefined;
   const digits = stripPhone(raw);
-  if (!digits) return null;
+  if (!digits) return undefined;
 
   if (digits.length === 10) return `sms:+1${digits}`;
   if (digits.length === 11 && digits.startsWith('1')) return `sms:+${digits}`;

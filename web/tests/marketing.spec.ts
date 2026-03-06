@@ -429,7 +429,7 @@ test.describe('Marketing Page', () => {
         // Select date/time
         const dateInput = page.locator('input[type="date"], input[type="datetime-local"]').first();
         if (await dateInput.isVisible()) {
-          await dateInput.fill('2025-12-31');
+          await dateInput.fill('2027-06-30');
         }
       }
     }

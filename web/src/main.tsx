@@ -17,7 +17,7 @@ const hideLoader = () => {
   loaderEl.classList.add('fade-out');
   window.setTimeout(() => {
     loaderEl.remove();
-  }, 600);
+  }, 300);
 };
 
 const showCrash = (message: unknown) => {
@@ -82,4 +82,4 @@ ReactDOM.createRoot(rootEl as HTMLElement).render(
 );
 
 requestAnimationFrame(hideLoader);
-window.setTimeout(hideLoader, 4000);
+window.setTimeout(hideLoader, 2000);

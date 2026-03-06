@@ -24,7 +24,7 @@ function timeAgo(dateStr: string): string {
   return `${days}d ago`;
 }
 
-export function NextBestActionRail() {
+export function NextBestActionRail({ compact = false, maxItems = 6 }: { compact?: boolean; maxItems?: number }) {
   const [actions, setActions] = useState<ActionItem[]>([]);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
@@ -51,7 +51,7 @@ export function NextBestActionRail() {
           kind: 'reply',
           path:
             item.contactType === 'lead'
-              ? `/leads?focusId=${encodeURIComponent(item.contactId)}`
+              ? `/leads/${encodeURIComponent(item.contactId)}`
               : `/clients/${encodeURIComponent(item.contactId)}?tab=timeline`,
         }));
 
@@ -79,7 +79,7 @@ export function NextBestActionRail() {
 
         const ranked = [...replyActions, ...taskActions]
           .sort((a, b) => b.score - a.score || new Date(b.at).getTime() - new Date(a.at).getTime())
-          .slice(0, 6);
+          .slice(0, Math.max(1, Math.min(maxItems, 8)));
 
         setActions(ranked);
       } catch {
@@ -102,15 +102,19 @@ export function NextBestActionRail() {
 
   if (loading) {
     return (
-      <div className="rounded-2xl sm:rounded-[28px] bg-slate-950/40 border border-white/10 backdrop-blur-xl p-4 sm:p-5">
-        <div className="text-sm text-slate-400">Loading next best actions…</div>
-      </div>
+      compact ? (
+        <div className="text-xs text-slate-400">Loading actions…</div>
+      ) : (
+        <div className="rounded-2xl sm:rounded-[28px] bg-slate-950/40 border border-white/10 backdrop-blur-xl p-4 sm:p-5">
+          <div className="text-sm text-slate-400">Loading next best actions…</div>
+        </div>
+      )
     );
   }
 
-  return (
-    <div className="rounded-2xl sm:rounded-[28px] bg-slate-950/40 border border-white/10 backdrop-blur-xl p-4 sm:p-5">
-      <div className="flex items-center justify-between gap-4 mb-3">
+  const content = (
+    <>
+      <div className={`flex items-center justify-between gap-4 ${compact ? 'mb-2' : 'mb-3'}`}>
         <div>
           <div className="text-xs uppercase tracking-[0.18em] text-cyan-300">Next best actions</div>
           <div className="text-xs text-slate-400 mt-1">
@@ -123,17 +127,17 @@ export function NextBestActionRail() {
       </div>
 
       {actions.length === 0 ? (
-        <div className="text-sm text-slate-400">You’re caught up. Great momentum.</div>
+        <div className={`text-slate-400 ${compact ? 'text-xs' : 'text-sm'}`}>You’re caught up. Great momentum.</div>
       ) : (
         <div className="space-y-1">
           {actions.map((action) => (
             <button
               key={action.id}
               onClick={() => navigate(action.path)}
-              className="w-full text-left flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl hover:bg-white/5 transition-colors"
+              className={`w-full text-left flex items-center justify-between gap-3 rounded-xl hover:bg-white/5 transition-colors ${compact ? 'px-2 py-1.5' : 'px-3 py-2.5'}`}
             >
               <div className="min-w-0">
-                <div className="text-sm text-slate-100 truncate">{action.title}</div>
+                <div className={`${compact ? 'text-xs' : 'text-sm'} text-slate-100 truncate`}>{action.title}</div>
                 <div className="text-[11px] text-slate-400 truncate">{action.subtitle}</div>
               </div>
               <div className="text-[10px] text-slate-500 shrink-0">{timeAgo(action.at)}</div>
@@ -141,6 +145,16 @@ export function NextBestActionRail() {
           ))}
         </div>
       )}
+    </>
+  );
+
+  if (compact) {
+    return <div>{content}</div>;
+  }
+
+  return (
+    <div className="rounded-2xl sm:rounded-[28px] bg-slate-950/40 border border-white/10 backdrop-blur-xl p-4 sm:p-5">
+      {content}
     </div>
   );
 }

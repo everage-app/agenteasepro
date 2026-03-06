@@ -10,7 +10,7 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const baseClasses =
-  'inline-flex items-center justify-center gap-2 font-semibold rounded-full transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-white dark:focus:ring-offset-[#040b18] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:transform-none';
+  'inline-flex items-center justify-center gap-2 font-semibold rounded-full transition-all duration-200 ae-motion-button focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-white dark:focus:ring-offset-[#040b18] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:transform-none';
 
 const variantClasses: Record<ButtonVariant, string> = {
   primary: 'bg-gradient-to-r from-[#2563eb] via-[#4f46e5] to-[#0ea5e9] text-white shadow-[0_15px_40px_rgba(37,99,235,0.45)] hover:shadow-[0_18px_50px_rgba(14,165,233,0.45)] border border-white/10 hover:translate-y-[-1px] hover:scale-[1.015] active:scale-[0.97] focus:ring-blue-500/60',

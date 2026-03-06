@@ -234,14 +234,32 @@ export function ContractsHub() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [dealsRes, formsRes, envelopesRes] = await Promise.all([
+      const [dealsRes, formsRes, envelopesRes] = await Promise.allSettled([
         api.get('/deals'),
         api.get('/forms/definitions'),
         api.get('/esign/envelopes'),
       ]);
-      setDeals(dealsRes.data || []);
-      setFormDefs(formsRes.data || []);
-      setEnvelopes(envelopesRes.data || []);
+
+      if (dealsRes.status === 'fulfilled') {
+        setDeals(dealsRes.value.data || []);
+      } else {
+        console.error('Failed to load deals:', dealsRes.reason);
+        setDeals([]);
+      }
+
+      if (formsRes.status === 'fulfilled') {
+        setFormDefs(formsRes.value.data || []);
+      } else {
+        console.error('Failed to load form definitions:', formsRes.reason);
+        setFormDefs([]);
+      }
+
+      if (envelopesRes.status === 'fulfilled') {
+        setEnvelopes(envelopesRes.value.data || []);
+      } else {
+        console.error('Failed to load e-sign envelopes:', envelopesRes.reason);
+        setEnvelopes([]);
+      }
     } catch (err) {
       console.error('Failed to load data:', err);
     } finally {
@@ -1351,7 +1369,7 @@ function SignatureCard({ deal, envelope, onResend, onView, onDownload, formatDat
                   <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-slate-800 text-white text-xs rounded opacity-0 group-hover/signer:opacity-100 transition-opacity whitespace-nowrap pointer-events-none border border-white/10">
                     <div className="font-semibold">{signer.name}</div>
                     <div className="text-slate-400 text-[10px]">
-                      {signer.role} • {signer.signed ? `Signed ${signer.signedAt ? formatDate(signer.signedAt) : ''}` : signer.viewed ? `Viewed ${signer.viewedAt ? formatDate(signer.viewedAt) : ''}` : 'Sent'}
+                      {signer.role} • {signer.signed ? `Signed ${'signedAt' in signer && signer.signedAt ? formatDate(signer.signedAt) : ''}` : signer.viewed ? `Viewed ${'viewedAt' in signer && signer.viewedAt ? formatDate(signer.viewedAt) : ''}` : 'Sent'}
                     </div>
                   </div>
                 </div>

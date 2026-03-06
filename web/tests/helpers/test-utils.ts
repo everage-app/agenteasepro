@@ -35,7 +35,23 @@ export async function waitForElement(
  * Navigate to a specific page and wait for it to load
  */
 export async function navigateTo(page: Page, path: string) {
-  await page.goto(path, { waitUntil: 'domcontentloaded' });
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      await page.goto(path, { waitUntil: 'domcontentloaded' });
+      lastError = null;
+      break;
+    } catch (error) {
+      lastError = error;
+      const message = String((error as any)?.message || error);
+      if (!/ERR_NETWORK_CHANGED/i.test(message) || attempt === 1) {
+        throw error;
+      }
+      await page.waitForTimeout(400);
+    }
+  }
+
+  if (lastError) throw lastError;
   try {
     await page.waitForLoadState('networkidle', { timeout: 5000 });
   } catch {
@@ -88,19 +104,24 @@ export async function isVisible(page: Page, selector: string): Promise<boolean> 
  * Wait for loading state to disappear
  */
 export async function waitForLoadingToComplete(page: Page) {
+  // Wait until the page is at least interactive
+  try {
+    await page.waitForLoadState('domcontentloaded', { timeout: 15000 });
+  } catch {
+    // Already loaded
+  }
+
   const indicators = ['text=Loading...', '.animate-spin'];
   for (const selector of indicators) {
     try {
-      await page.waitForSelector(selector, { state: 'hidden', timeout: 3000 });
+      await page.waitForSelector(selector, { state: 'hidden', timeout: 5000 });
     } catch {
       // Indicator may be absent or persistent in non-critical regions.
     }
   }
 
-  await page.waitForTimeout(250);
-
   try {
-    await page.waitForLoadState('networkidle', { timeout: 5000 });
+    await page.waitForLoadState('networkidle', { timeout: 10000 });
   } catch {
     // Ignore persistent network activity (analytics/streaming) once loading indicators are gone.
   }

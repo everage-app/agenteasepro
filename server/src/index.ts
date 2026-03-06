@@ -8,6 +8,7 @@ import path from 'path';
 import dotenv from 'dotenv';
 import fs from 'fs';
 import { requestIdMiddleware, securityHeadersMiddleware, suspiciousActivityDetector } from './middleware/security';
+import rateLimit from 'express-rate-limit';
 
 // Note: this repo keeps environment variables at the monorepo root.
 // In dev __dirname is server/src; in prod it's server/dist.
@@ -40,6 +41,7 @@ import { router as addendumsRouter } from './routes/addendums';
 import { router as listingsRouter } from './routes/listings';
 import { router as marketingRouter } from './routes/marketing';
 import { processDueScheduledMassEmails } from './routes/marketing';
+import { withLock } from './services/distributedLock';
 import { registerBlastClick } from './services/marketingService';
 import { router as esignRouter } from './routes/esign';
 import { router as esignPublicRouter } from './routes/esignPublic';
@@ -52,6 +54,8 @@ import { router as contractsRouter } from './routes/contracts';
 import { router as channelConnectionsRouter } from './routes/channelConnections';
 import dailyActivityRouter from './routes/dailyActivity';
 import automationsRouter from './routes/automations';
+import { router as teamsRouter } from './routes/teams';
+import { router as searchRouter } from './routes/search';
 import { router as priorityActionsRouter } from './routes/priorityActions';
 import { router as settingsRouter } from './routes/settings';
 import leadsRouter from './routes/leads';
@@ -69,9 +73,18 @@ import { sendgridEventsWebhookHandler, sendgridInboundParseHandler } from './rou
 import { router as oauthRouter } from './routes/oauth';
 import { router as contactEmailRouter } from './routes/contactEmail';
 import { prisma } from './lib/prisma';
+import { errorHandler } from './lib/apiResponse';
 
 const app = express();
-const sendgridInboundUpload = multer();
+const sendgridInboundUpload = multer({
+  limits: {
+    files: 0,
+    fields: 40,
+    parts: 40,
+    fieldNameSize: 100,
+    fieldSize: 256 * 1024,
+  },
+});
 
 const recentServerErrorFingerprints = new Map<string, number>();
 const SERVER_ERROR_DEDUPE_WINDOW_MS = 60 * 1000;
@@ -94,8 +107,9 @@ app.use(helmet({
       fontSrc: ["'self'", 'https://fonts.gstatic.com'],
       imgSrc: ["'self'", 'data:', 'https:', 'blob:'],
       connectSrc: ["'self'", 'https://api.openai.com'],
-      frameSrc: ["'none'"],
+      frameSrc: ["'self'", "blob:"],
       objectSrc: ["'none'"],
+      workerSrc: ["'self'", "blob:"],
       baseUri: ["'self'"],
       formAction: ["'self'"],
     },
@@ -127,6 +141,23 @@ app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 app.use(requestIdMiddleware);
 app.use(securityHeadersMiddleware);
 app.use(suspiciousActivityDetector);
+
+// ── Global API rate limiting ────────────────────────────────────────
+const globalApiLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 300,            // 300 requests per minute per IP for authenticated APIs
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => {
+    // Skip rate limiting for health checks, webhooks, and static files
+    return req.path === '/health' || req.path === '/api/health'
+      || req.path === '/api/billing/webhook'
+      || req.path.startsWith('/api/integrations/')
+      || !req.path.startsWith('/api/');
+  },
+  message: { error: 'Too many requests, please try again later.' },
+});
+app.use(globalApiLimiter);
 
 // Stripe webhook - raw body needed, no auth (must be registered BEFORE json())
 app.post('/api/billing/webhook', express.raw({ type: 'application/json' }), webhookHandler);
@@ -173,6 +204,8 @@ app.use('/api/contracts', authMiddleware, contractsRouter);
 app.use('/api/channels', authMiddleware, channelConnectionsRouter);
 app.use('/api/daily-activity', authMiddleware, dailyActivityRouter);
 app.use('/api/automations', authMiddleware, automationsRouter);
+app.use('/api/teams', authMiddleware, teamsRouter);
+app.use('/api/search', authMiddleware, searchRouter);
 app.use('/api/priority-actions', authMiddleware, priorityActionsRouter);
 app.use('/api/settings', authMiddleware, settingsRouter);
 app.use('/api/leads', leadsRouter);
@@ -270,6 +303,10 @@ app.use((req, res, next) => {
   return next();
 });
 app.use(express.static(distPath, { dotfiles: 'ignore' }));
+
+// Global error handler (must be after all routes, before SPA fallback)
+app.use('/api', errorHandler);
+
 app.get('*', (_req, res) => {
   res.sendFile(path.join(distPath, 'index.html'));
 });
@@ -279,13 +316,13 @@ app.listen(port, () => {
   console.log(`AgentEasePro API listening on port ${port}`);
 
   setTimeout(() => {
-    processDueScheduledMassEmails().catch((err) => {
+    withLock('scheduled-mass-emails', () => processDueScheduledMassEmails(), 55_000).catch((err) => {
       console.error('Initial scheduled mass email processing failed', err);
     });
   }, 15000);
 
   setInterval(() => {
-    processDueScheduledMassEmails().catch((err) => {
+    withLock('scheduled-mass-emails', () => processDueScheduledMassEmails(), 55_000).catch((err) => {
       console.error('Scheduled mass email processing failed', err);
     });
   }, 60 * 1000);

@@ -163,7 +163,7 @@ export function RecentRepliesWidget() {
             onClick={() =>
               navigate(
                 item.contactType === 'lead'
-                  ? `/leads?focusId=${encodeURIComponent(item.contactId)}`
+                  ? `/leads/${encodeURIComponent(item.contactId)}`
                   : `/clients/${encodeURIComponent(item.contactId)}?tab=timeline`,
               )
             }

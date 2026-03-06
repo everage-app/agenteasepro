@@ -49,7 +49,7 @@ export function ClientsSettingsPage() {
         stage: c.stage,
         role: c.role || 'BUYER',
         tags: c.tags || [],
-        dealCount: (c.buyerDeals?.length || 0) + (c.sellerDeals?.length || 0),
+        dealCount: c.dealCount ?? ((c.buyerDeals?.length || 0) + (c.sellerDeals?.length || 0)),
         createdAt: c.createdAt,
       }));
       setClients(clientList);

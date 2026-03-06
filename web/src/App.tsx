@@ -1,5 +1,5 @@
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
-import { useEffect, useRef } from 'react';
+import { lazy, Suspense, useEffect, useRef } from 'react';
 import { ProtectedRoute } from './features/auth/ProtectedRoute';
 import { AppShell } from './components/layout/AppShell';
 import { isInternalHost } from './features/internal/isInternalHost';
@@ -8,59 +8,76 @@ import { OwnerRoute } from './features/internal/OwnerRoute';
 import { InternalShell } from './features/internal/InternalShell';
 import { useAuthStore } from './features/auth/authStore';
 import { reportClientError, trackEvent } from './lib/telemetry';
+import { prefetchRoute, prefetchTopRoutes } from './lib/prefetch';
 
-// All routes loaded eagerly for stability
+// ─── Critical path: eager imports (auth, billing gate) ───────────────
 import { LoginPage } from './features/auth/LoginPage';
 import { ForgotPasswordPage } from './features/auth/ForgotPasswordPage';
 import { ResetPasswordPage } from './features/auth/ResetPasswordPage';
 import { VerifyEmailPage } from './features/auth/VerifyEmailPage';
-import { DashboardPage } from './features/deals/DashboardPage';
-import { DealCreateWizard } from './features/deals/DealCreateWizard';
-import { DealsKanban } from './features/deals/DealsKanban';
-import { RepcWizard } from './features/repc/RepcWizard';
-import { ListingsPage } from './features/listings/ListingsPage';
-import { ClientsListPage } from './features/clients/ClientsListPage';
-import { ClientDetailPage } from './features/clients/ClientDetailPage';
-import { ContractsHub } from './features/contracts/ContractsHub';
-import { PdfEditor } from './features/contracts/PdfEditor';
-import { DealTemplateFormPage } from './features/contracts/DealTemplateFormPage';
-import { TasksPage } from './features/tasks/TasksPage';
-import { MarketingPage } from './features/marketing/MarketingPage';
-import { BlastDetailPage } from './features/marketing/BlastDetailPage';
 import { PublicSignPage } from './features/esign/PublicSignPage';
-import LeadsDashboard from './features/leads/LeadsDashboard';
-import { CalendarPage } from './features/calendar/CalendarPage';
-import { AutomationsPage } from './features/automations/AutomationsPage';
-import { SettingsLayout } from './features/settings/SettingsLayout';
-import { SettingsIndexPage } from './features/settings/SettingsIndexPage';
-import { ProfileSettingsPage } from './features/settings/ProfileSettingsPage';
-import { ClientsSettingsPage } from './features/settings/ClientsSettingsPage';
-import { LeadsSettingsPage } from './features/settings/LeadsSettingsPage';
-import { BrandingSettingsPage } from './features/settings/BrandingSettingsPage';
-import { IntegrationsSettingsPage } from './features/settings/IntegrationsSettingsPage';
-import { AutomationsSettingsPage } from './features/settings/AutomationsSettingsPage';
-import { NotificationsSettingsPage } from './features/settings/NotificationsSettingsPage';
-import { BillingSettingsPage } from './features/settings/BillingSettingsPage';
-import { DataSettingsPage } from './features/settings/DataSettingsPage';
-import { IdxSettingsPage } from './features/settings/IdxSettingsPage';
-import { LandingPagesSettingsPage } from './features/settings/LandingPagesSettingsPage';
-import { LandingPageEditorPage } from './features/settings/LandingPageEditorPage';
-import PropertySearch from './features/properties/PropertySearch';
-import { ReportingPage } from './features/reporting/ReportingPage';
-import { InternalLoginPage } from './features/internal/InternalLoginPage';
-import { InternalOverviewPage } from './features/internal/pages/InternalOverviewPage';
-import { InternalAgentsPage } from './features/internal/pages/InternalAgentsPage';
-import { InternalAgentDetailPage } from './features/internal/pages/InternalAgentDetailPage';
-import { InternalListingsPage } from './features/internal/pages/InternalListingsPage';
-import { InternalContractsPage } from './features/internal/pages/InternalContractsPage';
-import { InternalSystemPage } from './features/internal/pages/InternalSystemPage';
-import { InternalBillingPage } from './features/internal/pages/InternalBillingPage';
-import { InternalActivityPage } from './features/internal/pages/InternalActivityPage';
-import { InternalUsagePage } from './features/internal/pages/InternalUsagePage';
-import { InternalSupportPage } from './features/internal/pages/InternalSupportPage';
-import { InternalCalculationsPage } from './features/internal/pages/InternalCalculationsPage';
-import { InternalCampaignsPage } from './features/internal/pages/InternalCampaignsPage';
 import { BillingAccessGate } from './features/billing/BillingAccessGate';
+import { InternalLoginPage } from './features/internal/InternalLoginPage';
+
+// ─── Lazy-loaded feature pages (code-split per route) ────────────────
+const DashboardPage = lazy(() => import('./features/deals/DashboardPage').then(m => ({ default: m.DashboardPage })));
+const DealCreateWizard = lazy(() => import('./features/deals/DealCreateWizard').then(m => ({ default: m.DealCreateWizard })));
+const DealsKanban = lazy(() => import('./features/deals/DealsKanban').then(m => ({ default: m.DealsKanban })));
+const DealDetailPage = lazy(() => import('./features/deals/DealDetailPage').then(m => ({ default: m.DealDetailPage })));
+const DealExecutionCockpitPage = lazy(() => import('./features/deals/DealExecutionCockpitPage').then(m => ({ default: m.DealExecutionCockpitPage })));
+const RepcWizard = lazy(() => import('./features/repc/RepcWizard').then(m => ({ default: m.RepcWizard })));
+const ListingsPage = lazy(() => import('./features/listings/ListingsPage').then(m => ({ default: m.ListingsPage })));
+const ClientsListPage = lazy(() => import('./features/clients/ClientsListPage').then(m => ({ default: m.ClientsListPage })));
+const ClientDetailPage = lazy(() => import('./features/clients/ClientDetailPage').then(m => ({ default: m.ClientDetailPage })));
+const ContractsHub = lazy(() => import('./features/contracts/ContractsHub').then(m => ({ default: m.ContractsHub })));
+const PdfEditor = lazy(() => import('./features/contracts/PdfEditor').then(m => ({ default: m.PdfEditor })));
+const DealTemplateFormPage = lazy(() => import('./features/contracts/DealTemplateFormPage').then(m => ({ default: m.DealTemplateFormPage })));
+const TasksPage = lazy(() => import('./features/tasks/TasksPage').then(m => ({ default: m.TasksPage })));
+const MarketingPage = lazy(() => import('./features/marketing/MarketingPage').then(m => ({ default: m.MarketingPage })));
+const BlastDetailPage = lazy(() => import('./features/marketing/BlastDetailPage').then(m => ({ default: m.BlastDetailPage })));
+const LeadsDashboard = lazy(() => import('./features/leads/LeadsDashboard'));
+const LeadDetailPage = lazy(() => import('./features/leads/LeadDetailPage').then(m => ({ default: m.LeadDetailPage })));
+const CalendarPage = lazy(() => import('./features/calendar/CalendarPage').then(m => ({ default: m.CalendarPage })));
+const AutomationsPage = lazy(() => import('./features/automations/AutomationsPage').then(m => ({ default: m.AutomationsPage })));
+const SettingsLayout = lazy(() => import('./features/settings/SettingsLayout').then(m => ({ default: m.SettingsLayout })));
+const SettingsIndexPage = lazy(() => import('./features/settings/SettingsIndexPage').then(m => ({ default: m.SettingsIndexPage })));
+const ProfileSettingsPage = lazy(() => import('./features/settings/ProfileSettingsPage').then(m => ({ default: m.ProfileSettingsPage })));
+const ClientsSettingsPage = lazy(() => import('./features/settings/ClientsSettingsPage').then(m => ({ default: m.ClientsSettingsPage })));
+const LeadsSettingsPage = lazy(() => import('./features/settings/LeadsSettingsPage').then(m => ({ default: m.LeadsSettingsPage })));
+const BrandingSettingsPage = lazy(() => import('./features/settings/BrandingSettingsPage').then(m => ({ default: m.BrandingSettingsPage })));
+const IntegrationsSettingsPage = lazy(() => import('./features/settings/IntegrationsSettingsPage').then(m => ({ default: m.IntegrationsSettingsPage })));
+const AutomationsSettingsPage = lazy(() => import('./features/settings/AutomationsSettingsPage').then(m => ({ default: m.AutomationsSettingsPage })));
+const NotificationsSettingsPage = lazy(() => import('./features/settings/NotificationsSettingsPage').then(m => ({ default: m.NotificationsSettingsPage })));
+const BillingSettingsPage = lazy(() => import('./features/settings/BillingSettingsPage').then(m => ({ default: m.BillingSettingsPage })));
+const DataSettingsPage = lazy(() => import('./features/settings/DataSettingsPage').then(m => ({ default: m.DataSettingsPage })));
+const IdxSettingsPage = lazy(() => import('./features/settings/IdxSettingsPage').then(m => ({ default: m.IdxSettingsPage })));
+const LandingPagesSettingsPage = lazy(() => import('./features/settings/LandingPagesSettingsPage').then(m => ({ default: m.LandingPagesSettingsPage })));
+const LandingPageEditorPage = lazy(() => import('./features/settings/LandingPageEditorPage').then(m => ({ default: m.LandingPageEditorPage })));
+const PropertySearch = lazy(() => import('./features/properties/PropertySearch'));
+const ReportingPage = lazy(() => import('./features/reporting/ReportingPage').then(m => ({ default: m.ReportingPage })));
+
+// Internal admin pages (lazy — rarely visited)
+const InternalOverviewPage = lazy(() => import('./features/internal/pages/InternalOverviewPage').then(m => ({ default: m.InternalOverviewPage })));
+const InternalAgentsPage = lazy(() => import('./features/internal/pages/InternalAgentsPage').then(m => ({ default: m.InternalAgentsPage })));
+const InternalAgentDetailPage = lazy(() => import('./features/internal/pages/InternalAgentDetailPage').then(m => ({ default: m.InternalAgentDetailPage })));
+const InternalListingsPage = lazy(() => import('./features/internal/pages/InternalListingsPage').then(m => ({ default: m.InternalListingsPage })));
+const InternalContractsPage = lazy(() => import('./features/internal/pages/InternalContractsPage').then(m => ({ default: m.InternalContractsPage })));
+const InternalSystemPage = lazy(() => import('./features/internal/pages/InternalSystemPage').then(m => ({ default: m.InternalSystemPage })));
+const InternalBillingPage = lazy(() => import('./features/internal/pages/InternalBillingPage').then(m => ({ default: m.InternalBillingPage })));
+const InternalActivityPage = lazy(() => import('./features/internal/pages/InternalActivityPage').then(m => ({ default: m.InternalActivityPage })));
+const InternalUsagePage = lazy(() => import('./features/internal/pages/InternalUsagePage').then(m => ({ default: m.InternalUsagePage })));
+const InternalSupportPage = lazy(() => import('./features/internal/pages/InternalSupportPage').then(m => ({ default: m.InternalSupportPage })));
+const InternalCalculationsPage = lazy(() => import('./features/internal/pages/InternalCalculationsPage').then(m => ({ default: m.InternalCalculationsPage })));
+const InternalCampaignsPage = lazy(() => import('./features/internal/pages/InternalCampaignsPage').then(m => ({ default: m.InternalCampaignsPage })));
+
+// ─── Lightweight auth/public page loader ─────────────────────────────
+function MinimalLoader() {
+  return (
+    <div className="flex items-center justify-center min-h-screen bg-[#020617]">
+      <div className="w-8 h-8 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
+    </div>
+  );
+}
 
 function isNonActionableRejection(reason: unknown): boolean {
   if (!reason || typeof reason !== 'object') return false;
@@ -87,6 +104,20 @@ export default function App() {
   useEffect(() => {
     loadAgent();
   }, [loadAgent]);
+
+  // Prefetch top routes after idle
+  useEffect(() => {
+    if (!token) return;
+    const id = window.requestIdleCallback?.(() => {
+      prefetchTopRoutes();
+    }) ?? window.setTimeout(() => {
+      prefetchTopRoutes();
+    }, 2000);
+    return () => {
+      if (typeof id === 'number' && window.cancelIdleCallback) window.cancelIdleCallback(id);
+      else clearTimeout(id as number);
+    };
+  }, [token]);
 
   useEffect(() => {
     if (!token) return;
@@ -176,10 +207,13 @@ export default function App() {
           <Route path="calendar" element={<CalendarPage />} />
           <Route path="tasks" element={<TasksPage />} />
           <Route path="leads" element={<LeadsDashboard />} />
+          <Route path="leads/:id" element={<LeadDetailPage />} />
           <Route path="search" element={<PropertySearch />} />
           <Route path="deals" element={<DealsKanban />} />
-          <Route path="deals/:dealId" element={<DealsKanban />} />
           <Route path="deals/new" element={<DealCreateWizard />} />
+          <Route path="deals/:dealId" element={<DealsKanban />} />
+          <Route path="deals/:dealId/cockpit" element={<DealExecutionCockpitPage />} />
+          <Route path="deals/:dealId/detail" element={<DealDetailPage />} />
           <Route path="deals/:dealId/repc" element={<RepcWizard />} />
           <Route path="clients" element={<ClientsListPage />} />
           <Route path="clients/:id" element={<ClientDetailPage />} />
@@ -218,18 +252,18 @@ export default function App() {
             </ProtectedRoute>
           }
         >
-          <Route index element={<InternalOverviewPage />} />
-          <Route path="agents" element={<InternalAgentsPage />} />
-          <Route path="agents/:id" element={<InternalAgentDetailPage />} />
-          <Route path="activity" element={<InternalActivityPage />} />
-          <Route path="usage" element={<InternalUsagePage />} />
-          <Route path="support" element={<InternalSupportPage />} />
-          <Route path="listings" element={<InternalListingsPage />} />
-          <Route path="contracts" element={<InternalContractsPage />} />
-          <Route path="campaigns" element={<InternalCampaignsPage />} />
-          <Route path="calculations" element={<InternalCalculationsPage />} />
-          <Route path="system" element={<InternalSystemPage />} />
-          <Route path="billing" element={<InternalBillingPage />} />
+          <Route index element={<Suspense fallback={<MinimalLoader />}><InternalOverviewPage /></Suspense>} />
+          <Route path="agents" element={<Suspense fallback={<MinimalLoader />}><InternalAgentsPage /></Suspense>} />
+          <Route path="agents/:id" element={<Suspense fallback={<MinimalLoader />}><InternalAgentDetailPage /></Suspense>} />
+          <Route path="activity" element={<Suspense fallback={<MinimalLoader />}><InternalActivityPage /></Suspense>} />
+          <Route path="usage" element={<Suspense fallback={<MinimalLoader />}><InternalUsagePage /></Suspense>} />
+          <Route path="support" element={<Suspense fallback={<MinimalLoader />}><InternalSupportPage /></Suspense>} />
+          <Route path="listings" element={<Suspense fallback={<MinimalLoader />}><InternalListingsPage /></Suspense>} />
+          <Route path="contracts" element={<Suspense fallback={<MinimalLoader />}><InternalContractsPage /></Suspense>} />
+          <Route path="campaigns" element={<Suspense fallback={<MinimalLoader />}><InternalCampaignsPage /></Suspense>} />
+          <Route path="calculations" element={<Suspense fallback={<MinimalLoader />}><InternalCalculationsPage /></Suspense>} />
+          <Route path="system" element={<Suspense fallback={<MinimalLoader />}><InternalSystemPage /></Suspense>} />
+          <Route path="billing" element={<Suspense fallback={<MinimalLoader />}><InternalBillingPage /></Suspense>} />
         </Route>
         <Route path="/esign/:envelopeId/:signerId/:token" element={<PublicSignPage />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
