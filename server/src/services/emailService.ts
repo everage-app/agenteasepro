@@ -38,10 +38,81 @@ interface SendResult {
   error?: string;
 }
 
+type ResolvedEmailIdentity = {
+  fromEmail: string;
+  fromName: string;
+  replyTo?: string;
+  requestedFromEmail?: string;
+  senderMode: 'default' | 'custom' | 'fallback';
+};
+
 const SENDGRID_API_URL = 'https://api.sendgrid.com/v3/mail/send';
 
 function normalizeEmail(value: unknown): string {
   return String(value || '').trim().toLowerCase();
+}
+
+function isEmailAddress(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
+function getDefaultSenderEmail(): string {
+  return normalizeEmail(process.env.SENDGRID_FROM_EMAIL || process.env.SENDER_EMAIL || '');
+}
+
+function getAllowedSenderDomains(defaultSenderEmail: string): string[] {
+  const configuredDomains = String(process.env.SENDGRID_ALLOWED_FROM_DOMAINS || '')
+    .split(',')
+    .map((domain) => domain.trim().toLowerCase())
+    .filter(Boolean);
+
+  if (configuredDomains.length > 0) {
+    return Array.from(new Set(configuredDomains));
+  }
+
+  const defaultDomain = defaultSenderEmail.split('@')[1] || '';
+  return defaultDomain ? [defaultDomain] : [];
+}
+
+function canUseRequestedSenderEmail(requestedFromEmail: string, defaultSenderEmail: string): boolean {
+  if (!requestedFromEmail) return false;
+  if (!defaultSenderEmail) return true;
+  if (requestedFromEmail === defaultSenderEmail) return true;
+
+  const requestedDomain = requestedFromEmail.split('@')[1] || '';
+  return getAllowedSenderDomains(defaultSenderEmail).includes(requestedDomain);
+}
+
+export function resolveEmailIdentity(params: Pick<EmailParams, 'fromEmail' | 'fromName' | 'replyTo'>): ResolvedEmailIdentity {
+  const defaultSenderEmail = getDefaultSenderEmail();
+  const requestedFromEmail = normalizeEmail(params.fromEmail);
+  const requestedReplyTo = normalizeEmail(params.replyTo);
+  const fromName = String(params.fromName || 'AgentEase Pro').trim() || 'AgentEase Pro';
+
+  let fromEmail = defaultSenderEmail || requestedFromEmail;
+  let replyTo = requestedReplyTo || undefined;
+  let senderMode: ResolvedEmailIdentity['senderMode'] = 'default';
+
+  if (requestedFromEmail) {
+    if (canUseRequestedSenderEmail(requestedFromEmail, defaultSenderEmail)) {
+      fromEmail = requestedFromEmail;
+      senderMode = requestedFromEmail === defaultSenderEmail ? 'default' : 'custom';
+    } else {
+      senderMode = 'fallback';
+      replyTo = replyTo || requestedFromEmail;
+      console.warn(
+        `Email sender fallback: requested fromEmail ${requestedFromEmail} is not on an allowed SendGrid sender domain. Using ${defaultSenderEmail || requestedFromEmail} instead.`,
+      );
+    }
+  }
+
+  return {
+    fromEmail,
+    fromName,
+    replyTo,
+    requestedFromEmail: requestedFromEmail || undefined,
+    senderMode,
+  };
 }
 
 /**
@@ -49,7 +120,8 @@ function normalizeEmail(value: unknown): string {
  */
 export async function sendEmail(params: EmailParams): Promise<SendResult> {
   const apiKey = process.env.SENDGRID_API_KEY;
-  const fromEmail = (params.fromEmail || process.env.SENDGRID_FROM_EMAIL || process.env.SENDER_EMAIL || '').trim();
+  const identity = resolveEmailIdentity(params);
+  const fromEmail = identity.fromEmail;
 
   if (!apiKey) {
     console.warn('⚠️ SENDGRID_API_KEY not configured - email not sent');
@@ -98,7 +170,7 @@ export async function sendEmail(params: EmailParams): Promise<SendResult> {
 
     const payload: Record<string, any> = {
       personalizations,
-      from: { email: fromEmail, name: params.fromName || 'AgentEase Pro' },
+      from: { email: fromEmail, name: identity.fromName },
       subject: params.subject,
       content: [
         ...(params.text ? [{ type: 'text/plain', value: params.text }] : []),
@@ -117,8 +189,8 @@ export async function sendEmail(params: EmailParams): Promise<SendResult> {
       payload.categories = params.categories;
     }
 
-    if (params.replyTo) {
-      payload.reply_to = { email: params.replyTo };
+    if (identity.replyTo && isEmailAddress(identity.replyTo)) {
+      payload.reply_to = { email: identity.replyTo };
     }
 
     if (params.headers && Object.keys(params.headers).length > 0) {

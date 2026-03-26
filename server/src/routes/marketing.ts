@@ -21,6 +21,28 @@ import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 export const router = Router();
 
+async function getAgentEmailIdentity(agentId: string) {
+  const connection = await prisma.agentChannelConnection.findUnique({
+    where: {
+      agentId_type: {
+        agentId,
+        type: 'EMAIL',
+      },
+    },
+    select: { config: true },
+  });
+
+  const config = (connection?.config || {}) as Record<string, unknown>;
+  const fromEmail = typeof config.fromEmail === 'string' ? config.fromEmail.trim() : '';
+  const fromName = typeof config.fromName === 'string' ? config.fromName.trim() : '';
+
+  return {
+    fromEmail: fromEmail || undefined,
+    fromName: fromName || undefined,
+    replyTo: fromEmail || undefined,
+  };
+}
+
 const DirectMailRecipientsSchema = z
   .object({
     stage: z.union([z.nativeEnum(ClientStage), z.array(z.nativeEnum(ClientStage)).min(1)]).optional(),
@@ -305,7 +327,10 @@ export async function processDueScheduledMassEmails() {
           await prisma.$transaction(linkTx);
         }
 
-        const agent = await prisma.agent.findUnique({ where: { id: blast.agentId }, select: { name: true } });
+        const [agent, emailIdentity] = await Promise.all([
+          prisma.agent.findUnique({ where: { id: blast.agentId }, select: { name: true } }),
+          getAgentEmailIdentity(blast.agentId),
+        ]);
         let sentAny = false;
 
         for (const channel of emailChannels) {
@@ -328,6 +353,9 @@ export async function processDueScheduledMassEmails() {
             htmlContent,
             listingAddress: blast.listing?.headline || undefined,
             agentName: agent?.name || undefined,
+            fromEmail: emailIdentity.fromEmail,
+            fromName: emailIdentity.fromName || agent?.name || undefined,
+            replyTo: emailIdentity.replyTo,
             categories: ['marketing_blast', blast.playbook === BlastPlaybook.CUSTOM ? 'mass_email' : 'listing_blast', 'scheduled'],
             customArgs: {
               agentId: blast.agentId,
@@ -535,11 +563,16 @@ router.post('/email/send', async (req: AuthenticatedRequest, res, next) => {
       return res.status(400).json({ error: 'No recipients found for selected audience' });
     }
 
+    const emailIdentity = await getAgentEmailIdentity(req.agentId);
+
     const result = await sendMarketingEmail({
       recipients,
       subject: parsed.data.subject,
       htmlContent: messageHtml,
       agentName: agent?.name || undefined,
+      fromEmail: emailIdentity.fromEmail,
+      fromName: emailIdentity.fromName || agent?.name || undefined,
+      replyTo: emailIdentity.replyTo,
       categories: ['marketing_blast', 'mass_email'],
       customArgs: {
         agentId: req.agentId,
@@ -926,6 +959,8 @@ router.post('/blasts/:id/send', async (req: AuthenticatedRequest, res, next) => 
 
     // Send actual emails for EMAIL channels and persist delivery logs
     const deliveryResults: Array<{ channelId: string; ok: boolean; error?: string; messageId?: string; recipientsCount: number }> = [];
+    const emailIdentity = await getAgentEmailIdentity(req.agentId);
+
     for (const channel of emailChannels) {
       if (!channel.previewHtml && !channel.previewText) {
         console.warn(`⚠️ Skipping email send for channel ${channel.id} - no content`);
@@ -958,6 +993,9 @@ router.post('/blasts/:id/send', async (req: AuthenticatedRequest, res, next) => 
         htmlContent: fullHtml,
         listingAddress: blast.listing?.headline || undefined,
         agentName: agent?.name || undefined,
+        fromEmail: emailIdentity.fromEmail,
+        fromName: emailIdentity.fromName || agent?.name || undefined,
+        replyTo: emailIdentity.replyTo,
         categories: ['marketing_blast'],
         customArgs: {
           agentId: req.agentId,

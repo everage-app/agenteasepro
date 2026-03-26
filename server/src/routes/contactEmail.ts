@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { authenticateToken, AuthenticatedRequest } from '../middleware/auth';
-import { sendEmail } from '../services/emailService';
+import { resolveEmailIdentity, sendEmail } from '../services/emailService';
 import { buildContactReplyToAddress, generateContactReplyToken } from '../services/contactReplyToken';
 
 export const router = Router();
@@ -104,13 +104,22 @@ router.post('/send', async (req: AuthenticatedRequest, res) => {
     const { contactType, contactId, subject, body, ccAgent } = parsed.data;
     const agentId = req.agentId;
 
-    const [agent, contact] = await withPrismaRetry(() =>
+    const [agent, contact, emailChannel] = await withPrismaRetry(() =>
       Promise.all([
         prisma.agent.findUnique({
           where: { id: agentId },
           select: { id: true, email: true, name: true },
         }),
         getContact({ agentId, contactType, contactId }),
+        prisma.agentChannelConnection.findUnique({
+          where: {
+            agentId_type: {
+              agentId,
+              type: 'EMAIL',
+            },
+          },
+          select: { config: true },
+        }),
       ]),
     );
 
@@ -127,14 +136,24 @@ router.post('/send', async (req: AuthenticatedRequest, res) => {
       replyToken,
     }) || agent.email;
 
+    const emailConfig = (emailChannel?.config || {}) as Record<string, unknown>;
+    const requestedFromEmail = typeof emailConfig.fromEmail === 'string' ? emailConfig.fromEmail.trim() : '';
+    const configuredFromName = typeof emailConfig.fromName === 'string' ? emailConfig.fromName.trim() : '';
+    const senderIdentity = resolveEmailIdentity({
+      fromEmail: requestedFromEmail || undefined,
+      fromName: configuredFromName || (agent.name ? `${agent.name} via AgentEase Pro` : 'AgentEase Pro'),
+      replyTo,
+    });
+
     const sendResult = await sendEmail({
       to: contact.email,
       cc: ccAgent ? agent.email : undefined,
       subject,
       html: `<div style="font-family: Arial, sans-serif; line-height: 1.55; color: #1f2937;">${bodyToHtml(body)}</div>`,
       text: body,
-      replyTo,
-      fromName: agent.name ? `${agent.name} via AgentEase Pro` : 'AgentEase Pro',
+      replyTo: senderIdentity.replyTo,
+      fromEmail: senderIdentity.requestedFromEmail,
+      fromName: senderIdentity.fromName,
       categories: ['contact-email'],
       customArgs: {
         agentId,
@@ -160,6 +179,9 @@ router.post('/send', async (req: AuthenticatedRequest, res) => {
           ccAgent,
           replyTo,
           replyToken,
+          fromEmail: senderIdentity.fromEmail,
+          requestedFromEmail: senderIdentity.requestedFromEmail || null,
+          senderMode: senderIdentity.senderMode,
           messageId: sendResult.messageId || null,
           error: sendResult.error || null,
         },

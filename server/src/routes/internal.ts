@@ -237,7 +237,7 @@ async function runInternalCampaignJob(params: {
   recipients: string[];
   batchSize: number;
   throttleMs: number;
-  fromEmail: string;
+  fromEmail?: string;
   fromName: string;
   replyTo: string;
   utmCampaign?: string;
@@ -479,8 +479,8 @@ router.post('/campaigns/send', async (req: AuthenticatedRequest, res) => {
   const htmlTemplate = sanitizeCampaignHtml(parsed.data.htmlTemplate);
   const campaignTitle = parsed.data.campaignName || parsed.data.subject;
   const totalBatches = Math.ceil(deliverable.length / parsed.data.batchSize);
-  const enforcedFromEmail = 'sales@agenteasepro.com';
-  const replyTo = parsed.data.replyTo || enforcedFromEmail;
+  const fallbackReplyTo = parsed.data.fromEmail || 'sales@agenteasepro.com';
+  const replyTo = parsed.data.replyTo || fallbackReplyTo;
 
   cleanupInternalLaunchIndex();
   const signature = buildCampaignSignature({
@@ -573,7 +573,7 @@ router.post('/campaigns/send', async (req: AuthenticatedRequest, res) => {
     recipients: deliverable,
     batchSize: parsed.data.batchSize,
     throttleMs: parsed.data.throttleMs,
-    fromEmail: enforcedFromEmail,
+    fromEmail: parsed.data.fromEmail,
     fromName: parsed.data.fromName,
     replyTo,
     utmCampaign: parsed.data.utmCampaign,
