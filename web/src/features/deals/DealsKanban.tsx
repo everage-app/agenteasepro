@@ -52,6 +52,9 @@ interface DealCard {
   } | null;
   stage?: string | null;
   repc?: {
+    purchasePrice?: string | number | null;
+    sellerCompensationContributionPercent?: string | number | null;
+    sellerCompensationContributionFlat?: string | number | null;
     settlementDeadline: string | null;
     sellerDisclosureDeadline: string | null;
     dueDiligenceDeadline: string | null;
@@ -96,6 +99,10 @@ const microFlow = [
   { key: 'finance', label: 'Finance' },
   { key: 'settle', label: 'Settle' },
 ];
+
+const DEFAULT_COMMISSION_RATE = 2.5;
+
+type CommissionMode = 'DEFAULT' | 'PERCENT' | 'FLAT';
 
 const statusProgressIndex: Record<DealStatus, number> = {
   LEAD: 0,
@@ -229,6 +236,64 @@ const getUrgencyLevel = (deadline: Date | null): 'critical' | 'warning' | 'norma
   return 'normal';
 };
 
+function formatCurrency(value?: number | null) {
+  if (value == null || !Number.isFinite(Number(value))) return '$0';
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: 0,
+  }).format(Number(value));
+}
+
+function getDealPrice(deal: DealCard): number {
+  return Number(deal.repc?.purchasePrice || 0) || 0;
+}
+
+function getDealCommissionMode(deal: DealCard): CommissionMode {
+  const flat = Number(deal.repc?.sellerCompensationContributionFlat || 0);
+  if (flat > 0) return 'FLAT';
+  const percent = Number(deal.repc?.sellerCompensationContributionPercent || 0);
+  if (percent > 0) return 'PERCENT';
+  return 'DEFAULT';
+}
+
+function getDealCommissionRate(deal: DealCard): number {
+  const percent = Number(deal.repc?.sellerCompensationContributionPercent || 0);
+  return percent > 0 ? percent : DEFAULT_COMMISSION_RATE;
+}
+
+function getDealCommission(deal: DealCard): number {
+  const flat = Number(deal.repc?.sellerCompensationContributionFlat || 0);
+  if (flat > 0) return flat;
+  const price = getDealPrice(deal);
+  if (price <= 0) return 0;
+  return price * (getDealCommissionRate(deal) / 100);
+}
+
+function getCommissionModeLabel(deal: DealCard): string {
+  const mode = getDealCommissionMode(deal);
+  if (mode === 'FLAT') return 'Flat fee';
+  const rate = getDealCommissionRate(deal);
+  return mode === 'DEFAULT' ? `${rate}% default` : `${rate}% rate`;
+}
+
+function getCommissionFormState(deal: DealCard): { mode: CommissionMode; value: string } {
+  const mode = getDealCommissionMode(deal);
+  if (mode === 'FLAT') {
+    return {
+      mode,
+      value: String(Number(deal.repc?.sellerCompensationContributionFlat || 0) || ''),
+    };
+  }
+  if (mode === 'PERCENT') {
+    return {
+      mode,
+      value: String(Number(deal.repc?.sellerCompensationContributionPercent || 0) || ''),
+    };
+  }
+  return { mode: 'DEFAULT', value: '' };
+}
+
 function getDealDocsSummary(deal: DealCard) {
   let signed = 0;
   let pending = 0;
@@ -315,6 +380,9 @@ export function DealsKanban() {
     offerReferenceDate: '',
     archiveAfterDays: 180,
     archiveReason: '',
+    purchasePrice: '',
+    commissionMode: 'DEFAULT' as CommissionMode,
+    commissionValue: '',
     propertyStreet: '',
     propertyCity: '',
     propertyState: '',
@@ -387,6 +455,7 @@ export function DealsKanban() {
   };
 
   const openManageDeal = (deal: DealCard) => {
+    const commissionState = getCommissionFormState(deal);
     setEditingDeal(deal);
     setManageError(null);
     setManageNotice(null);
@@ -396,6 +465,9 @@ export function DealsKanban() {
       offerReferenceDate: deal.offerReferenceDate ? String(deal.offerReferenceDate).slice(0, 10) : '',
       archiveAfterDays: typeof deal.archiveAfterDays === 'number' ? deal.archiveAfterDays : 180,
       archiveReason: '',
+      purchasePrice: deal.repc?.purchasePrice ? String(Number(deal.repc.purchasePrice)) : '',
+      commissionMode: commissionState.mode,
+      commissionValue: commissionState.value,
       propertyStreet: deal.property?.street || '',
       propertyCity: deal.property?.city || '',
       propertyState: deal.property?.state || '',
@@ -460,6 +532,23 @@ export function DealsKanban() {
           email: editForm.sellerEmail,
           phone: editForm.sellerPhone,
         },
+        ...(editingDeal.repc
+          ? {
+              repc: {
+                ...(editForm.purchasePrice.trim()
+                  ? { purchasePrice: Number(editForm.purchasePrice) }
+                  : {}),
+                sellerCompensationContributionPercent:
+                  editForm.commissionMode === 'PERCENT' && editForm.commissionValue.trim()
+                    ? Number(editForm.commissionValue)
+                    : null,
+                sellerCompensationContributionFlat:
+                  editForm.commissionMode === 'FLAT' && editForm.commissionValue.trim()
+                    ? Number(editForm.commissionValue)
+                    : null,
+              },
+            }
+          : {}),
       });
       closeManageDeal();
       await fetchDeals();
@@ -561,6 +650,8 @@ export function DealsKanban() {
     },
     { signed: 0, pending: 0, draft: 0 }
   );
+  const activeVolume = activeDeals.reduce((sum, deal) => sum + getDealPrice(deal), 0);
+  const activeCommission = activeDeals.reduce((sum, deal) => sum + getDealCommission(deal), 0);
 
   if (loading) {
     return (
@@ -653,6 +744,14 @@ export function DealsKanban() {
             <div className="mt-1 text-lg font-semibold text-white">{activeDeals.length}</div>
           </div>
           <div className="rounded-xl border border-white/10 bg-slate-900/40 px-3.5 py-3.5">
+            <div className="text-slate-500">Pipeline volume</div>
+            <div className="mt-1 text-lg font-semibold text-emerald-300">{formatCurrency(activeVolume)}</div>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-slate-900/40 px-3.5 py-3.5">
+            <div className="text-slate-500">Projected commission</div>
+            <div className="mt-1 text-lg font-semibold text-amber-300">{formatCurrency(activeCommission)}</div>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-slate-900/40 px-3.5 py-3.5">
             <div className="text-slate-500">Critical deadlines</div>
             <div className="mt-1 text-lg font-semibold text-red-300">{dealHealth.critical}</div>
           </div>
@@ -677,6 +776,8 @@ export function DealsKanban() {
         {columns.map((col) => {
         const colorSet = colorClasses[col.color];
         const colDeals = activeDeals.filter((d) => d.status === col.key);
+        const colVolume = colDeals.reduce((sum, deal) => sum + getDealPrice(deal), 0);
+        const colCommission = colDeals.reduce((sum, deal) => sum + getDealCommission(deal), 0);
         return (
           <section
             key={col.key}
@@ -692,6 +793,11 @@ export function DealsKanban() {
               <div>
                 <p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">Pipeline</p>
                 <h3 className="text-sm font-semibold text-slate-50">{col.label}</h3>
+                <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-300">
+                  <span>{colDeals.length} deal{colDeals.length === 1 ? '' : 's'}</span>
+                  <span className="text-emerald-300">{formatCurrency(colVolume)}</span>
+                  <span className="text-amber-300">{formatCurrency(colCommission)} est. comm</span>
+                </div>
               </div>
               <span className="rounded-full bg-white/10 px-2 py-0.5 text-[11px] font-medium text-slate-50">
                 {colDeals.length} Active
@@ -709,6 +815,8 @@ export function DealsKanban() {
                   const urgency = getUrgencyLevel(nextDeadline?.date || null);
                   const urgencyStyle = urgencyStyles[urgency];
                   const docsSummary = getDealDocsSummary(deal);
+                  const purchasePrice = getDealPrice(deal);
+                  const estimatedCommission = getDealCommission(deal);
                   const mapQuery = deal.property?.street
                     ? `${deal.property.street}, ${deal.property.city || ''}`.trim()
                     : deal.title;
@@ -864,6 +972,20 @@ export function DealsKanban() {
                       </div>
                     </div>
 
+                    <div className="mb-2 rounded-xl border border-emerald-400/20 bg-emerald-500/5 px-2.5 py-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <div>
+                          <div className="text-[10px] uppercase tracking-[0.14em] text-slate-400">Deal value</div>
+                          <div className="text-sm font-semibold text-emerald-300">{formatCurrency(purchasePrice)}</div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-[10px] uppercase tracking-[0.14em] text-slate-400">Potential commission</div>
+                          <div className="text-sm font-semibold text-amber-300">{formatCurrency(estimatedCommission)}</div>
+                          <div className="text-[10px] text-slate-500">{getCommissionModeLabel(deal)}</div>
+                        </div>
+                      </div>
+                    </div>
+
                     <div className="flex items-center justify-between gap-3">
                       <div className="flex-1">
                         <div className="mb-0.5 flex justify-between text-[10px] text-slate-500">
@@ -945,6 +1067,11 @@ export function DealsKanban() {
             <div>
               <p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">Completed</p>
               <h3 className="text-sm font-semibold text-slate-50">Closed Deals</h3>
+              <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-300">
+                <span>{closedDeals.length} deal{closedDeals.length === 1 ? '' : 's'}</span>
+                <span className="text-emerald-300">{formatCurrency(closedDeals.reduce((sum, deal) => sum + getDealPrice(deal), 0))}</span>
+                <span className="text-amber-300">{formatCurrency(closedDeals.reduce((sum, deal) => sum + getDealCommission(deal), 0))} comm</span>
+              </div>
             </div>
             <button
               onClick={() => setShowClosed(!showClosed)}
@@ -1237,6 +1364,78 @@ export function DealsKanban() {
                 className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none focus:border-cyan-400"
               />
               <div className="mt-1 text-[10px] text-slate-500">Set to 0 to disable auto-archive.</div>
+            </div>
+
+            <div className="lg:col-span-2 rounded-2xl border border-amber-400/20 bg-amber-500/5 p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-amber-200">Commission Tracking</div>
+                  <div className="mt-1 text-xs text-amber-100/80">
+                    Save deal value and projected commission from this board. Reporting will use the same numbers.
+                  </div>
+                </div>
+                <div className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] text-slate-200">
+                  Est. {formatCurrency(editingDeal.repc ? (() => {
+                    const draftPrice = Number(editForm.purchasePrice || 0) || 0;
+                    if (editForm.commissionMode === 'FLAT') return Number(editForm.commissionValue || 0) || 0;
+                    const rate = editForm.commissionMode === 'PERCENT'
+                      ? Number(editForm.commissionValue || 0) || 0
+                      : DEFAULT_COMMISSION_RATE;
+                    return draftPrice * (rate / 100);
+                  })() : 0)}
+                </div>
+              </div>
+              {editingDeal.repc ? (
+                <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                  <div>
+                    <label className="mb-1 block text-[11px] text-slate-400">Deal Value</label>
+                    <input
+                      type="number"
+                      min={0}
+                      step="1000"
+                      value={editForm.purchasePrice}
+                      onChange={(e) => setEditForm((prev) => ({ ...prev, purchasePrice: e.target.value }))}
+                      className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-400"
+                      placeholder="450000"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-[11px] text-slate-400">Commission Type</label>
+                    <select
+                      value={editForm.commissionMode}
+                      onChange={(e) => setEditForm((prev) => ({
+                        ...prev,
+                        commissionMode: e.target.value as CommissionMode,
+                        commissionValue: e.target.value === 'DEFAULT' ? '' : prev.commissionValue,
+                      }))}
+                      className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-400"
+                    >
+                      <option value="DEFAULT">Default {DEFAULT_COMMISSION_RATE}%</option>
+                      <option value="PERCENT">Percent of price</option>
+                      <option value="FLAT">Flat amount</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-[11px] text-slate-400">
+                      {editForm.commissionMode === 'FLAT' ? 'Flat Commission' : 'Commission %'}
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      step={editForm.commissionMode === 'FLAT' ? '100' : '0.1'}
+                      disabled={editForm.commissionMode === 'DEFAULT'}
+                      value={editForm.commissionValue}
+                      onChange={(e) => setEditForm((prev) => ({ ...prev, commissionValue: e.target.value }))}
+                      className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-400 disabled:cursor-not-allowed disabled:opacity-60"
+                      placeholder={editForm.commissionMode === 'FLAT' ? '12000' : '2.5'}
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-300">
+                  This deal does not have a REPC record yet. Open the REPC first, then you can track purchase price and commission here.
+                </div>
+              )}
             </div>
 
             <div>

@@ -295,6 +295,7 @@ router.patch('/:id', async (req: AuthenticatedRequest, res) => {
     property,
     buyer,
     seller,
+    repc,
   } = req.body as {
     title?: string;
     status?: DealStatus;
@@ -303,6 +304,11 @@ router.patch('/:id', async (req: AuthenticatedRequest, res) => {
     property?: Record<string, any>;
     buyer?: Record<string, any>;
     seller?: Record<string, any>;
+    repc?: {
+      purchasePrice?: number | string | null;
+      sellerCompensationContributionPercent?: number | string | null;
+      sellerCompensationContributionFlat?: number | string | null;
+    };
   };
 
   const existing = await prisma.deal.findFirst({
@@ -311,6 +317,7 @@ router.patch('/:id', async (req: AuthenticatedRequest, res) => {
       property: true,
       buyer: true,
       seller: true,
+      repc: true,
     },
   });
 
@@ -391,6 +398,52 @@ router.patch('/:id', async (req: AuthenticatedRequest, res) => {
         });
         sellerId = createdSeller.id;
         updates.push('seller');
+      }
+    }
+
+    if (repc && existing.repc?.id) {
+      const repcData: Record<string, number | null> = {};
+
+      if (repc.purchasePrice !== undefined && repc.purchasePrice !== null && String(repc.purchasePrice).trim() !== '') {
+        const purchasePrice = Number(repc.purchasePrice);
+        if (!Number.isFinite(purchasePrice) || purchasePrice <= 0) {
+          throw new Error('Purchase price must be greater than 0.');
+        }
+        repcData.purchasePrice = purchasePrice;
+      }
+
+      if (repc.sellerCompensationContributionPercent !== undefined) {
+        const rawPercent = String(repc.sellerCompensationContributionPercent ?? '').trim();
+        if (!rawPercent) {
+          repcData.sellerCompensationContributionPercent = null;
+        } else {
+          const percent = Number(rawPercent);
+          if (!Number.isFinite(percent) || percent < 0 || percent > 100) {
+            throw new Error('Commission percent must be between 0 and 100.');
+          }
+          repcData.sellerCompensationContributionPercent = percent;
+        }
+      }
+
+      if (repc.sellerCompensationContributionFlat !== undefined) {
+        const rawFlat = String(repc.sellerCompensationContributionFlat ?? '').trim();
+        if (!rawFlat) {
+          repcData.sellerCompensationContributionFlat = null;
+        } else {
+          const flat = Number(rawFlat);
+          if (!Number.isFinite(flat) || flat < 0) {
+            throw new Error('Flat commission must be 0 or greater.');
+          }
+          repcData.sellerCompensationContributionFlat = flat;
+        }
+      }
+
+      if (Object.keys(repcData).length > 0) {
+        await tx.repc.update({
+          where: { id: existing.repc.id },
+          data: repcData,
+        });
+        updates.push('commission');
       }
     }
 

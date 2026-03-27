@@ -7,10 +7,14 @@ interface Deal {
   title: string;
   clientName?: string;
   price?: number;
+  commissionPercent?: number | null;
+  commissionFlat?: number | null;
   status: string;
   closingDate?: string;
   address?: string;
 }
+
+const DEFAULT_COMMISSION_RATE = 2.5;
 
 export function ActiveDealsWidget() {
   const navigate = useNavigate();
@@ -45,6 +49,14 @@ export function ActiveDealsWidget() {
             address,
             clientName: clientName || undefined,
             price: d.repc?.purchasePrice ? Number(d.repc.purchasePrice) : undefined,
+            commissionPercent:
+              d.repc?.sellerCompensationContributionPercent != null
+                ? Number(d.repc.sellerCompensationContributionPercent)
+                : null,
+            commissionFlat:
+              d.repc?.sellerCompensationContributionFlat != null
+                ? Number(d.repc.sellerCompensationContributionFlat)
+                : null,
             status: d.status,
             closingDate: d.repc?.settlementDeadline || undefined,
           };
@@ -64,6 +76,20 @@ export function ActiveDealsWidget() {
       currency: 'USD',
       maximumFractionDigits: 0,
     }).format(price);
+  };
+
+  const getDealCommission = (deal: Deal) => {
+    if ((deal.commissionFlat || 0) > 0) return Number(deal.commissionFlat || 0);
+    const price = Number(deal.price || 0);
+    if (!price) return 0;
+    const rate = Number(deal.commissionPercent || 0) > 0 ? Number(deal.commissionPercent) : DEFAULT_COMMISSION_RATE;
+    return price * (rate / 100);
+  };
+
+  const getCommissionLabel = (deal: Deal) => {
+    if ((deal.commissionFlat || 0) > 0) return 'Flat fee';
+    const rate = Number(deal.commissionPercent || 0) > 0 ? Number(deal.commissionPercent) : DEFAULT_COMMISSION_RATE;
+    return Number(deal.commissionPercent || 0) > 0 ? `${rate}% rate` : `${rate}% default`;
   };
 
   const statusConfig: Record<string, { color: string; label: string }> = {
@@ -93,6 +119,7 @@ export function ActiveDealsWidget() {
   }
 
   const totalVolume = deals.reduce((sum, deal) => sum + (deal.price || 0), 0);
+  const totalCommission = deals.reduce((sum, deal) => sum + getDealCommission(deal), 0);
 
   return (
     <div className="rounded-[32px] border border-white/10 bg-slate-950/40 backdrop-blur-xl shadow-[0_18px_45px_rgba(0,0,0,0.60)] overflow-hidden flex flex-col">
@@ -102,9 +129,15 @@ export function ActiveDealsWidget() {
           <h3 className="text-xl font-bold text-white flex items-center gap-2">
             <span className="text-2xl">🏠</span> Active Deals
           </h3>
-          <p className="text-sm text-slate-400 mt-1">
-            {deals.length} active files • <span className="text-emerald-400 font-medium">{formatPrice(totalVolume)}</span> volume
-          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-slate-400">
+            <span>{deals.length} active files</span>
+            <span>
+              <span className="text-emerald-400 font-medium">{formatPrice(totalVolume)}</span> volume
+            </span>
+            <span>
+              <span className="text-amber-300 font-medium">{formatPrice(totalCommission)}</span> projected commission
+            </span>
+          </div>
         </div>
         <button 
           onClick={() => navigate('/deals')}
@@ -153,8 +186,16 @@ export function ActiveDealsWidget() {
                   </div>
 
                   <div className="flex items-end justify-between">
-                    <div className="text-xl font-bold text-emerald-400">
-                      {formatPrice(deal.price)}
+                    <div>
+                      <div className="text-xl font-bold text-emerald-400">
+                        {formatPrice(deal.price)}
+                      </div>
+                      <div className="mt-1 text-[11px] text-amber-300 font-medium">
+                        {formatPrice(getDealCommission(deal))}
+                      </div>
+                      <div className="text-[10px] text-slate-500">
+                        {getCommissionLabel(deal)}
+                      </div>
                     </div>
                     <div className="flex items-center gap-2">
                       {deal.title && (
