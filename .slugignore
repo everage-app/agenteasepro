@@ -1,0 +1,6 @@
+# Keep Heroku app slugs focused on the main app runtime.
+# Exclude marketing-site workspace and local audit artifacts.
+_scan/
+audits/
+logs/
+attached_assets/

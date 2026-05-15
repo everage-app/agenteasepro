@@ -1,0 +1,31 @@
+<svg width="400" height="100" viewBox="0 0 400 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- AgentEasePro Logo - Light Mode (Dark on Transparent) -->
+  
+  <!-- Logo Icon -->
+  <g transform="translate(10, 15)">
+    <!-- Back square (behind, offset to upper-right) -->
+    <rect x="18" y="4" width="44" height="44" rx="7" stroke="#0f172a" stroke-width="2.5" fill="none"/>
+    
+    <!-- Front square with solid fill -->
+    <rect x="4" y="18" width="44" height="44" rx="7" stroke="#0f172a" stroke-width="2.5" fill="white"/>
+    
+    <!-- House icon inside front square -->
+    <g transform="translate(9, 25)">
+      <!-- House roof and body -->
+      <path d="M17 3L3 14V31H31V14L17 3Z" stroke="#0f172a" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+      <!-- Door -->
+      <rect x="12" y="18" width="9" height="13" rx="1" stroke="#0f172a" stroke-width="2" fill="none"/>
+      <!-- Door handle -->
+      <circle cx="18" cy="24" r="1.5" fill="#0f172a"/>
+    </g>
+  </g>
+  
+  <!-- Text: AgentEasePro -->
+  <text x="90" y="60" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="36" font-weight="700" fill="#0f172a">
+    <tspan font-weight="700">Agent</tspan><tspan font-weight="400">Ease</tspan>
+  </text>
+  
+  <!-- Pro badge -->
+  <rect x="277" y="38" width="45" height="28" rx="5" fill="#0f172a"/>
+  <text x="300" y="58" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="18" font-weight="600" fill="white" text-anchor="middle">Pro</text>
+</svg>

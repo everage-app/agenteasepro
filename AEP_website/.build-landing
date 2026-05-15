@@ -1,0 +1,2 @@
+# This file indicates to heroku-postbuild to build the landing site instead of web+server
+# Delete this file before pushing to the main Heroku app

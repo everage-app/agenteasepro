@@ -1,0 +1,19 @@
+<svg width="200" height="200" viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- AgentEasePro Icon Only - Dark Mode (White on Transparent) -->
+  
+  <!-- Back square (behind, offset to upper-right) -->
+  <rect x="56" y="16" width="128" height="128" rx="20" stroke="white" stroke-width="6" fill="none"/>
+  
+  <!-- Front square with solid fill -->
+  <rect x="16" y="56" width="128" height="128" rx="20" stroke="white" stroke-width="6" fill="#0f172a"/>
+  
+  <!-- House icon inside front square -->
+  <g transform="translate(30, 75)">
+    <!-- House roof and body -->
+    <path d="M50 8L8 42V92H92V42L50 8Z" stroke="white" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    <!-- Door -->
+    <rect x="36" y="54" width="28" height="38" rx="3" stroke="white" stroke-width="5" fill="none"/>
+    <!-- Door handle -->
+    <circle cx="56" cy="72" r="4" fill="white"/>
+  </g>
+</svg>

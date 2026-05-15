@@ -1,0 +1,588 @@
+{
+  "generatedAt": "2026-02-17T17:47:29.985Z",
+  "inventory": {
+    "frontendRouteCount": 40,
+    "backendRouteCount": 34,
+    "featureCount": 17,
+    "frontendRoutes": [
+      "*",
+      "/",
+      "/esign/:envelopeId/:signerId/:token",
+      "/forgot-password",
+      "/internal",
+      "/login",
+      "/reset-password",
+      "activity",
+      "agents",
+      "agents/:id",
+      "ai",
+      "automations",
+      "billing",
+      "branding",
+      "calendar",
+      "clients",
+      "clients/:id",
+      "contracts",
+      "contracts/pdf-editor",
+      "dashboard",
+      "data",
+      "deals/:dealId/repc",
+      "deals/new",
+      "idx",
+      "integrations",
+      "landing-pages",
+      "landing-pages/:id/edit",
+      "leads",
+      "listings",
+      "marketing",
+      "marketing/blasts/:id",
+      "notifications",
+      "profile",
+      "reporting",
+      "search",
+      "settings",
+      "support",
+      "system",
+      "tasks",
+      "usage"
+    ],
+    "featureModules": [
+      "auth",
+      "automations",
+      "calendar",
+      "clients",
+      "contracts",
+      "deals",
+      "esign",
+      "internal",
+      "leads",
+      "listings",
+      "marketing",
+      "mls",
+      "properties",
+      "repc",
+      "reporting",
+      "settings",
+      "tasks"
+    ],
+    "backendRoutes": [
+      "server/src/routes/addendums.ts",
+      "server/src/routes/agents.ts",
+      "server/src/routes/ai.ts",
+      "server/src/routes/auth.ts",
+      "server/src/routes/automations.ts",
+      "server/src/routes/billing.ts",
+      "server/src/routes/calendar.ts",
+      "server/src/routes/channelConnections.ts",
+      "server/src/routes/clients.ts",
+      "server/src/routes/contracts.ts",
+      "server/src/routes/dailyActivity.ts",
+      "server/src/routes/deals.ts",
+      "server/src/routes/esign.ts",
+      "server/src/routes/esignPublic.ts",
+      "server/src/routes/forms.ts",
+      "server/src/routes/internal.ts",
+      "server/src/routes/landingPages.ts",
+      "server/src/routes/leadIntegrations.ts",
+      "server/src/routes/leads.ts",
+      "server/src/routes/listings.ts",
+      "server/src/routes/marketing.ts",
+      "server/src/routes/mls.ts",
+      "server/src/routes/oauth.ts",
+      "server/src/routes/priorityActions.ts",
+      "server/src/routes/properties.ts",
+      "server/src/routes/propertySearch.ts",
+      "server/src/routes/publicLandingPages.ts",
+      "server/src/routes/repc.ts",
+      "server/src/routes/reporting.ts",
+      "server/src/routes/sendgridWebhook.ts",
+      "server/src/routes/settings.ts",
+      "server/src/routes/support.ts",
+      "server/src/routes/tasks.ts",
+      "server/src/routes/telemetry.ts"
+    ]
+  },
+  "summary": {
+    "Strong": 9,
+    "Partial": 1,
+    "Gap": 0
+  },
+  "capabilities": [
+    {
+      "id": "crm_pipeline",
+      "category": "Core CRM",
+      "title": "CRM + pipeline management",
+      "status": "Strong",
+      "expectedByMarket": true,
+      "priority": "P0",
+      "notes": "Deals, leads, tasks, calendar, and reporting should work as one workflow.",
+      "requiredCoverage": "5/5",
+      "evidence": [
+        {
+          "file": "web/src/features/contracts/ContractsHub.tsx",
+          "pattern": "/api/deals"
+        },
+        {
+          "file": "web/src/features/repc/RepcWizard.tsx",
+          "pattern": "/api/deals"
+        },
+        {
+          "file": "server/src/index.ts",
+          "pattern": "/api/deals"
+        },
+        {
+          "file": "server/src/index.ts",
+          "pattern": "/api/leads"
+        },
+        {
+          "file": "server/src/index.ts",
+          "pattern": "/api/tasks"
+        },
+        {
+          "file": "server/src/index.ts",
+          "pattern": "/api/calendar"
+        },
+        {
+          "file": "server/src/index.ts",
+          "pattern": "/api/reporting"
+        },
+        {
+          "file": "server/src/routes/calendar.ts",
+          "pattern": "/api/calendar"
+        },
+        {
+          "file": "server/src/routes/tasks.ts",
+          "pattern": "/api/tasks"
+        },
+        {
+          "file": "web/src/App.tsx",
+          "pattern": "DashboardPage"
+        }
+      ]
+    },
+    {
+      "id": "contracts_esign",
+      "category": "Transactions",
+      "title": "Contracts + e-sign workflow",
+      "status": "Strong",
+      "expectedByMarket": true,
+      "priority": "P0",
+      "notes": "End-to-end contract send, sign, remind, and PDF retrieval.",
+      "requiredCoverage": "5/5",
+      "evidence": [
+        {
+          "file": "server/src/index.ts",
+          "pattern": "/api/esign"
+        },
+        {
+          "file": "server/src/index.ts",
+          "pattern": "/api/esign-public"
+        },
+        {
+          "file": "server/src/lib/esignToken.ts",
+          "pattern": "createESignToken"
+        },
+        {
+          "file": "server/src/lib/esignToken.ts",
+          "pattern": "verifyESignToken"
+        },
+        {
+          "file": "server/src/routes/esign.ts",
+          "pattern": "createESignToken"
+        },
+        {
+          "file": "server/src/routes/esign.ts",
+          "pattern": "/envelopes/:envelopeId/remind"
+        },
+        {
+          "file": "server/src/routes/esignPublic.ts",
+          "pattern": "verifyESignToken"
+        },
+        {
+          "file": "web/src/App.tsx",
+          "pattern": "PublicSignPage"
+        },
+        {
+          "file": "web/src/App.tsx",
+          "pattern": "ContractsHub"
+        },
+        {
+          "file": "web/src/features/contracts/ContractsHub.tsx",
+          "pattern": "ContractsHub"
+        }
+      ]
+    },
+    {
+      "id": "idx_mls_search",
+      "category": "Property Discovery",
+      "title": "IDX + MLS + property search",
+      "status": "Strong",
+      "expectedByMarket": true,
+      "priority": "P0",
+      "notes": "Search, listing import/cache, and MLS/IDX settings must be reliable.",
+      "requiredCoverage": "3/3",
+      "evidence": [
+        {
+          "file": "server/src/index.ts",
+          "pattern": "/api/search"
+        },
+        {
+          "file": "server/src/index.ts",
+          "pattern": "/api/mls"
+        },
+        {
+          "file": "server/src/routes/propertySearch.ts",
+          "pattern": "/api/search"
+        },
+        {
+          "file": "server/src/routes/settings.ts",
+          "pattern": "/api/settings/idx"
+        },
+        {
+          "file": "web/src/App.tsx",
+          "pattern": "PropertySearch"
+        },
+        {
+          "file": "web/src/App.tsx",
+          "pattern": "IdxSettingsPage"
+        },
+        {
+          "file": "web/src/App.tsx",
+          "pattern": "ListingsPage"
+        },
+        {
+          "file": "web/src/components/ai/CommandBar.tsx",
+          "pattern": "mlsNumber"
+        },
+        {
+          "file": "web/src/features/contracts/PdfAnnotator.tsx",
+          "pattern": "mlsNumber"
+        },
+        {
+          "file": "web/src/features/deals/DealCreateWizard.tsx",
+          "pattern": "mlsNumber"
+        }
+      ]
+    },
+    {
+      "id": "marketing_automation",
+      "category": "Growth",
+      "title": "Marketing + automations",
+      "status": "Strong",
+      "expectedByMarket": true,
+      "priority": "P1",
+      "notes": "Campaigns, channel config, and automation orchestration.",
+      "requiredCoverage": "3/3",
+      "evidence": [
+        {
+          "file": "web/src/features/tasks/MarketingActivityTracker.tsx",
+          "pattern": "/api/marketing"
+        },
+        {
+          "file": "server/src/index.ts",
+          "pattern": "/api/marketing"
+        },
+        {
+          "file": "server/src/index.ts",
+          "pattern": "/api/channels"
+        },
+        {
+          "file": "server/src/index.ts",
+          "pattern": "/api/automations"
+        },
+        {
+          "file": "server/src/routes/channelConnections.ts",
+          "pattern": "/api/channels"
+        },
+        {
+          "file": "server/src/routes/marketing.ts",
+          "pattern": "/api/marketing"
+        },
+        {
+          "file": "web/src/App.tsx",
+          "pattern": "MarketingPage"
+        },
+        {
+          "file": "web/src/App.tsx",
+          "pattern": "AutomationsPage"
+        },
+        {
+          "file": "web/src/App.tsx",
+          "pattern": "BlastDetailPage"
+        },
+        {
+          "file": "web/src/features/automations/AutomationsPage.tsx",
+          "pattern": "AutomationsPage"
+        }
+      ]
+    },
+    {
+      "id": "ai_assistant",
+      "category": "AI",
+      "title": "AI workflow assistance",
+      "status": "Strong",
+      "expectedByMarket": true,
+      "priority": "P1",
+      "notes": "AI should assist in daily planning, contracts, tasks, and marketing.",
+      "requiredCoverage": "3/3",
+      "evidence": [
+        {
+          "file": "web/src/components/ai/AIDailyPlan.tsx",
+          "pattern": "AIDailyPlan"
+        },
+        {
+          "file": "web/src/components/ai/ContractsAIAssistant.tsx",
+          "pattern": "ContractsAIAssistant"
+        },
+        {
+          "file": "web/src/features/calendar/CalendarPage.tsx",
+          "pattern": "AIDailyPlan"
+        },
+        {
+          "file": "web/src/features/contracts/ContractsHub.tsx",
+          "pattern": "ContractsAIAssistant"
+        },
+        {
+          "file": "web/src/features/deals/DashboardPage.tsx",
+          "pattern": "AIDailyPlan"
+        },
+        {
+          "file": "web/src/features/repc/RepcWizard.tsx",
+          "pattern": "ContractsAIAssistant"
+        },
+        {
+          "file": "server/src/index.ts",
+          "pattern": "/api/ai"
+        },
+        {
+          "file": "server/src/routes/ai.ts",
+          "pattern": "/api/ai"
+        },
+        {
+          "file": "web/src/components/ai/ListingAIDescription.tsx",
+          "pattern": "ListingAIDescription"
+        },
+        {
+          "file": "web/src/components/ai/MarketingAICopy.tsx",
+          "pattern": "MarketingAICopy"
+        }
+      ]
+    },
+    {
+      "id": "integration_ecosystem",
+      "category": "Platform",
+      "title": "Integrations ecosystem depth",
+      "status": "Strong",
+      "expectedByMarket": true,
+      "priority": "P0",
+      "notes": "Breadth and reliability of key integration connectors/webhooks.",
+      "requiredCoverage": "4/4",
+      "evidence": [
+        {
+          "file": "web/src/features/listings/ListingCard.tsx",
+          "pattern": "/api/integrations"
+        },
+        {
+          "file": "web/src/features/settings/IntegrationsSettingsPage.tsx",
+          "pattern": "/api/integrations"
+        },
+        {
+          "file": "server/src/index.ts",
+          "pattern": "/api/oauth"
+        },
+        {
+          "file": "server/src/index.ts",
+          "pattern": "/api/integrations"
+        },
+        {
+          "file": "server/src/index.ts",
+          "pattern": "sendgridEventsWebhookHandler"
+        },
+        {
+          "file": "server/src/routes/billing.ts",
+          "pattern": "STRIPE_WEBHOOK_SECRET"
+        },
+        {
+          "file": "server/src/routes/leadIntegrations.ts",
+          "pattern": "/api/integrations"
+        },
+        {
+          "file": "server/src/routes/oauth.ts",
+          "pattern": "/api/oauth"
+        },
+        {
+          "file": "server/src/routes/sendgridWebhook.ts",
+          "pattern": "sendgridEventsWebhookHandler"
+        },
+        {
+          "file": "web/src/App.tsx",
+          "pattern": "IntegrationsSettingsPage"
+        }
+      ]
+    },
+    {
+      "id": "lead_routing",
+      "category": "Lead Ops",
+      "title": "Lead routing + SLA response controls",
+      "status": "Partial",
+      "expectedByMarket": true,
+      "priority": "P0",
+      "notes": "Deterministic distribution, prioritization, and response accountability.",
+      "requiredCoverage": "2/2",
+      "evidence": [
+        {
+          "file": "server/src/index.ts",
+          "pattern": "/api/priority-actions"
+        },
+        {
+          "file": "server/src/index.ts",
+          "pattern": "/api/leads"
+        },
+        {
+          "file": "server/src/routes/priorityActions.ts",
+          "pattern": "/api/priority-actions"
+        }
+      ]
+    },
+    {
+      "id": "mobile_execution",
+      "category": "Experience",
+      "title": "Mobile execution readiness",
+      "status": "Strong",
+      "expectedByMarket": true,
+      "priority": "P1",
+      "notes": "Mobile-friendly workflows and practical on-the-go operations.",
+      "requiredCoverage": "2/2",
+      "evidence": [
+        {
+          "file": "web/src/features/clients/ClientDetailPage.tsx",
+          "pattern": "phoneToSmsHref"
+        },
+        {
+          "file": "web/src/features/clients/ClientDetailPage.tsx",
+          "pattern": "phoneToTelHref"
+        },
+        {
+          "file": "web/src/features/leads/LeadsDashboard.tsx",
+          "pattern": "phoneToSmsHref"
+        },
+        {
+          "file": "web/src/features/leads/LeadsDashboard.tsx",
+          "pattern": "phoneToTelHref"
+        },
+        {
+          "file": "web/src/lib/phone.ts",
+          "pattern": "phoneToSmsHref"
+        },
+        {
+          "file": "web/src/lib/phone.ts",
+          "pattern": "phoneToTelHref"
+        },
+        {
+          "file": "web/src/components/ErrorBoundary.tsx",
+          "pattern": "mobile"
+        },
+        {
+          "file": "web/src/components/layout/AppShell.tsx",
+          "pattern": "mobile"
+        },
+        {
+          "file": "web/src/components/layout/PageLayout.tsx",
+          "pattern": "mobile"
+        },
+        {
+          "file": "web/src/components/layout/Sidebar.tsx",
+          "pattern": "mobile"
+        }
+      ]
+    },
+    {
+      "id": "security_compliance",
+      "category": "Trust",
+      "title": "Security + compliance posture",
+      "status": "Strong",
+      "expectedByMarket": true,
+      "priority": "P0",
+      "notes": "Auth, webhooks, ownership checks, and auditability in production.",
+      "requiredCoverage": "4/4",
+      "evidence": [
+        {
+          "file": "web/src/features/esign/PublicSignPage.tsx",
+          "pattern": "auditHash"
+        },
+        {
+          "file": "server/src/index.ts",
+          "pattern": "authMiddleware"
+        },
+        {
+          "file": "server/src/middleware/auth.ts",
+          "pattern": "authMiddleware"
+        },
+        {
+          "file": "server/src/middleware/requireOwner.ts",
+          "pattern": "requireOwner"
+        },
+        {
+          "file": "server/src/routes/automations.ts",
+          "pattern": "authMiddleware"
+        },
+        {
+          "file": "server/src/routes/dailyActivity.ts",
+          "pattern": "authMiddleware"
+        },
+        {
+          "file": "server/src/routes/esignPublic.ts",
+          "pattern": "auditHash"
+        },
+        {
+          "file": "server/src/routes/internal.ts",
+          "pattern": "requireOwner"
+        },
+        {
+          "file": "server/src/routes/oauth.ts",
+          "pattern": "authMiddleware"
+        },
+        {
+          "file": "server/src/routes/sendgridWebhook.ts",
+          "pattern": "verifySendGridEventWebhook"
+        }
+      ]
+    },
+    {
+      "id": "observability_quality",
+      "category": "Operations",
+      "title": "Observability + release quality gates",
+      "status": "Strong",
+      "expectedByMarket": true,
+      "priority": "P0",
+      "notes": "Telemetry, test coverage, and release confidence automation.",
+      "requiredCoverage": "3/3",
+      "evidence": [
+        {
+          "file": "web/src/App.tsx",
+          "pattern": "reportClientError"
+        },
+        {
+          "file": "web/src/components/ErrorBoundary.tsx",
+          "pattern": "reportClientError"
+        },
+        {
+          "file": "web/src/lib/api.ts",
+          "pattern": "reportClientError"
+        },
+        {
+          "file": "web/src/lib/telemetry.ts",
+          "pattern": "reportClientError"
+        },
+        {
+          "file": "server/src/index.ts",
+          "pattern": "/api/telemetry"
+        },
+        {
+          "file": "server/src/index.ts",
+          "pattern": "/api/health"
+        }
+      ]
+    }
+  ]
+}

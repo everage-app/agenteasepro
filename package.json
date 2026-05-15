@@ -1,0 +1,17 @@
+{
+  "name": "utahcontracts-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": "20.x",
+    "npm": "10.x"
+  },
+  "scripts": {
+    "dev": "concurrently \"npm run dev --prefix server\" \"npm run dev --prefix web -- --port 5174 --strictPort --host\"",
+    "heroku-postbuild": "if [ -z \"$DATABASE_URL\" ]; then echo 'Building MARKETING site'; cd AEP_website/landing && npm ci --include=dev && npm run build && cd ../.. && cp -r AEP_website/landing/config config && cp -r AEP_website/landing/dist dist && echo 'Done building marketing site'; else echo 'Building WEB+SERVER'; cd web && npm ci --include=dev && npm run build && cd ../server && npm ci --include=dev && npx prisma generate && npm run build && cd ..; fi",
+    "audit:market-readiness": "node scripts/market_readiness_audit.js"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.0"
+  }
+}

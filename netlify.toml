@@ -1,0 +1,9 @@
+[build]
+  base = "AEP_website/landing"
+  command = "npm run build"
+  publish = "AEP_website/landing/dist"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

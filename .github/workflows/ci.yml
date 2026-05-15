@@ -1,0 +1,119 @@
+name: CI — Build + Typecheck
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typecheck-server:
+    name: Server typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - run: npm ci
+        working-directory: server
+      - run: npx prisma generate
+        working-directory: server
+      - run: npx tsc --noEmit
+        working-directory: server
+
+  typecheck-web:
+    name: Web typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - run: npx tsc --noEmit
+        working-directory: web
+
+  build-web:
+    name: Web production build
+    runs-on: ubuntu-latest
+    needs: typecheck-web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - run: npm run build
+        working-directory: web
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: server/dist/public
+          retention-days: 7
+
+  build-server:
+    name: Server production build
+    runs-on: ubuntu-latest
+    needs: typecheck-server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - run: npm ci
+        working-directory: server
+      - run: npx prisma generate
+        working-directory: server
+      - run: npx tsc
+        working-directory: server
+
+  test-server:
+    name: Server unit tests
+    runs-on: ubuntu-latest
+    needs: typecheck-server
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: aep
+          POSTGRES_PASSWORD: aep_test
+          POSTGRES_DB: aep_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://aep:aep_test@localhost:5432/aep_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - run: npm ci
+        working-directory: server
+      - run: npx prisma generate
+        working-directory: server
+      - run: npx prisma db push --skip-generate
+        working-directory: server
+      - run: npm test
+        working-directory: server
