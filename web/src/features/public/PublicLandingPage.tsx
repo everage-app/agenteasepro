@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
-import { ArrowRight, Award, Calendar, Check, Copy, ExternalLink, FileDown, Home, Link2, Mail, Phone, Share2, ShieldCheck, Star, Zap } from 'lucide-react';
+import { ArrowRight, Award, Calendar, Check, Copy, ExternalLink, FileDown, Home, Link2, Mail, Phone, Share2, ShieldCheck, Star, Zap, type LucideIcon } from 'lucide-react';
 import { getTemplateMediaPack } from '../landing/templateMediaSuggestions';
 import { toDisplayErrorMessage } from '../../lib/errorMessages';
 import { buildTrackedLandingQrUrl } from '../../lib/landingQr';
@@ -941,7 +941,7 @@ export function PublicLandingPage() {
     const pillars: Array<{
       label: string;
       value: string;
-      icon: React.ComponentType<{ className?: string; strokeWidth?: number }>;
+      icon: LucideIcon;
       accent: string;
     }> = [];
 

@@ -263,19 +263,22 @@ export function PdfAnnotator({ pdfUrl, pdfData, signers, onSave, onCancel, onSen
       setTotalPages(1);
       setCurrentPage(1);
 
-      if (!pdfUrl && !pdfData) {
+      const sourcePdfUrl = pdfUrl;
+      if (!sourcePdfUrl && !pdfData) {
         return;
       }
 
       try {
         if (pdfData) {
           loadingTask = pdfjsLib.getDocument({ data: clonePdfBytes(pdfData), ...PDF_DOCUMENT_LOAD_OPTIONS });
-        } else if (/^(blob|data):/i.test(pdfUrl)) {
-          const pdfBytes = await fetch(pdfUrl).then((response) => response.arrayBuffer());
+        } else if (sourcePdfUrl && /^(blob|data):/i.test(sourcePdfUrl)) {
+          const pdfBytes = await fetch(sourcePdfUrl).then((response) => response.arrayBuffer());
           loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(pdfBytes), ...PDF_DOCUMENT_LOAD_OPTIONS });
-        } else {
-          const absolutePdfUrl = new URL(pdfUrl, window.location.origin).toString();
+        } else if (sourcePdfUrl) {
+          const absolutePdfUrl = new URL(sourcePdfUrl, window.location.origin).toString();
           loadingTask = pdfjsLib.getDocument({ url: absolutePdfUrl, ...PDF_DOCUMENT_LOAD_OPTIONS });
+        } else {
+          return;
         }
         const loadedPdf = await loadingTask.promise;
         loadedDocument = loadedPdf;

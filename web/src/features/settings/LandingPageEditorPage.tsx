@@ -992,7 +992,10 @@ export function LandingPageEditorPage() {
     !effectiveAgentPhone && 'agent phone',
     !(effectiveBrokerageName || effectiveBrokerageLogoUrl) && 'brokerage name or logo',
   ].filter(Boolean) as string[];
-  const listingDisplayName = (page?.listing?.headline || page?.listing?.addressLine1 || page?.title || 'this property').trim();
+  const listingHeadline = typeof (page?.listing as { headline?: unknown } | undefined)?.headline === 'string'
+    ? (page?.listing as { headline?: string }).headline?.trim()
+    : '';
+  const listingDisplayName = (listingHeadline || page?.listing?.addressLine1 || page?.title || 'this property').trim();
   const listingFactLine = [
     page?.listing?.beds != null && page?.listing?.baths != null ? `${page.listing.beds} beds, ${page.listing.baths} baths` : '',
     page?.listing?.sqft ? `${Number(page.listing.sqft).toLocaleString()} sqft` : '',
