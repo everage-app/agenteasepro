@@ -10,6 +10,18 @@ interface State {
   error: Error | null;
 }
 
+const CHUNK_RELOAD_KEY = 'aep_chunk_reload_attempts';
+const MAX_CHUNK_RELOAD_ATTEMPTS = 2;
+
+function isChunkLoadError(message: string) {
+  const text = message.toLowerCase();
+  return text.includes('failed to fetch dynamically imported module')
+    || text.includes('loading chunk')
+    || text.includes('chunkloaderror')
+    || text.includes('importing a module script failed')
+    || text.includes('dynamically imported module');
+}
+
 /**
  * Error Boundary component to catch JavaScript errors in child components.
  * Prevents white/black screens on mobile by showing a friendly error message.
@@ -25,6 +37,27 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    // Recover from stale chunk/module loads with cache-busting refresh attempts.
+    if (typeof window !== 'undefined' && isChunkLoadError(error.message || '')) {
+      try {
+        const attempts = Number(window.sessionStorage.getItem(CHUNK_RELOAD_KEY) || '0');
+        if (attempts < MAX_CHUNK_RELOAD_ATTEMPTS) {
+          window.sessionStorage.setItem(CHUNK_RELOAD_KEY, String(attempts + 1));
+          const nextUrl = new URL(window.location.href);
+          nextUrl.searchParams.set('_aep_refresh', String(Date.now()));
+          window.location.replace(nextUrl.toString());
+          return;
+        }
+        window.sessionStorage.removeItem(CHUNK_RELOAD_KEY);
+      } catch {
+        // If storage is unavailable, still attempt one recovery reload.
+        const nextUrl = new URL(window.location.href);
+        nextUrl.searchParams.set('_aep_refresh', String(Date.now()));
+        window.location.replace(nextUrl.toString());
+        return;
+      }
+    }
+
     // Log error to console in development
     console.error('ErrorBoundary caught an error:', error, errorInfo);
     

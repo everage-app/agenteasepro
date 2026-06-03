@@ -192,7 +192,7 @@ export function NotificationCenter({ isOpen, onClose, isMobile, streak = 0, anch
       return;
     }
     if (action.relatedType === 'deal' && action.relatedId) {
-      handleNavigate(`/deals/${encodeURIComponent(action.relatedId)}/repc`);
+      handleNavigate(`/contracts/${encodeURIComponent(action.relatedId)}`);
       return;
     }
     if (action.relatedType === 'listing') {

@@ -469,7 +469,7 @@ export function PublicSignPage() {
     setActiveRequiredTabKey(step.key);
     markTabStepReviewed(step.key);
 
-    if ((step.field.type === 'signature' || step.field.type === 'initials') && !isFieldValueCompleted(step.field)) {
+    if (step.field.type === 'signature' || step.field.type === 'initials') {
       openAdoptModal(step.field.type, step.field, step.key);
       return;
     }
@@ -633,6 +633,24 @@ export function PublicSignPage() {
           next[field.id] = adoptedName;
           didChange = true;
         }
+      });
+
+      return didChange ? next : prev;
+    });
+
+    setReviewedTabKeys((prev) => {
+      const next = { ...prev };
+      let didChange = false;
+      const shouldMarkField = (field: EnvelopeField) => {
+        if (field.type === 'initials') return true;
+        if (field.type === 'signature') return adoptModalMode === 'signature' || adoptModalMode === 'finalize';
+        return false;
+      };
+
+      requiredTabSteps.forEach((step) => {
+        if (!shouldMarkField(step.field) || next[step.key]) return;
+        next[step.key] = true;
+        didChange = true;
       });
 
       return didChange ? next : prev;

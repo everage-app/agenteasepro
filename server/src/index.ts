@@ -75,9 +75,11 @@ import { router as settingsRouter } from './routes/settings';
 import leadsRouter from './routes/leads';
 import landingPagesRouter from './routes/landingPages';
 import publicLandingPagesRouter from './routes/publicLandingPages';
+import { router as qrRedirectsRouter } from './routes/qrRedirects';
 import { router as propertySearchRouter } from './routes/propertySearch';
 import billingRouter, { webhookHandler } from './routes/billing';
 import reportingRouter from './routes/reporting';
+import { buildRobotsTxt, buildSitemapXml, getLandingPageSeoData, renderLandingPageHtml } from './services/publicLandingSeo';
 import { authMiddleware } from './middleware/auth';
 import { router as internalRouter } from './routes/internal';
 import { router as telemetryRouter } from './routes/telemetry';
@@ -143,6 +145,10 @@ app.use(helmet({
 
 // ── CORS ────────────────────────────────────────────────────────
 const allowedOrigins = (process.env.CORS_ORIGINS || '').split(',').map(o => o.trim()).filter(Boolean);
+const firstPartyOrigins = ['https://agenteasepro.com', 'https://www.agenteasepro.com', 'https://app.agenteasepro.com'];
+firstPartyOrigins.forEach((origin) => {
+  if (!allowedOrigins.includes(origin)) allowedOrigins.push(origin);
+});
 if (process.env.NODE_ENV !== 'production' || allowedOrigins.length === 0) {
   // Dev: allow all origins
   allowedOrigins.push('http://localhost:5173', 'http://localhost:5174', 'http://localhost:3001');
@@ -219,6 +225,24 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok' });
 });
 
+app.get('/api/health/db', async (_req, res) => {
+  const startedAt = Date.now();
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    res.json({
+      status: 'ok',
+      database: 'ok',
+      latencyMs: Date.now() - startedAt,
+    });
+  } catch (error) {
+    console.error('Database health check failed:', error);
+    res.status(503).json({
+      status: 'degraded',
+      database: 'unavailable',
+    });
+  }
+});
+
 app.use('/api/auth', authRouter);
 app.use('/api/agents', authMiddleware, agentsRouter);
 app.use('/api/clients', authMiddleware, clientsRouter);
@@ -254,12 +278,14 @@ app.use('/api/search', authMiddleware, propertySearchRouter);
 app.use('/api/billing', authMiddleware, billingRouter);
 app.use('/api/reporting', authMiddleware, reportingRouter);
 app.use('/api/internal', authMiddleware, internalRouter);
+app.use('/api/public-telemetry', telemetryRouter);
 app.use('/api/telemetry', authMiddleware, telemetryRouter);
 app.use('/api/contact-email', contactEmailRouter);
 app.use('/api/contact-sms', contactSmsRouter);
 app.use('/api/support', authMiddleware, supportRouter);
 app.use('/api/integrations', leadIntegrationsRouter); // Public webhook endpoints
 app.use('/api/oauth', oauthRouter); // OAuth routes - callbacks are public, connect endpoints use auth
+app.use('/q', qrRedirectsRouter); // Public short QR links for scan-friendly landing-page tracking
 
 // Serve uploaded assets (logos, imports, etc.)
 // In dev __dirname is server/src; in prod use a writable temp dir.
@@ -335,6 +361,34 @@ const distPath = __dirname.endsWith('src')
   ? path.join(__dirname, '../dist/public')
   : path.join(__dirname, 'public');
 console.log('Static files directory:', distPath);
+
+app.get('/robots.txt', (req, res) => {
+  res.type('text/plain').send(buildRobotsTxt(req));
+});
+
+app.get('/sitemap.xml', async (req, res, next) => {
+  try {
+    res.type('application/xml').send(await buildSitemapXml(req));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/sites/:slug', async (req, res, next) => {
+  try {
+    const indexPath = path.join(distPath, 'index.html');
+    const indexHtml = await fs.promises.readFile(indexPath, 'utf8');
+    const seo = await getLandingPageSeoData(req.params.slug, req);
+
+    if (!seo) {
+      return res.status(404).send(indexHtml);
+    }
+
+    res.type('html').send(renderLandingPageHtml(indexHtml, seo));
+  } catch (error) {
+    next(error);
+  }
+});
 // Block access to dotfiles (e.g., /.git) for security.
 app.use((req, res, next) => {
   if (req.path.startsWith('/.')) {

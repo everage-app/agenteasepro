@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { LeadPriority, LeadSource } from '@prisma/client';
+import { LeadPriority, LeadSource, Prisma } from '@prisma/client';
 import { authenticateToken, AuthenticatedRequest } from '../middleware/auth';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma';
@@ -9,6 +9,14 @@ import { runLeadCaptureWorkflow } from '../services/leadCaptureWorkflow';
 const router = Router();
 
 const ARCHIVED_TAG = 'ARCHIVED';
+
+const isSmartListStorageUnavailable = (error: unknown) => {
+  if (!(error instanceof Prisma.PrismaClientKnownRequestError)) {
+    return false;
+  }
+
+  return error.code === 'P2021' || error.code === 'P2022';
+};
 
 const normalizeToken = (value: string) =>
   value
@@ -91,8 +99,8 @@ const normalizeMailingAddressFields = (source?: {
 
 const leadCreateSchema = z
   .object({
-    firstName: z.string().trim().min(1),
-    lastName: z.string().trim().min(1),
+    firstName: z.string().trim().min(1).max(80),
+    lastName: z.string().trim().max(120).optional(),
     email: z.string().trim().email(),
     phone: z.string().trim().min(1).optional(),
     mailingAddress: z.string().trim().max(200).optional(),
@@ -104,6 +112,8 @@ const leadCreateSchema = z
     source: z.any().optional(),
     priority: z.any().optional(),
     notes: z.string().optional(),
+    nextTask: z.string().trim().max(500).optional(),
+    tags: z.array(z.string().trim().min(1).max(40)).optional(),
     visitorId: z.string().trim().min(1).optional(),
     utmData: z.record(z.any()).optional(),
   })
@@ -197,7 +207,12 @@ router.get('/smart-lists', async (req: AuthenticatedRequest, res) => {
     });
     res.json(list);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    if (isSmartListStorageUnavailable(err)) {
+      console.warn('Smart list storage unavailable during fetch; returning empty list set.');
+      return res.json([]);
+    }
+    console.error('Error fetching smart lists:', err);
+    res.status(500).json({ error: 'Failed to fetch smart lists' });
   }
 });
 
@@ -216,7 +231,12 @@ router.post('/smart-lists', async (req: AuthenticatedRequest, res) => {
     });
     res.json(newList);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    if (isSmartListStorageUnavailable(err)) {
+      console.warn('Smart list storage unavailable during create.');
+      return res.status(503).json({ error: 'Smart lists are temporarily unavailable' });
+    }
+    console.error('Error creating smart list:', err);
+    res.status(500).json({ error: 'Failed to create smart list' });
   }
 });
 
@@ -230,7 +250,12 @@ router.delete('/smart-lists/:id', async (req: AuthenticatedRequest, res) => {
     await prisma.smartList.delete({ where: { id: target.id } });
     res.json({ success: true });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    if (isSmartListStorageUnavailable(err)) {
+      console.warn('Smart list storage unavailable during delete.');
+      return res.status(503).json({ error: 'Smart lists are temporarily unavailable' });
+    }
+    console.error('Error deleting smart list:', err);
+    res.status(500).json({ error: 'Failed to delete smart list' });
   }
 });
 
@@ -957,7 +982,8 @@ router.post('/', async (req: AuthenticatedRequest, res) => {
   try {
     const parsed = leadCreateSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res.status(400).json({ error: 'Invalid lead data' });
+      const details = parsed.error.errors.map((issue) => `${issue.path.join('.') || 'lead'}: ${issue.message}`);
+      return res.status(400).json({ error: details[0] || 'Invalid lead data', details });
     }
 
     const {
@@ -974,6 +1000,8 @@ router.post('/', async (req: AuthenticatedRequest, res) => {
       source,
       priority,
       notes,
+      nextTask,
+      tags,
       visitorId,
       utmData,
     } = parsed.data;
@@ -983,14 +1011,16 @@ router.post('/', async (req: AuthenticatedRequest, res) => {
     const parsedPriority = parseLeadPriority(priority) ?? LeadPriority.WARM;
     const leadOps = await getLeadOpsSettings(req.user!.id);
     const leadOpsTags = buildLeadOpsTags(leadOps);
+    const inputTags = Array.from(new Set((tags || []).map((tag) => tag.trim()).filter(Boolean)));
+    const requestedNextTask = normalizeOptionalText(nextTask);
     const normalizedMailing = normalizeMailingAddressFields({ mailingAddress, mailingCity, mailingState, mailingZip });
     const isLandingCapture = effectiveSource === LeadSource.LANDING_PAGE || Boolean(landingPageId);
     const sourceTags = isLandingCapture ? ['SOURCE:landing page'] : [];
-    const defaultNextTask = leadOps.followUpEnabled
+    const defaultNextTask = requestedNextTask || (leadOps.followUpEnabled
       ? `First response due in ${leadOps.followUpMinutes} minutes`
       : isLandingCapture
         ? 'Follow up on landing page inquiry today'
-        : undefined;
+        : undefined);
 
     // Check if lead already exists
     const existingLead = await prisma.lead.findFirst({
@@ -1019,7 +1049,7 @@ router.post('/', async (req: AuthenticatedRequest, res) => {
           priority: existingLead.priority === LeadPriority.HOT ? LeadPriority.HOT : parsedPriority,
           nextTask: existingLead.nextTask || defaultNextTask,
           assignedTo: existingLead.assignedTo || leadOps.assignedTo,
-          tags: Array.from(new Set([...(existingLead.tags || []), ...sourceTags, ...leadOpsTags])),
+          tags: Array.from(new Set([...(existingLead.tags || []), ...sourceTags, ...leadOpsTags, ...inputTags])),
           notes: notes ? `${existingLead.notes || ''}\n\n${notes}` : existingLead.notes,
         },
       });
@@ -1043,7 +1073,7 @@ router.post('/', async (req: AuthenticatedRequest, res) => {
       data: {
         agentId: req.user!.id,
         firstName,
-        lastName,
+        lastName: lastName || '',
         email: email.toLowerCase(),
         phone,
         mailingAddress: normalizedMailing.mailingAddress,
@@ -1060,7 +1090,7 @@ router.post('/', async (req: AuthenticatedRequest, res) => {
         lastContact: new Date(),
         nextTask: defaultNextTask,
         assignedTo: leadOps.assignedTo,
-        tags: Array.from(new Set([...sourceTags, ...leadOpsTags])),
+        tags: Array.from(new Set([...sourceTags, ...leadOpsTags, ...inputTags])),
       },
     });
 

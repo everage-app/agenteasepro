@@ -315,20 +315,15 @@ test.describe('Marketing Page', () => {
 
     // Open new blast drawer
     await page.getByRole('button', { name: /\+\s*listing blast|start listing blast|launch listing blast|new blast/i }).first().click();
-    await expect(page.getByText(/launch a multi-channel listing push/i)).toBeVisible();
+    await expect(page.getByText(/launch listing marketing/i)).toBeVisible();
 
     const drawer = page.getByTestId('new-blast-drawer');
 
     // Select listing
     await drawer.getByText('123 Main St, Provo, UT').click();
 
-    // Select at least one channel (labels appear as buttons)
-    // Use a broad selector because connected channels vary in environments.
-    const channelButton = drawer.getByRole('button', { name: /email|text|sms|facebook|instagram|linkedin|x|website/i }).first();
-    await channelButton.click({ force: true });
-
     // Create blast
-    await drawer.getByRole('button', { name: /create listing blast|create & generate copy/i }).click({ force: true });
+    await drawer.getByRole('button', { name: /create ai campaign workspace/i }).click({ force: true });
 
     const createReq = await createRequestPromise;
     const requestPayload = createReq.postDataJSON() as any;

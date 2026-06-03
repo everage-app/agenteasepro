@@ -80,7 +80,7 @@ export function PriorityActionCenter() {
             id: `smart-hot-${c.id}`,
             type: 'CLIENT_FOLLOWUP',
             title: `Follow up with ${name}`,
-            description: `Hot lead — ${daysSince}d since last contact`,
+            description: `Hot lead - ${daysSince}d since last contact`,
             clientName: name,
             priority: 'HIGH',
             relatedId: c.id,
@@ -96,7 +96,7 @@ export function PriorityActionCenter() {
               id: `smart-active-${c.id}`,
               type: 'CLIENT_FOLLOWUP',
               title: `Check in with ${name}`,
-              description: `Active client — ${daysSince}d since last contact`,
+              description: `Active client - ${daysSince}d since last contact`,
               clientName: name,
               priority: daysSince >= 14 ? 'HIGH' : 'NORMAL',
               relatedId: c.id,
@@ -106,13 +106,13 @@ export function PriorityActionCenter() {
             });
           }
         }
-        // Referral partners — 30+ day touch
+        // Referral partners - 30+ day touch
         else if (c.stage === 'REFERRAL' && daysSince >= 30) {
           suggestions.push({
             id: `smart-ref-${c.id}`,
             type: 'REFERRAL_TOUCH',
             title: `Referral touch: ${name}`,
-            description: `${daysSince}d since last touch — stay top of mind`,
+            description: `${daysSince}d since last touch - stay top of mind`,
             clientName: name,
             priority: 'NORMAL',
             relatedId: c.id,
@@ -132,7 +132,7 @@ export function PriorityActionCenter() {
 
       setSmartFollowUps(suggestions.slice(0, 5));
     } catch {
-      // Silently fail — these are bonus suggestions
+      // Silently fail; these are bonus suggestions
     }
   };
 
@@ -259,7 +259,7 @@ export function PriorityActionCenter() {
           <div>
             <h3 className="text-lg font-semibold text-slate-50">Priority Action Center</h3>
             <p className="mt-1 text-[11px] text-slate-400">
-              Do this next — contracts, calls, referral touches, and daily goals
+              Do this next - contracts, calls, referral touches, and daily goals
             </p>
           </div>
           {actions.length > 0 && (
@@ -315,7 +315,7 @@ export function PriorityActionCenter() {
                     </span>
                   )}
                   {action.dealOrListing && (
-                    <span className="truncate max-w-[200px]">• {action.dealOrListing}</span>
+                    <span className="truncate max-w-[200px]">- {action.dealOrListing}</span>
                   )}
                   {action.dueDate && (
                     <span className="text-indigo-300">
@@ -323,7 +323,7 @@ export function PriorityActionCenter() {
                     </span>
                   )}
                   {action.description && (
-                    <span className="truncate max-w-[300px]">• {action.description}</span>
+                    <span className="truncate max-w-[300px]">- {action.description}</span>
                   )}
                 </div>
               </div>

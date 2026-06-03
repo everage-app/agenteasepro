@@ -11,12 +11,15 @@ export type SettingsAssetsUpdatedDetail = {
 };
 
 const isAlreadyAbsolute = (value: string) => /^(data:|blob:|https?:\/\/)/i.test(value);
+const isUnsupportedRenderableImage = (value: string) =>
+  /^data:image\/hei[cf]/i.test(value) || /\.hei[cf](?:$|[?#])/i.test(value);
 
 export const normalizeAssetUrl = (raw: string | null | undefined): string | null => {
   if (!raw) return null;
 
   const value = raw.trim();
   if (!value || value === 'null' || value === 'undefined') return null;
+  if (isUnsupportedRenderableImage(value)) return null;
 
   if (isAlreadyAbsolute(value) || value.startsWith('/')) {
     return value;

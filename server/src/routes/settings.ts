@@ -10,6 +10,7 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { storage } from '../services/storageService';
+import { buildPublicSiteUrl, ensureDefaultAgentLandingPage } from '../services/defaultAgentLandingPage';
 
 export const router = Router();
 
@@ -47,10 +48,6 @@ const resolveImageExtension = (file: Express.Multer.File) => {
       return '.webp';
     case 'image/svg+xml':
       return '.svg';
-    case 'image/heic':
-      return '.heic';
-    case 'image/heif':
-      return '.heif';
     default:
       return '.bin';
   }
@@ -126,6 +123,42 @@ const deleteManagedAsset = async (assetUrl: string | null | undefined, label: st
   }
 };
 
+const cleanAssetUrl = (value: unknown) => String(value || '').trim();
+
+async function clearStaleLandingPageAssetReferences(params: {
+  agentId: string;
+  field: 'agentPhotoUrl' | 'brokerageLogoUrl';
+  oldUrl?: string | null;
+}) {
+  const oldUrl = cleanAssetUrl(params.oldUrl);
+  if (!oldUrl) return;
+
+  const pages = await prisma.landingPage.findMany({
+    where: { agentId: params.agentId },
+    select: { id: true, customContent: true },
+  });
+
+  const updates = pages.flatMap((page) => {
+    const content = page.customContent && typeof page.customContent === 'object' && !Array.isArray(page.customContent)
+      ? { ...(page.customContent as Record<string, unknown>) }
+      : null;
+    if (!content) return [];
+
+    const current = cleanAssetUrl(content[params.field]);
+    if (current !== oldUrl) return [];
+
+    delete content[params.field];
+    return prisma.landingPage.update({
+      where: { id: page.id },
+      data: { customContent: content as any },
+    });
+  });
+
+  if (updates.length > 0) {
+    await prisma.$transaction(updates);
+  }
+}
+
 const imageFileFilter: multer.Options['fileFilter'] = (req, file, cb) => {
   const env = (process.env.NODE_ENV || '').toLowerCase();
   if (env === 'test') {
@@ -138,17 +171,15 @@ const imageFileFilter: multer.Options['fileFilter'] = (req, file, cb) => {
     'image/png',
     'image/gif',
     'image/svg+xml',
-    'image/webp',
-    'image/heic',
-    'image/heif'
+    'image/webp'
   ];
-  const allowedExts = ['.jpg', '.jpeg', '.png', '.gif', '.svg', '.webp', '.heic', '.heif'];
+  const allowedExts = ['.jpg', '.jpeg', '.png', '.gif', '.svg', '.webp'];
   const ext = path.extname(file.originalname || '').toLowerCase();
 
   if (allowedTypes.includes(file.mimetype) || allowedExts.includes(ext)) {
     cb(null, true);
   } else {
-    cb(new Error('Invalid file type. Only images are allowed.'));
+    cb(new Error('Invalid file type. Use JPG, PNG, GIF, SVG, or WebP so the image renders reliably in the app, public pages, and emails.'));
   }
 };
 
@@ -415,9 +446,23 @@ router.get('/profile', async (req: AuthenticatedRequest, res) => {
       });
     }
 
+    let defaultAgentPage = null;
+    try {
+      defaultAgentPage = await ensureDefaultAgentLandingPage(req.agentId);
+    } catch (defaultPageError) {
+      console.error('Error ensuring default agent landing page:', defaultPageError);
+    }
+
     return res.json({
       ...agent,
-      settings: profileSettings
+      settings: profileSettings,
+      defaultAgentPage: defaultAgentPage
+        ? {
+            id: defaultAgentPage.id,
+            slug: defaultAgentPage.slug,
+            url: buildPublicSiteUrl(defaultAgentPage.slug, req),
+          }
+        : null,
     });
   } catch (error: any) {
     console.error('Error fetching profile settings:', error);
@@ -444,7 +489,6 @@ router.put('/profile', async (req: AuthenticatedRequest, res) => {
       timezone,
       signatureBlock,
       brokerageName,
-      brokerageLogoUrl,
       brokerageLogoWidth,
       brokerageLogoBackground,
       brokerageAddress,
@@ -515,7 +559,6 @@ router.put('/profile', async (req: AuthenticatedRequest, res) => {
         timezone: timezone || 'America/Denver',
         signatureBlock,
         brokerageName,
-        brokerageLogoUrl,
         ...(normalizedBrokerageLogoWidth !== undefined ? { brokerageLogoWidth: normalizedBrokerageLogoWidth } : {}),
         ...(hasBrokerageLogoBackground ? { brokerageLogoBackground: normalizedBrokerageLogoBackground } : {}),
         brokerageAddress,
@@ -538,7 +581,6 @@ router.put('/profile', async (req: AuthenticatedRequest, res) => {
         timezone,
         signatureBlock,
         brokerageName,
-        brokerageLogoUrl,
         ...(normalizedBrokerageLogoWidth !== undefined ? { brokerageLogoWidth: normalizedBrokerageLogoWidth } : {}),
         ...(hasBrokerageLogoBackground ? { brokerageLogoBackground: normalizedBrokerageLogoBackground } : {}),
         brokerageAddress,
@@ -700,6 +742,11 @@ router.post('/branding/logo', handleLogoUpload, async (req: AuthenticatedRequest
       update: { logoUrl }
     });
 
+    await clearStaleLandingPageAssetReferences({
+      agentId: req.agentId,
+      field: 'brokerageLogoUrl',
+      oldUrl: oldSettings?.logoUrl,
+    });
     await deleteManagedAsset(oldSettings?.logoUrl, 'old branding logo');
 
     return res.json({ message: 'Logo uploaded successfully', logoUrl });
@@ -733,6 +780,11 @@ router.post('/profile/brokerage-logo', handleLogoUpload, async (req: Authenticat
       update: { brokerageLogoUrl }
     });
 
+    await clearStaleLandingPageAssetReferences({
+      agentId: req.agentId,
+      field: 'brokerageLogoUrl',
+      oldUrl: oldSettings?.brokerageLogoUrl,
+    });
     await deleteManagedAsset(oldSettings?.brokerageLogoUrl, 'old brokerage logo');
 
     return res.json({ message: 'Brokerage logo uploaded successfully', brokerageLogoUrl });
@@ -754,6 +806,11 @@ router.delete('/profile/brokerage-logo', async (req: AuthenticatedRequest, res) 
       select: { brokerageLogoUrl: true }
     });
 
+    await clearStaleLandingPageAssetReferences({
+      agentId: req.agentId,
+      field: 'brokerageLogoUrl',
+      oldUrl: settings?.brokerageLogoUrl,
+    });
     await deleteManagedAsset(settings?.brokerageLogoUrl, 'brokerage logo');
 
     await prisma.agentProfileSettings.upsert({
@@ -793,6 +850,11 @@ router.post('/profile/photo', handleProfilePhotoUpload, async (req: Authenticate
       update: { photoUrl }
     });
 
+    await clearStaleLandingPageAssetReferences({
+      agentId: req.agentId,
+      field: 'agentPhotoUrl',
+      oldUrl: oldSettings?.photoUrl,
+    });
     await deleteManagedAsset(oldSettings?.photoUrl, 'old profile photo');
 
     return res.json({ message: 'Profile photo uploaded successfully', photoUrl });
@@ -814,6 +876,11 @@ router.delete('/profile/photo', async (req: AuthenticatedRequest, res) => {
       select: { photoUrl: true }
     });
 
+    await clearStaleLandingPageAssetReferences({
+      agentId: req.agentId,
+      field: 'agentPhotoUrl',
+      oldUrl: settings?.photoUrl,
+    });
     await deleteManagedAsset(settings?.photoUrl, 'profile photo');
 
     await prisma.agentProfileSettings.upsert({
@@ -841,6 +908,11 @@ router.delete('/branding/logo', async (req: AuthenticatedRequest, res) => {
       select: { logoUrl: true }
     });
 
+    await clearStaleLandingPageAssetReferences({
+      agentId: req.agentId,
+      field: 'brokerageLogoUrl',
+      oldUrl: settings?.logoUrl,
+    });
     await deleteManagedAsset(settings?.logoUrl, 'branding logo');
 
     await prisma.agentProfileSettings.upsert({

@@ -26,6 +26,19 @@ interface AuthState {
 }
 
 const firstLoginWelcomeKey = (agentId: string) => `aep_first_login_welcome_${agentId}`;
+const MARKETING_ATTRIBUTION_KEY = 'aep_marketing_attribution';
+
+function readMarketingAttribution(): Record<string, unknown> | null {
+	if (typeof window === 'undefined' || typeof localStorage === 'undefined') return null;
+	try {
+		const raw = localStorage.getItem(MARKETING_ATTRIBUTION_KEY);
+		if (!raw) return null;
+		const parsed = JSON.parse(raw);
+		return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+	} catch {
+		return null;
+	}
+}
 
 const readStoredRefreshToken = (): string | null => {
 	if (typeof window === 'undefined' || typeof localStorage === 'undefined') {
@@ -122,7 +135,11 @@ export const useAuthStore = create<AuthState>((set) => ({
 		set({ token, refreshToken: null, agent });
 	},
 	async signup(input: { name?: string; email: string; password: string; acceptTerms: true; acceptPrivacy: true }) {
-		const res = await axios.post('/api/auth/signup', input);
+		const marketingAttribution = readMarketingAttribution();
+		const res = await axios.post('/api/auth/signup', {
+			...input,
+			...(marketingAttribution ? { marketingAttribution } : {}),
+		});
 		const { token, refreshToken, agent, emailVerified } = res.data;
 		if (!token || typeof token !== 'string') {
 			throw new Error('Signup failed: missing token');

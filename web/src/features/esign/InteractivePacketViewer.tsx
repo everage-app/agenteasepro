@@ -1,14 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min?url';
+import { installPdfJsCompat } from '../../lib/pdfJsCompat';
+import { PDF_DOCUMENT_LOAD_OPTIONS, renderPdfPageToImage } from '../../lib/pdfRendering';
 
+installPdfJsCompat();
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
-
-const SAFE_PDFJS_OPTIONS = {
-  enableScripting: false,
-  isEvalSupported: false,
-  stopAtErrors: true,
-} as const;
 
 type PacketField = {
   id: string;
@@ -231,35 +228,33 @@ export function InteractivePacketViewer({
 
       try {
         const absolutePdfUrl = new URL(pdfUrl, window.location.origin).toString();
-        const loadingTask = pdfjsLib.getDocument({ url: absolutePdfUrl, ...SAFE_PDFJS_OPTIONS });
+        const pdfBytes = await fetch(absolutePdfUrl).then((response) => {
+          if (!response.ok) {
+            throw new Error(`PDF request failed with ${response.status}`);
+          }
+          return response.arrayBuffer();
+        });
+        const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(pdfBytes), ...PDF_DOCUMENT_LOAD_OPTIONS });
         const pdfDocument = await loadingTask.promise;
         const nextPages: RenderedPage[] = [];
         const targetWidth = Math.min(1040, containerWidth);
 
         for (let pageNumber = 1; pageNumber <= pdfDocument.numPages; pageNumber += 1) {
           const page = await pdfDocument.getPage(pageNumber);
-          const baseViewport = page.getViewport({ scale: 1 });
-          const scale = targetWidth / baseViewport.width;
-          const viewport = page.getViewport({ scale });
-          const canvas = document.createElement('canvas');
-          const context = canvas.getContext('2d', { alpha: false });
-
-          if (!context) {
-            continue;
-          }
-
-          canvas.width = Math.floor(viewport.width);
-          canvas.height = Math.floor(viewport.height);
-
-          await page.render({ canvasContext: context, viewport, canvas }).promise;
+          const rendered = await renderPdfPageToImage(page, {
+            maxWidth: targetWidth,
+            outputScale: Math.max(1, Math.min(2, window.devicePixelRatio || 1)),
+            imageType: 'image/jpeg',
+            imageQuality: 0.92,
+          });
 
           nextPages.push({
             pageNumber,
-            imageSrc: canvas.toDataURL('image/jpeg', 0.92),
-            renderedWidth: viewport.width,
-            renderedHeight: viewport.height,
-            baseWidth: baseViewport.width,
-            baseHeight: baseViewport.height,
+            imageSrc: rendered.imageSrc,
+            renderedWidth: rendered.renderedWidth,
+            renderedHeight: rendered.renderedHeight,
+            baseWidth: rendered.baseWidth,
+            baseHeight: rendered.baseHeight,
           });
         }
 
@@ -273,7 +268,12 @@ export function InteractivePacketViewer({
         if (cancelled) return;
         setPages([]);
         setLoading(false);
-        setRenderError('Interactive preview unavailable for this packet. Use the open/download links below.');
+        const errorMessage = error instanceof Error ? error.message : '';
+        setRenderError(
+          /blank/i.test(errorMessage)
+            ? 'The interactive preview rendered blank, so this signer link is showing the browser PDF preview instead. Signing fields are still available in the packet controls.'
+            : 'Interactive preview unavailable for this packet. Use the open/download links below.',
+        );
         onReadyChange?.(true);
       }
     };
@@ -352,8 +352,17 @@ export function InteractivePacketViewer({
       )}
 
       {renderError && (
-        <div className="flex min-h-[620px] items-center justify-center px-6 text-center text-sm text-slate-300">
-          {renderError}
+        <div className="min-h-[620px] bg-slate-950/30 p-3 md:p-4">
+          <div className="mb-3 rounded-xl border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+            {renderError}
+          </div>
+          {pdfUrl && (
+            <iframe
+              src={pdfUrl}
+              title="Contract PDF fallback preview"
+              className="h-[760px] w-full rounded-2xl border border-white/10 bg-white"
+            />
+          )}
         </div>
       )}
 

@@ -28,14 +28,11 @@ import {
 import { leadsApi } from '../../lib/leadsApi';
 import type { Lead } from '../../types/leads';
 import PdfAnnotator, { type Annotation as EsignFieldPlacement } from './PdfAnnotator';
+import { installPdfJsCompat } from '../../lib/pdfJsCompat';
+import { PDF_DOCUMENT_LOAD_OPTIONS, renderPdfPageToImage, toExactArrayBuffer } from '../../lib/pdfRendering';
 
+installPdfJsCompat();
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
-
-const SAFE_PDFJS_OPTIONS = {
-  enableScripting: false,
-  isEvalSupported: false,
-  stopAtErrors: true,
-} as const;
 
 const isValidEmailAddress = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 
@@ -54,6 +51,11 @@ interface PagePreview {
   thumbnail: string;
   selected: boolean;
 }
+
+type SelectedPageEntry = {
+  file: PdfFile;
+  preview: PagePreview;
+};
 
 interface DealSummary {
   id: string;
@@ -97,6 +99,7 @@ interface ClientSummary {
 }
 
 type EsignRole = 'BUYER' | 'SELLER' | 'AGENT' | 'OTHER';
+type WorkflowIntent = 'merge' | 'packet' | 'esign';
 
 interface EsignSigner {
   role: EsignRole;
@@ -123,6 +126,7 @@ export function PdfEditor() {
   const [toast, setToast] = useState<{ type: 'success' | 'error' | 'warning'; message: string } | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'upload' | 'preview'>('upload');
+  const [workflowIntent, setWorkflowIntent] = useState<WorkflowIntent>(documentOnlyMode ? 'esign' : 'merge');
   const [contextType, setContextType] = useState<'deal' | 'client' | 'lead' | 'new'>(documentOnlyMode ? 'new' : 'deal');
   const [contextSearch, setContextSearch] = useState('');
   const [deals, setDeals] = useState<DealSummary[]>([]);
@@ -135,6 +139,7 @@ export function PdfEditor() {
   const [showEsign, setShowEsign] = useState(false);
   const [esignStep, setEsignStep] = useState<'recipients' | 'preview'>('recipients');
   const [esignPreviewUrl, setEsignPreviewUrl] = useState<string | null>(null);
+  const [esignPreviewData, setEsignPreviewData] = useState<ArrayBuffer | null>(null);
   const [esignSigners, setEsignSigners] = useState<EsignSigner[]>([]);
   const [esignSubject, setEsignSubject] = useState('Please review and sign');
   const [esignMessage, setEsignMessage] = useState('Please review and sign the attached documents.');
@@ -149,6 +154,7 @@ export function PdfEditor() {
   const [esignFieldPlacements, setEsignFieldPlacements] = useState<EsignFieldPlacement[]>([]);
   const esignResendTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const esignCelebrateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const propertyPrefillAppliedRef = useRef(false);
 
   const showToast = (type: 'success' | 'error' | 'warning', message: string) => {
     setToast({ type, message });
@@ -160,6 +166,42 @@ export function PdfEditor() {
       setContextType('new');
     }
   }, [documentOnlyMode]);
+
+  useEffect(() => {
+    if (propertyPrefillAppliedRef.current) return;
+
+    const propertyParam = searchParams.get('property') || '';
+    const mlsParam = searchParams.get('mls') || '';
+    let propertyContext: any = null;
+    try {
+      const raw = sessionStorage.getItem('agentease_property_workspace_pdf_context');
+      propertyContext = raw ? JSON.parse(raw) : null;
+    } catch {
+      propertyContext = null;
+    }
+
+    const address = propertyContext?.address || [propertyContext?.street, propertyContext?.city, propertyContext?.state, propertyContext?.zip]
+      .filter(Boolean)
+      .join(', ') || propertyParam;
+    const label = propertyContext?.headline || address || (mlsParam ? `MLS #${mlsParam}` : '');
+    if (!label && !documentOnlyMode) return;
+
+    propertyPrefillAppliedRef.current = true;
+    const safeLabel = String(label || 'Property packet')
+      .replace(/[^\w\s#.,-]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 80) || 'Property packet';
+    const packetName = propertyContext?.packetName || `${safeLabel} packet`;
+
+    setWorkflowIntent('esign');
+    setContextType('new');
+    setOutputName(packetName);
+    setBundleName(packetName);
+    setContextSearch(address || safeLabel);
+    setEsignSubject(`Please review and sign: ${safeLabel}`);
+    setEsignMessage(`Please review and sign the attached property packet for ${address || safeLabel}.`);
+  }, [documentOnlyMode, searchParams]);
 
   useEffect(() => {
     let cancelled = false;
@@ -262,32 +304,23 @@ export function PdfEditor() {
   // Generate page thumbnails using PDF.js
   const generateThumbnails = async (pdfFile: PdfFile) => {
     try {
-      const loadingTask = pdfjsLib.getDocument({ data: pdfFile.data, ...SAFE_PDFJS_OPTIONS });
+      const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(pdfFile.data.slice(0)), ...PDF_DOCUMENT_LOAD_OPTIONS });
       const pdfDoc = await loadingTask.promise;
       const previews: PagePreview[] = [];
 
       for (let i = 1; i <= pdfDoc.numPages; i += 1) {
         const page = await pdfDoc.getPage(i);
-        const viewport = page.getViewport({ scale: 1 });
-        const maxThumbWidth = 220;
-        const scale = Math.min(1, maxThumbWidth / viewport.width);
-        const scaledViewport = page.getViewport({ scale });
-        const canvas = document.createElement('canvas');
-        const context = canvas.getContext('2d', { alpha: false });
-        if (!context) {
-          continue;
-        }
+        const rendered = await renderPdfPageToImage(page, {
+          maxWidth: 220,
+          outputScale: 1,
+          imageType: 'image/jpeg',
+          imageQuality: 0.78,
+        });
 
-        canvas.width = Math.floor(scaledViewport.width);
-        canvas.height = Math.floor(scaledViewport.height);
-
-        await page.render({ canvasContext: context, viewport: scaledViewport, canvas }).promise;
-
-        const thumbnail = canvas.toDataURL('image/jpeg', 0.78);
         previews.push({
           fileId: pdfFile.id,
           pageNumber: i,
-          thumbnail,
+          thumbnail: rendered.imageSrc,
           selected: true,
         });
       }
@@ -297,6 +330,38 @@ export function PdfEditor() {
       console.error('Error generating thumbnails:', error);
       return [];
     }
+  };
+
+  const generateFallbackPreviews = (pdfFile: PdfFile): PagePreview[] => {
+    return Array.from({ length: pdfFile.pageCount }, (_, index) => {
+      const pageNumber = index + 1;
+      const canvas = document.createElement('canvas');
+      canvas.width = 220;
+      canvas.height = 284;
+      const context = canvas.getContext('2d');
+
+      if (context) {
+        context.fillStyle = '#ffffff';
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        context.strokeStyle = '#cbd5e1';
+        context.lineWidth = 2;
+        context.strokeRect(1, 1, canvas.width - 2, canvas.height - 2);
+        context.fillStyle = '#334155';
+        context.font = 'bold 18px sans-serif';
+        context.textAlign = 'center';
+        context.fillText(`Page ${pageNumber}`, canvas.width / 2, canvas.height / 2 - 8);
+        context.font = '12px sans-serif';
+        context.fillStyle = '#64748b';
+        context.fillText('Preview needs verification', canvas.width / 2, canvas.height / 2 + 18);
+      }
+
+      return {
+        fileId: pdfFile.id,
+        pageNumber,
+        thumbnail: canvas.toDataURL('image/png'),
+        selected: true,
+      };
+    });
   };
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -329,7 +394,10 @@ export function PdfEditor() {
 
         newFiles.push(pdfFile);
 
-        const previews = await generateThumbnails(pdfFile);
+        const renderedPreviews = await generateThumbnails(pdfFile);
+        const previews = renderedPreviews.length > 0
+          ? renderedPreviews
+          : generateFallbackPreviews(pdfFile);
         previews.forEach((preview) => {
           newPreviews.push(preview);
           selectedPages.add(`${preview.fileId}-${preview.pageNumber}`);
@@ -460,7 +528,7 @@ export function PdfEditor() {
     }
 
     const pdfBytes = await mergedPdf.save();
-    return pdfBytes.buffer as ArrayBuffer;
+    return toExactArrayBuffer(pdfBytes);
   };
 
   const buildName = (first?: string, last?: string) => `${first || ''} ${last || ''}`.trim();
@@ -562,6 +630,26 @@ export function PdfEditor() {
       .filter(p => p.fileId === fileId && selectedPages.has(`${p.fileId}-${p.pageNumber}`))
       .map(p => p.pageNumber);
 
+  const getSelectedPageEntries = (): SelectedPageEntry[] =>
+    pagePreviews
+      .filter((preview) => selectedPages.has(`${preview.fileId}-${preview.pageNumber}`))
+      .map((preview) => {
+        const file = files.find((entry) => entry.id === preview.fileId);
+        return file ? { file, preview } : null;
+      })
+      .filter((entry): entry is SelectedPageEntry => Boolean(entry));
+
+  const getUnchangedSingleFileSelection = (entries: SelectedPageEntry[]) => {
+    if (entries.length === 0) return null;
+
+    const firstFile = entries[0].file;
+    const isSingleFile = entries.every((entry) => entry.file.id === firstFile.id);
+    if (!isSingleFile || entries.length !== firstFile.pageCount) return null;
+
+    const isOriginalOrder = entries.every((entry, index) => entry.preview.pageNumber === index + 1);
+    return isOriginalOrder ? firstFile : null;
+  };
+
   const generatePdfForFile = async (file: PdfFile): Promise<ArrayBuffer> => {
     const selectedPageNumbers = getSelectedPagesForFile(file.id);
     const sourcePdf = await PDFDocument.load(file.data);
@@ -573,13 +661,141 @@ export function PdfEditor() {
     }
 
     const pdfBytes = await outPdf.save();
-    return pdfBytes.buffer as ArrayBuffer;
+    return toExactArrayBuffer(pdfBytes);
+  };
+
+  const dataUrlToBytes = (dataUrl: string) => {
+    const base64 = dataUrl.split(',')[1] || '';
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+      bytes[index] = binary.charCodeAt(index);
+    }
+    return bytes;
+  };
+
+  const generateRasterizedPdfForEntries = async (entries: SelectedPageEntry[]): Promise<ArrayBuffer> => {
+    const outputPdf = await PDFDocument.create();
+    const pdfDocCache = new Map<string, pdfjsLib.PDFDocumentProxy>();
+
+    const getPdfDoc = async (file: PdfFile) => {
+      const cached = pdfDocCache.get(file.id);
+      if (cached) return cached;
+
+      const loadingTask = pdfjsLib.getDocument({
+        data: new Uint8Array(file.data.slice(0)),
+        ...PDF_DOCUMENT_LOAD_OPTIONS,
+      });
+      const pdfDoc = await loadingTask.promise;
+      pdfDocCache.set(file.id, pdfDoc);
+      return pdfDoc;
+    };
+
+    try {
+      for (const entry of entries) {
+        const pdfDoc = await getPdfDoc(entry.file);
+        const page = await pdfDoc.getPage(entry.preview.pageNumber);
+        const baseViewport = page.getViewport({ scale: 1 });
+        const rendered = await renderPdfPageToImage(page, {
+          maxWidth: Math.max(baseViewport.width * 2, 1224),
+          maxHeight: Math.max(baseViewport.height * 2, 1584),
+          outputScale: 1,
+          imageType: 'image/jpeg',
+          imageQuality: 0.94,
+          throwOnBlank: false,
+        });
+        const image = await outputPdf.embedJpg(dataUrlToBytes(rendered.imageSrc));
+        const outputPage = outputPdf.addPage([rendered.baseWidth, rendered.baseHeight]);
+        outputPage.drawImage(image, {
+          x: 0,
+          y: 0,
+          width: rendered.baseWidth,
+          height: rendered.baseHeight,
+        });
+      }
+
+      const pdfBytes = await outputPdf.save();
+      return toExactArrayBuffer(pdfBytes);
+    } finally {
+      await Promise.all(Array.from(pdfDocCache.values()).map((pdfDoc) => pdfDoc.destroy()));
+    }
+  };
+
+  const pdfHasVisiblePages = async (pdfBuffer: ArrayBuffer, label: string) => {
+    let loadingTask: pdfjsLib.PDFDocumentLoadingTask | null = null;
+    let pdfDoc: pdfjsLib.PDFDocumentProxy | null = null;
+
+    try {
+      loadingTask = pdfjsLib.getDocument({
+        data: new Uint8Array(pdfBuffer.slice(0)),
+        ...PDF_DOCUMENT_LOAD_OPTIONS,
+      });
+      pdfDoc = await loadingTask.promise;
+      const pagesToCheck = Math.min(pdfDoc.numPages, 3);
+
+      for (let pageNumber = 1; pageNumber <= pagesToCheck; pageNumber += 1) {
+        try {
+          const page = await pdfDoc.getPage(pageNumber);
+          await renderPdfPageToImage(page, {
+            maxWidth: 360,
+            outputScale: 1,
+            imageType: 'image/jpeg',
+            imageQuality: 0.72,
+            throwOnBlank: true,
+          });
+          return true;
+        } catch (error) {
+          console.warn(`E-sign PDF visibility check could not render ${label} page ${pageNumber}:`, error);
+        }
+      }
+
+      return false;
+    } catch (error) {
+      console.warn(`E-sign PDF visibility check failed for ${label}:`, error);
+      return false;
+    } finally {
+      await pdfDoc?.destroy();
+      loadingTask?.destroy();
+    }
+  };
+
+  const generateEsignPdf = async (): Promise<ArrayBuffer> => {
+    const entries = getSelectedPageEntries();
+    const unchangedFile = getUnchangedSingleFileSelection(entries);
+
+    if (unchangedFile) {
+      const originalBytes = unchangedFile.data.slice(0);
+      if (await pdfHasVisiblePages(originalBytes, 'original upload')) {
+        return originalBytes;
+      }
+    }
+
+    const copiedBytes = await generateMergedPdf();
+    if (await pdfHasVisiblePages(copiedBytes, 'merged copy')) {
+      return copiedBytes;
+    }
+
+    const rasterizedBytes = await generateRasterizedPdfForEntries(entries);
+    if (await pdfHasVisiblePages(rasterizedBytes, 'rasterized packet')) {
+      return rasterizedBytes;
+    }
+
+    throw new Error('The selected PDF pages could not be prepared with a visible preview. Try re-uploading a freshly downloaded or flattened PDF.');
   };
 
   const createPreviewUrl = async () => {
     const pdfBuffer = await generateMergedPdf();
     const blob = new Blob([pdfBuffer], { type: 'application/pdf' });
     return URL.createObjectURL(blob);
+  };
+
+  const createPreviewDocument = async () => {
+    const pdfBuffer = await generateEsignPdf();
+    const blob = new Blob([pdfBuffer], { type: 'application/pdf' });
+    return {
+      data: pdfBuffer.slice(0),
+      url: URL.createObjectURL(blob),
+    };
   };
 
   const handlePreview = async () => {
@@ -643,11 +859,12 @@ export function PdfEditor() {
 
     setProcessing(true);
     try {
-      const url = await createPreviewUrl();
+      const previewDocument = await createPreviewDocument();
       if (esignPreviewUrl) {
         URL.revokeObjectURL(esignPreviewUrl);
       }
-      setEsignPreviewUrl(url);
+      setEsignPreviewUrl(previewDocument.url);
+      setEsignPreviewData(previewDocument.data);
       setEsignSigners(buildDefaultSigners());
       setEsignSubject(`Please sign: ${contextLabel}`);
       setEsignMessage('Please review and sign the attached document.');
@@ -683,6 +900,7 @@ export function PdfEditor() {
       URL.revokeObjectURL(esignPreviewUrl);
     }
     setEsignPreviewUrl(null);
+    setEsignPreviewData(null);
     setEsignEnvelopeId(null);
     setEsignSentAt(null);
     setEsignCanResend(false);
@@ -732,10 +950,15 @@ export function PdfEditor() {
       return;
     }
 
+    if (!esignSubject.trim() || !esignMessage.trim()) {
+      showToast('error', 'Add a subject and message before sending.');
+      return;
+    }
+
     setEsignSending(true);
     try {
       setEsignFieldPlacements(fieldPlacements);
-      const pdfBuffer = await generateMergedPdf();
+      const pdfBuffer = await generateEsignPdf();
       const documentName = (outputName || contextLabel || 'document').trim() || 'document';
       const safeDocumentBaseName = documentName
         .replace(/\.pdf$/i, '')
@@ -953,6 +1176,11 @@ export function PdfEditor() {
     };
   }, [esignPreviewUrl]);
 
+  const openUploadPicker = () => {
+    setActiveTab('upload');
+    window.setTimeout(() => fileInputRef.current?.click(), 0);
+  };
+
   const totalPages = pagePreviews.length;
   const selectedCount = selectedPages.size;
   const selectedOrderMap = useMemo(() => {
@@ -974,9 +1202,17 @@ export function PdfEditor() {
   const invalidEsignEmailCount = includedEsignSigners.filter((s) => s.email.trim() && !isValidEmailAddress(s.email)).length;
   const missingEsignNameCount = includedEsignSigners.filter((s) => !s.name.trim()).length;
   const canProceedEsign = includedEsignSigners.length > 0 && missingEsignNameCount === 0 && invalidEsignEmailCount === 0;
-  const canSendEsign = canProceedEsign;
+  const hasEsignMessage = Boolean(esignSubject.trim() && esignMessage.trim());
+  const canSendEsign = canProceedEsign && hasEsignMessage;
   const isEsignSent = Boolean(esignEnvelopeId);
   const sendEsignActionLabel = emailedEsignSigners.length > 0 ? 'Send for Signature' : 'Create Signing Links';
+  const esignChecklist = [
+    { label: 'PDF pages selected', done: selectedCount > 0 },
+    { label: 'Signer names ready', done: canProceedEsign },
+    { label: 'Fields placed (optional)', done: esignFieldPlacements.length > 0 },
+    { label: 'Subject and message ready', done: hasEsignMessage },
+    { label: emailedEsignSigners.length > 0 ? 'Email delivery ready' : 'Secure links ready', done: canProceedEsign },
+  ];
 
   return (
     <div className="space-y-6">
@@ -1007,8 +1243,8 @@ export function PdfEditor() {
       )}
 
       <PageHeader
-        title="PDF Editor"
-        subtitle="Merge, combine, and edit your PDF documents"
+        title="PDF & Packet Builder"
+        subtitle="Merge PDFs, build contract packets, and send for e-sign from one simple workspace."
         actions={
           <div className="flex items-center gap-2">
             <Button variant="ghost" onClick={() => navigate('/contracts')}>
@@ -1021,17 +1257,94 @@ export function PdfEditor() {
         }
       />
 
+      <Card className="p-4 sm:p-5 border border-slate-200 bg-white shadow-sm dark:border-white/10 dark:bg-slate-950/70">
+        <div className="grid gap-3 lg:grid-cols-3">
+          {[
+            {
+              id: 'merge' as WorkflowIntent,
+              title: 'Clean up PDFs',
+              detail: 'Upload, select pages, reorder, merge, and download.',
+              action: files.length > 0 ? 'Manage pages' : 'Upload PDFs',
+              onClick: () => {
+                setWorkflowIntent('merge');
+                if (files.length === 0) {
+                  openUploadPicker();
+                } else {
+                  setActiveTab('upload');
+                }
+              },
+            },
+            {
+              id: 'packet' as WorkflowIntent,
+              title: 'Build packet',
+              detail: 'Name a bundle for a deal, client, or lead.',
+              action: files.length > 0 ? 'Package files' : 'Start packet',
+              onClick: () => {
+                setWorkflowIntent('packet');
+                if (files.length === 0) {
+                  openUploadPicker();
+                } else {
+                  setActiveTab('upload');
+                }
+              },
+            },
+            {
+              id: 'esign' as WorkflowIntent,
+              title: 'Send e-sign',
+              detail: 'Autofill recipients, place fields, and send links or emails.',
+              action: selectedCount > 0 ? 'Open studio' : 'Upload first',
+              onClick: () => {
+                setWorkflowIntent('esign');
+                if (selectedCount > 0) {
+                  void handleOpenEsign();
+                } else {
+                  openUploadPicker();
+                }
+              },
+            },
+          ].map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={item.onClick}
+              className={`rounded-2xl border p-4 text-left transition-all ${
+                workflowIntent === item.id
+                  ? 'border-emerald-300 bg-emerald-50 shadow-sm dark:border-emerald-400/30 dark:bg-emerald-500/10'
+                  : 'border-slate-200 bg-slate-50 hover:border-slate-300 hover:bg-white dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10'
+              }`}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-slate-950 dark:text-white">{item.title}</div>
+                  <p className="mt-1 text-xs leading-5 text-slate-600 dark:text-slate-400">{item.detail}</p>
+                </div>
+                <span className={`rounded-full border px-2 py-1 text-[10px] font-bold uppercase ${
+                  workflowIntent === item.id
+                    ? 'border-emerald-300 bg-white text-emerald-700 dark:border-emerald-400/30 dark:bg-emerald-500/10 dark:text-emerald-200'
+                    : 'border-slate-300 bg-white text-slate-500 dark:border-white/10 dark:bg-white/10 dark:text-slate-300'
+                }`}>
+                  {item.action}
+                </span>
+              </div>
+            </button>
+          ))}
+        </div>
+      </Card>
+
       <Card className="p-4 sm:p-5 border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-emerald-50/70 shadow-sm dark:border-white/10 dark:bg-gradient-to-br dark:from-slate-950/80 dark:via-slate-900/80 dark:to-emerald-950/70">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
           <div>
             <div className="text-xs uppercase tracking-[0.2em] text-emerald-700 dark:text-emerald-300/70">Contract Context</div>
-            <h2 className="text-lg sm:text-xl font-semibold text-slate-950 mt-1 dark:text-white">Prepare a document for e-sign</h2>
-            <p className="text-xs sm:text-sm text-slate-600 mt-1 dark:text-slate-400">Send it standalone, or attach context for autofill and deal history.</p>
+            <h2 className="text-lg sm:text-xl font-semibold text-slate-950 mt-1 dark:text-white">Attach context once, reuse it everywhere</h2>
+            <p className="text-xs sm:text-sm text-slate-600 mt-1 dark:text-slate-400">Use deal, client, or lead details for signer defaults, smart fields, packet naming, and deal history.</p>
           </div>
           <div className="flex flex-col sm:flex-row gap-2">
             <Button
               variant="secondary"
-              onClick={handleOpenEsign}
+              onClick={() => {
+                setWorkflowIntent('esign');
+                void handleOpenEsign();
+              }}
               disabled={processing || selectedCount === 0}
               className="whitespace-nowrap"
             >
@@ -1567,7 +1880,9 @@ export function PdfEditor() {
                             className="w-6 h-6 rounded bg-black/60 text-white text-xs hover:bg-black/80"
                             title="Move up"
                           >
-                            ▲
+                            <svg className="mx-auto h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 15l7-7 7 7" />
+                            </svg>
                           </button>
                           <button
                             type="button"
@@ -1580,7 +1895,9 @@ export function PdfEditor() {
                             className="w-6 h-6 rounded bg-black/60 text-white text-xs hover:bg-black/80"
                             title="Move down"
                           >
-                            ▼
+                            <svg className="mx-auto h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                            </svg>
                           </button>
                           <button
                             type="button"
@@ -1591,7 +1908,9 @@ export function PdfEditor() {
                             className="w-6 h-6 rounded bg-red-500/80 text-white text-xs hover:bg-red-500"
                             title="Remove page"
                           >
-                            ✕
+                            <svg className="mx-auto h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                            </svg>
                           </button>
                         </div>
                       </button>
@@ -1674,7 +1993,11 @@ export function PdfEditor() {
                               signer.included ? 'bg-emerald-500 text-white' : 'bg-white/10 text-slate-400'
                             }`}
                           >
-                            {signer.included ? '✓' : ''}
+                            {signer.included && (
+                              <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                              </svg>
+                            )}
                           </button>
                           <select
                             value={signer.role}
@@ -1759,16 +2082,36 @@ export function PdfEditor() {
                   />
                 </div>
                 <div className="rounded-xl border border-white/10 bg-slate-950/60 p-4">
+                  <div className="mb-4 space-y-2">
+                    {esignChecklist.map((item) => (
+                      <div key={item.label} className="flex items-center justify-between gap-3 text-xs">
+                        <span className="text-slate-300">{item.label}</span>
+                        <span className={`inline-flex h-5 w-5 items-center justify-center rounded-full border ${
+                          item.done
+                            ? 'border-emerald-400/30 bg-emerald-500/20 text-emerald-200'
+                            : 'border-slate-500/40 bg-white/5 text-slate-500'
+                        }`}>
+                          {item.done ? (
+                            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                            </svg>
+                          ) : (
+                            <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                          )}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
                   <div className="flex items-center justify-between text-xs text-slate-400">
                     <span>Recipients ready</span>
                     <span>{readyEsignSigners.length}/{includedEsignSigners.length}</span>
                   </div>
                   <div className="mt-2 text-[11px] text-slate-400">
                     {emailedEsignSigners.length > 0 && <span>{emailedEsignSigners.length} email</span>}
-                    {emailedEsignSigners.length > 0 && linkOnlyEsignSigners.length > 0 && <span> • </span>}
+                    {emailedEsignSigners.length > 0 && linkOnlyEsignSigners.length > 0 && <span> - </span>}
                     {linkOnlyEsignSigners.length > 0 && <span>{linkOnlyEsignSigners.length} link only</span>}
-                    {missingEsignNameCount > 0 && <span className="text-amber-300"> • {missingEsignNameCount} need name</span>}
-                    {invalidEsignEmailCount > 0 && <span className="text-rose-300"> • {invalidEsignEmailCount} invalid email</span>}
+                    {missingEsignNameCount > 0 && <span className="text-amber-300"> - {missingEsignNameCount} need name</span>}
+                    {invalidEsignEmailCount > 0 && <span className="text-rose-300"> - {invalidEsignEmailCount} invalid email</span>}
                   </div>
                   <div className="mt-3 flex items-center gap-2">
                     <button
@@ -1818,7 +2161,7 @@ export function PdfEditor() {
                       )}
                       <div className="flex items-center justify-between gap-2">
                         <div className="text-[11px] text-emerald-100 font-medium">
-                          {(esignDeliveryStatus?.sent ?? 0) > 0 ? 'Envelope sent' : 'Signing links ready'}{esignSentAt ? ` • ${new Date(esignSentAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : ''}
+                          {(esignDeliveryStatus?.sent ?? 0) > 0 ? 'Envelope sent' : 'Signing links ready'}{esignSentAt ? ` - ${new Date(esignSentAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : ''}
                         </div>
                         <button
                           type="button"
@@ -1862,6 +2205,7 @@ export function PdfEditor() {
         <div className="fixed inset-0 z-[210] bg-slate-950">
           <PdfAnnotator
             pdfUrl={esignPreviewUrl}
+            pdfData={esignPreviewData}
             signers={includedEsignSigners.map(s => ({ role: s.role, name: s.name, email: s.email }))}
             dealData={dealData}
             onSave={(annotations) => {
@@ -1914,7 +2258,7 @@ function CopyLinksModal({
             onClick={onClose}
             className="text-slate-400 hover:text-white transition-colors"
           >
-            ✕
+            X
           </button>
         </div>
 

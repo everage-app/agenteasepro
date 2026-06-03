@@ -9,6 +9,7 @@ type AuthMode = 'login' | 'signup';
 
 const HOSTED_DEMO_URL = 'https://app.agenteasepro.com/login?demo=1';
 const LOCAL_DEMO_DB_ERROR_PATTERN = /authentication failed against database server/i;
+const MARKETING_ATTRIBUTION_KEY = 'aep_marketing_attribution';
 
 const isLocalDemoDatabaseError = (err: any) => {
   if (!import.meta.env.DEV) return false;
@@ -27,6 +28,35 @@ const authErrorMessage = (err: any, fallback: string) => {
   if (status >= 500) return fallback;
   return toDisplayErrorMessage(rawError, fallback);
 };
+
+function persistMarketingAttribution(search: string, entryPath: string) {
+  const params = new URLSearchParams(search);
+  const hasAttribution =
+    ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term', 'aep_vid', 'aep_sid', 'aep_landing_path']
+      .some((key) => params.has(key));
+
+  if (!hasAttribution) return;
+
+  try {
+    const existingRaw = window.localStorage.getItem(MARKETING_ATTRIBUTION_KEY);
+    const existing = existingRaw ? JSON.parse(existingRaw) : {};
+    window.localStorage.setItem(MARKETING_ATTRIBUTION_KEY, JSON.stringify({
+      ...(existing && typeof existing === 'object' ? existing : {}),
+      visitorId: params.get('aep_vid') || existing?.visitorId,
+      sessionId: params.get('aep_sid') || existing?.sessionId,
+      landingPath: params.get('aep_landing_path') || existing?.landingPath,
+      entryPath,
+      referrer: document.referrer || existing?.referrer,
+      utmSource: params.get('utm_source') || existing?.utmSource,
+      utmMedium: params.get('utm_medium') || existing?.utmMedium,
+      utmCampaign: params.get('utm_campaign') || existing?.utmCampaign,
+      utmContent: params.get('utm_content') || existing?.utmContent,
+      utmTerm: params.get('utm_term') || existing?.utmTerm,
+      capturedAt: new Date().toISOString(),
+    }));
+  } catch {
+  }
+}
 
 export function LoginPage() {
   const [mode, setMode] = useState<AuthMode>('login');
@@ -51,6 +81,10 @@ export function LoginPage() {
   const signup = useAuthStore((state) => state.signup);
   const demoLogin = useAuthStore((state) => state.demoLogin);
   const emailVerified = useAuthStore((state) => state.emailVerified);
+
+  useEffect(() => {
+    persistMarketingAttribution(location.search, `${location.pathname}${location.search || ''}`);
+  }, [location.pathname, location.search]);
 
   useEffect(() => {
     let cancelled = false;

@@ -4,6 +4,7 @@ import { useAuthStore } from '../auth/authStore';
 import { Card } from '../../components/ui/Card';
 import { toDisplayErrorMessage } from '../../lib/errorMessages';
 import { buildLandingPageQrToken, buildTrackedLandingQrUrl } from '../../lib/landingQr';
+import { getLandingPageIntent, type LandingPageIntent } from '../../lib/landingPageIntent';
 
 interface LandingPage {
   id: string;
@@ -17,8 +18,12 @@ interface LandingPage {
   createdAt: string;
   templateId?: string;
   customContent?: {
+    pageKind?: string;
+    headline?: string;
+    subheadline?: string;
     qrListingUrl?: string;
     qrListingToken?: string;
+    sections?: Record<string, boolean>;
   };
   listing?: {
     addressLine1: string;
@@ -54,6 +59,7 @@ const themeImages: Record<string, string> = {
 const launchBlueprints = [
   {
     id: 'listing',
+    pageKind: 'LISTING',
     name: 'Listing Launch',
     badge: 'Best for ads',
     templateId: 'modern-luxury',
@@ -66,12 +72,18 @@ const launchBlueprints = [
     formTitle: 'Want the private details?',
     formSubtitle: 'Ask for disclosures, showing times, or a pricing strategy before you tour.',
     leadButtonText: 'Request property details',
+    requiredFields: ['name', 'email', 'phone', 'message'],
+    seoTitle: 'Utah Listing Launch Page | Private Showing Request',
+    seoDescription: 'View listing details, request showing times, and connect directly with the local Utah listing agent.',
+    seoKeywords: ['Utah listing', 'private showing', 'real estate listing', 'listing agent'],
     features: ['Private showing requests', 'Listing QR and ad tracking', 'Fast lead follow-up task'],
     whyChooseBullets: ['Private-tour requests route into your CRM', 'Tracked ad links show what is working', 'Fast follow-up tasks are created from captured leads'],
+    stats: { yearsExperience: 7, homesSold: 120, avgDaysOnMarket: 18, clientRating: 4.9 },
     sections: { gallery: true, features: true, agent: true, contact: true, mortgage: true, homeValuation: false },
   },
   {
     id: 'buyer',
+    pageKind: 'BUYER_CAPTURE',
     name: 'Buyer Capture',
     badge: 'Lead magnet',
     templateId: 'minimal-white',
@@ -84,12 +96,18 @@ const launchBlueprints = [
     formTitle: 'Tell me what you are looking for',
     formSubtitle: 'You will get a practical next-step plan, not a generic drip campaign.',
     leadButtonText: 'Send my game plan',
+    requiredFields: ['name', 'email', 'phone', 'message'],
+    seoTitle: 'Utah Buyer Game Plan | Local Home Search Strategy',
+    seoDescription: 'Share your Utah home search goals and get local showing, offer, and negotiation guidance from a real estate agent.',
+    seoKeywords: ['Utah buyer agent', 'home search', 'buyer consultation', 'real estate strategy'],
     features: ['Buyer consultation requests', 'Works without IDX', 'Clear CRM handoff'],
     whyChooseBullets: ['Help buyers act before the perfect listing hits every portal', 'Capture search goals without depending on IDX', 'Move each lead directly into a follow-up workflow'],
+    stats: { yearsExperience: 7, homesSold: 120, avgDaysOnMarket: 18, clientRating: 4.9 },
     sections: { gallery: true, features: true, agent: true, contact: true, mortgage: true, homeValuation: false },
   },
   {
     id: 'seller',
+    pageKind: 'SELLER_VALUATION',
     name: 'Seller Valuation',
     badge: 'Seller leads',
     templateId: 'elegant-serif',
@@ -102,8 +120,40 @@ const launchBlueprints = [
     formTitle: 'Request a custom home value report',
     formSubtitle: 'Send the property address and the agent will prepare a focused pricing snapshot.',
     leadButtonText: 'Request my report',
-    features: ['Home value requests', 'Seller nurture ready', 'Agent proof and contact cards'],
-    whyChooseBullets: ['Turn seller curiosity into a real appointment', 'Use local comps and timing strategy in the follow-up', 'Promote from postcards, QR signs, email, and social ads'],
+    requiredFields: ['name', 'email', 'phone'],
+    seoTitle: 'Free Utah Home Value Report | Local Seller Pricing Strategy',
+    seoDescription: 'Request a custom Utah home value report using local comps, market timing, and seller preparation guidance.',
+    seoKeywords: ['Utah home value', 'home value report', 'sell my home', 'Utah real estate agent'],
+    features: ['Local comp review', 'Pricing range and timing', 'Prep-to-sell action plan'],
+    whyChooseBullets: ['Get a human pricing read instead of a generic estimate', 'See how local demand and timing affect your selling window', 'Leave with clear prep steps before you list'],
+    stats: { yearsExperience: 7, homesSold: 120, avgDaysOnMarket: 18, clientRating: 4.9 },
+    testimonials: [
+      { text: 'The pricing advice helped us understand what mattered before we listed.', author: 'Utah seller', role: 'Homeowner', rating: 5 },
+    ],
+    sections: { gallery: false, features: true, agent: true, contact: true, mortgage: false, homeValuation: true, whyChoose: true, stats: true },
+  },
+  {
+    id: 'personal',
+    pageKind: 'AGENT_PROFILE',
+    name: 'Personal Agent Page',
+    badge: 'Bio + QR',
+    templateId: 'modern-luxury',
+    title: 'Personal Agent Page',
+    slugPrefix: 'agent-profile',
+    description: 'A polished agent profile page for QR cards, social bios, email signatures, and buyer or seller introductions.',
+    headline: 'Meet Your Local Real Estate Guide',
+    subheadline: 'A simple way to connect for buying, selling, home value questions, and next-step real estate guidance.',
+    ctaText: 'Connect with me',
+    formTitle: 'Connect with me',
+    formSubtitle: 'Share what you are working on and the agent will follow up with a clear next step.',
+    leadButtonText: 'Send message',
+    requiredFields: ['name', 'email', 'phone', 'message'],
+    seoTitle: 'Local Real Estate Agent | Buying, Selling, and Home Value Help',
+    seoDescription: 'Connect with a local real estate agent for buying, selling, home value questions, and next-step guidance.',
+    seoKeywords: ['real estate agent', 'buyer help', 'seller help', 'home value'],
+    features: ['Agent contact hub', 'QR and bio-link ready', 'Buyer and seller lead capture'],
+    whyChooseBullets: ['One simple page for every client introduction', 'Works well for signs, email signatures, and social bios', 'Routes every inquiry into your CRM follow-up'],
+    stats: { yearsExperience: 7, homesSold: 120, avgDaysOnMarket: 18, clientRating: 5.0 },
     sections: { gallery: false, features: true, agent: true, contact: true, mortgage: false, homeValuation: true, whyChoose: true, stats: true },
   },
 ] as const;
@@ -131,21 +181,31 @@ const withCampaignSource = (slug: string, source: string) => {
 const getQrCampaignUrl = (page: LandingPage) => {
   const overrideUrl = page.customContent?.qrListingUrl?.trim();
   const token = page.customContent?.qrListingToken?.trim();
-  if (overrideUrl) return overrideUrl;
   if (token) return buildTrackedLandingQrUrl(getLandingPageUrl(page.slug), page.slug, token);
+  if (overrideUrl) return overrideUrl;
   return withCampaignSource(page.slug, 'qr');
 };
 
 const buildAdCaption = (page: LandingPage) => {
+  const intent = getLandingPageIntent({
+    title: page.title,
+    customContent: page.customContent,
+    sections: page.customContent?.sections,
+    listing: page.listing,
+  });
   const listingLine = page.listing
     ? `${page.listing.addressLine1}${page.listing.price ? ` | $${Number(page.listing.price).toLocaleString()}` : ''}`
     : page.title;
 
-  return [
-    listingLine,
-    'Private details, photos, showing times, and direct agent follow-up are ready here:',
-    withCampaignSource(page.slug, 'social'),
-  ].join('\n');
+  const message = intent.kind === 'seller'
+    ? 'Get a local home value read, pricing context, and seller strategy here:'
+    : intent.kind === 'buyer'
+      ? 'Share your search goals and get a sharper buyer game plan here:'
+      : intent.kind === 'agent-profile'
+        ? 'Connect for buying, selling, home value questions, and local real estate guidance here:'
+        : 'Private details, photos, showing times, and direct agent follow-up are ready here:';
+
+  return [listingLine, message, withCampaignSource(page.slug, 'social')].join('\n');
 };
 
 const getPagePreviewImage = (page: LandingPage): string | null => {
@@ -157,6 +217,43 @@ const getPagePreviewImage = (page: LandingPage): string | null => {
     return themeImages[page.templateId];
   }
   return themeImages['modern-luxury']; // Default fallback
+};
+
+const formatCurrency = (value?: number | null) => {
+  if (value == null || Number.isNaN(Number(value))) return '';
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: 0,
+  }).format(Number(value));
+};
+
+const getIntentAccentClass = (intent: LandingPageIntent) => {
+  switch (intent.kind) {
+    case 'listing':
+      return 'border-cyan-300/40 bg-cyan-500/15 text-cyan-100';
+    case 'agent-profile':
+      return 'border-violet-300/40 bg-violet-500/15 text-violet-100';
+    case 'seller':
+      return 'border-emerald-300/40 bg-emerald-500/15 text-emerald-100';
+    case 'buyer':
+      return 'border-blue-300/40 bg-blue-500/15 text-blue-100';
+    default:
+      return 'border-amber-300/40 bg-amber-500/15 text-amber-100';
+  }
+};
+
+const getPageIntentDetail = (page: LandingPage, intent: LandingPageIntent) => {
+  if (intent.kind === 'listing') {
+    if (page.listing?.addressLine1) {
+      return [
+        page.listing.addressLine1,
+        formatCurrency(page.listing.price),
+      ].filter(Boolean).join(' - ');
+    }
+    return 'Listing campaign - no listing linked yet';
+  }
+  return intent.dashboardDetail;
 };
 
 export function LandingPagesSettingsPage() {
@@ -231,6 +328,7 @@ export function LandingPagesSettingsPage() {
     const shouldSeedDefaults = !showCreateModal || blueprint.id !== selectedBlueprint;
     setSelectedBlueprint(blueprint.id);
     setSelectedTemplate(blueprint.templateId);
+    if (blueprint.id !== 'listing') setSelectedListingId('');
     if (shouldSeedDefaults || !pageTitle.trim()) setPageTitle(blueprint.title);
     if (shouldSeedDefaults || !pageSlug.trim()) setPageSlug(buildAvailableSlug(blueprint.slugPrefix));
     setShowCreateModal(true);
@@ -325,9 +423,11 @@ export function LandingPagesSettingsPage() {
 
   const handleCreate = async () => {
     const blueprint = selectedBlueprintConfig;
+    const selectedListing = listings.find((listing) => listing.id === selectedListingId);
     const title = pageTitle.trim() || blueprint.title;
     const slug = buildAvailableSlug(pageSlug.trim() || title);
     const templateId = selectedTemplate || blueprint.templateId;
+    const listingHeroHeadline = selectedListing?.headline || selectedListing?.addressLine1 || title;
     if (!title || !slug) return;
 
     try {
@@ -342,11 +442,18 @@ export function LandingPagesSettingsPage() {
           title,
           slug,
           description: blueprint.description,
+          heroImage: selectedListingId ? undefined : themeImages[templateId],
           templateId,
           isActive: true,
           customContent: {
-            headline: selectedListingId ? title : blueprint.headline,
-            subheadline: blueprint.subheadline,
+            pageKind: selectedListingId ? 'LISTING' : blueprint.pageKind,
+            headline: selectedListingId ? listingHeroHeadline : blueprint.headline,
+            subheadline: selectedListing
+              ? [
+                  selectedListing.city && selectedListing.state ? `${selectedListing.city}, ${selectedListing.state}` : '',
+                  selectedListing.price ? formatCurrency(selectedListing.price) : '',
+                ].filter(Boolean).join(' - ') || blueprint.subheadline
+              : blueprint.subheadline,
             ctaText: blueprint.ctaText,
             features: blueprint.features,
             whyChooseBullets: blueprint.whyChooseBullets,
@@ -354,6 +461,8 @@ export function LandingPagesSettingsPage() {
             showHeaderQr: true,
             qrListingToken: buildLandingPageQrToken(),
             qrPersonalLabel: 'Agent info',
+            stats: blueprint.stats,
+            testimonials: 'testimonials' in blueprint ? blueprint.testimonials : [],
           },
           customStyles: {
             heroHeight: 'large',
@@ -366,9 +475,14 @@ export function LandingPagesSettingsPage() {
             enabled: true,
             formTitle: blueprint.formTitle,
             formSubtitle: blueprint.formSubtitle,
-            requiredFields: ['name', 'email', 'phone'],
+            requiredFields: blueprint.requiredFields,
             buttonText: blueprint.leadButtonText,
             successMessage: 'Thanks. Your request is in, and the agent will follow up shortly.',
+          },
+          seoSettings: {
+            metaTitle: blueprint.seoTitle,
+            metaDescription: blueprint.seoDescription,
+            keywords: blueprint.seoKeywords,
           },
           sections: blueprint.sections,
         }),
@@ -400,7 +514,7 @@ export function LandingPagesSettingsPage() {
   const copyAdCaption = (page: LandingPage) => copyText(buildAdCaption(page), 'Ad caption copied.');
 
   return (
-    <div className="space-y-6">
+    <div className="ae-settings-content space-y-6">
       {/* Toast Notification */}
       {toast && (
         <div className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-xl shadow-lg border backdrop-blur-sm animate-in slide-in-from-top-2 duration-300 ${
@@ -437,7 +551,7 @@ export function LandingPagesSettingsPage() {
             <h2 className="text-xl font-bold text-white">Agent Landing Pages</h2>
           </div>
           <p className="text-slate-300 max-w-2xl mb-6">
-            Launch clean listing, buyer, and seller pages agents can advertise immediately. Every page gets lead capture, tracking, QR support, and a live public URL.
+            Launch the right real estate page for the job: property-first listing pages, personal agent profiles, buyer capture pages, and seller value pages. Every page gets lead capture, tracking, QR support, and a live public URL.
           </p>
           <div className="flex items-center gap-4">
             <button
@@ -453,7 +567,7 @@ export function LandingPagesSettingsPage() {
               <svg className="h-4 w-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
-              Simple share links, QR codes, and lead capture included
+              Page type, share links, QR codes, and lead capture included
             </div>
           </div>
         </div>
@@ -570,7 +684,7 @@ export function LandingPagesSettingsPage() {
           </div>
           <h3 className="text-lg font-semibold text-white mb-2">Create Your First Landing Page</h3>
           <p className="text-sm text-slate-400 max-w-md mx-auto mb-6">
-            Professional landing pages help you capture more leads. Choose from 9+ stunning templates designed for real estate.
+            Choose the page type first, then advertise it fast: listing, personal agent profile, buyer capture, or seller value.
           </p>
           <button
             onClick={() => openCreateModal('listing')}
@@ -586,6 +700,13 @@ export function LandingPagesSettingsPage() {
         <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
           {pages.map((page) => {
             const previewImage = getPagePreviewImage(page);
+            const intent = getLandingPageIntent({
+              title: page.title,
+              customContent: page.customContent,
+              sections: page.customContent?.sections,
+              listing: page.listing,
+            });
+            const intentDetail = getPageIntentDetail(page, intent);
             return (
             <div key={page.id} className="group relative rounded-[28px] border border-white/10 bg-gradient-to-br from-slate-950/80 to-[#101525]/80 backdrop-blur-xl shadow-2xl overflow-hidden hover:border-cyan-500/50 hover:shadow-cyan-500/10 transition-all duration-300">
               <div className="h-44 bg-gradient-to-br from-slate-800 to-slate-900 relative overflow-hidden">
@@ -623,11 +744,19 @@ export function LandingPagesSettingsPage() {
                     {page.isActive ? 'Live' : 'Draft'}
                   </span>
                 </div>
+                <div className="absolute left-3 top-3">
+                  <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] backdrop-blur-sm ${getIntentAccentClass(intent)}`}>
+                    {intent.label}
+                  </span>
+                </div>
               </div>
               <div className="p-5">
                 <h3 className="text-base font-semibold text-white truncate mb-1" title={page.title}>
                   {page.title}
                 </h3>
+                <p className="mb-2 line-clamp-2 min-h-[2.25rem] text-xs leading-5 text-slate-300">
+                  {intentDetail}
+                </p>
                 <p className="text-xs text-slate-400 truncate flex items-center gap-1">
                   <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
@@ -675,15 +804,6 @@ export function LandingPagesSettingsPage() {
                     >
                       Copy ad caption
                     </button>
-                    <a
-                      href={`https://api.qrserver.com/v1/create-qr-code/?size=600x600&margin=20&format=png&data=${encodeURIComponent(getQrCampaignUrl(page))}`}
-                      download={`${page.slug}-campaign-qr.png`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="rounded-lg border border-[#f2d894]/25 bg-[#d6b56d]/15 px-3 py-2 text-center text-xs font-semibold text-[#f7e7b0] transition-colors hover:bg-[#d6b56d]/25"
-                    >
-                      Download QR
-                    </a>
                     <a
                       href={`mailto:?subject=${encodeURIComponent(page.title)}&body=${encodeURIComponent(buildAdCaption(page))}`}
                       className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-center text-xs font-semibold text-slate-100 transition-colors hover:bg-white/10"
@@ -759,7 +879,7 @@ export function LandingPagesSettingsPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <h3 className="text-xl font-bold text-slate-900 dark:text-white">Launch Landing Page</h3>
-                  <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">Pick the agent goal, link a listing if you have one, then open a ready-to-advertise page.</p>
+                  <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">Pick the exact page type first, link a listing when it is a listing page, then open a ready-to-advertise draft.</p>
                 </div>
                 <button
                   onClick={() => setShowCreateModal(false)}
@@ -774,8 +894,8 @@ export function LandingPagesSettingsPage() {
             
             <div className="p-6 overflow-y-auto max-h-[calc(90vh-200px)]">
               <div className="mb-6">
-                <h4 className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-3">Choose the page goal</h4>
-                <div className="grid gap-3 md:grid-cols-3">
+                <h4 className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-3">Choose the page type</h4>
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                   {launchBlueprints.map((blueprint) => (
                     <button
                       key={blueprint.id}
@@ -783,6 +903,7 @@ export function LandingPagesSettingsPage() {
                       onClick={() => {
                         setSelectedBlueprint(blueprint.id);
                         setSelectedTemplate(blueprint.templateId);
+                        if (blueprint.id !== 'listing') setSelectedListingId('');
                         setPageTitle(blueprint.title);
                         setPageSlug(buildAvailableSlug(blueprint.slugPrefix));
                       }}
@@ -821,7 +942,16 @@ export function LandingPagesSettingsPage() {
                       </option>
                     ))}
                   </select>
-                  <p className="mt-2 text-xs text-slate-500">Linking a listing pulls in address, pricing, MLS details, and photo assets for the public page.</p>
+                  <p className="mt-2 text-xs text-slate-500">
+                    {selectedBlueprint === 'listing'
+                      ? 'Best for listing pages: linking a listing pulls in address, pricing, MLS details, and photo assets.'
+                      : 'Personal, buyer, and seller pages usually do not need a listing linked.'}
+                  </p>
+                  {selectedBlueprint === 'listing' && !selectedListingId && (
+                    <div className="mt-3 rounded-xl border border-amber-400/25 bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-700 dark:text-amber-200">
+                      This will create a listing campaign without a property attached. You can still link the listing later in the editor.
+                    </div>
+                  )}
                 </div>
 
                 <div>
@@ -853,7 +983,7 @@ export function LandingPagesSettingsPage() {
 
               <div className="mb-4">
                 <h4 className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-3">Visual style</h4>
-                <p className="text-xs text-slate-500 mb-4">A style is preselected from the goal above. Change it only if the listing needs a different look.</p>
+                <p className="text-xs text-slate-500 mb-4">A style is preselected from the page type above. Change it only if this campaign needs a different look.</p>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   {[
                     { id: 'modern-luxury', name: 'Modern Luxury', description: 'Clean lines with bold accents', image: 'https://images.unsplash.com/photo-1512917774080-9991f1c4c750?auto=format&fit=crop&w=400&q=80', tag: 'Popular', colors: ['#1e40af', '#0ea5e9', '#f59e0b'] },

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { LucideIcon } from 'lucide-react';
 import { BarChart3, CalendarDays, CheckCircle2, Clock3, FileText, Home, Mailbox, MapPin, Megaphone, Search, UsersRound } from 'lucide-react';
@@ -55,6 +55,36 @@ interface Suggestion {
   value: string;
 }
 
+type AppSearchResults = {
+  deals: any[];
+  clients: any[];
+  leads: any[];
+  tasks: any[];
+  listings: any[];
+  landingPages: any[];
+  marketingBlasts: any[];
+};
+
+type AppSearchItem = {
+  key: string;
+  icon: LucideIcon;
+  label: string;
+  detail: string;
+  meta: string;
+  route: string;
+  accent: string;
+};
+
+const emptyAppSearchResults: AppSearchResults = {
+  deals: [],
+  clients: [],
+  leads: [],
+  tasks: [],
+  listings: [],
+  landingPages: [],
+  marketingBlasts: [],
+};
+
 const formatPrice = (price: number) => {
   if (!Number.isFinite(price) || price <= 0) return 'Not listed';
   if (price >= 1000000) return `$${(price / 1000000).toFixed(1)}M`;
@@ -62,11 +92,62 @@ const formatPrice = (price: number) => {
   return `$${price}`;
 };
 
+const compactLabel = (value: unknown, fallback = 'Untitled') => {
+  const label = String(value || '').trim();
+  return label || fallback;
+};
+
+const fullName = (person: any) => compactLabel([person?.firstName, person?.lastName].filter(Boolean).join(' '), person?.email || 'Unknown contact');
+
+const optionalFullName = (person: any) => {
+  const name = [person?.firstName, person?.lastName].filter(Boolean).join(' ').trim();
+  return name || person?.email || '';
+};
+
+const formatDateShort = (value: unknown) => {
+  if (!value) return '';
+  const date = new Date(String(value));
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+};
+
 const buildMapUrl = (fullAddress: string) =>
   `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(fullAddress)}`;
 
 const buildAssessorUrl = (fullAddress: string) =>
   `https://www.google.com/search?q=${encodeURIComponent(`${fullAddress} county assessor`)}`;
+
+const normalizePropertyResult = (value: any): PropertyResult | null => {
+  if (!value || typeof value !== 'object') return null;
+  const address = value.address && typeof value.address === 'object' ? value.address : {};
+  const street = String(address.street || address.addressLine1 || '').trim();
+  const city = String(address.city || '').trim();
+  const state = String(address.state || 'UT').trim();
+  const zip = String(address.zip || address.zipCode || '').trim();
+  const fullAddress = String(address.fullAddress || [street, city, state, zip].filter(Boolean).join(', ') || '').trim();
+  const mlsId = value.mlsId || value.mlsNumber ? String(value.mlsId || value.mlsNumber).trim() : undefined;
+  const fallbackAddress = fullAddress || (mlsId ? `MLS #${mlsId}` : 'Property record');
+  const price = typeof value.price === 'number' ? value.price : Number(String(value.price || '').replace(/[^0-9.]/g, '')) || 0;
+  const photos = Array.isArray(value.photos) ? value.photos.filter((photo: unknown): photo is string => typeof photo === 'string' && photo.trim().length > 0) : [];
+
+  return {
+    source: String(value.source || 'unknown'),
+    mlsId,
+    address: {
+      street: street || fallbackAddress,
+      city,
+      state,
+      zip,
+      fullAddress: fallbackAddress,
+    },
+    price,
+    beds: Number(value.beds) || undefined,
+    baths: Number(value.baths) || undefined,
+    sqft: Number(value.sqft) || undefined,
+    photos,
+    url: String(value.url || buildMapUrl(fallbackAddress)),
+  };
+};
 
 const sourceColors: Record<string, string> = {
   utahrealestate: 'bg-[#d6b56d]/[0.15] text-[#7a5a24] dark:text-[#f2d894]',
@@ -113,10 +194,97 @@ export function CommandBar({ compact = false }: { compact?: boolean }) {
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
   const [cachedListings, setCachedListings] = useState<PropertyResult[]>([]);
   const [searchResults, setSearchResults] = useState<PropertyResult[]>([]);
+  const [appSearchResults, setAppSearchResults] = useState<AppSearchResults>(emptyAppSearchResults);
+  const [appSearchLoading, setAppSearchLoading] = useState(false);
+  const [appSearchError, setAppSearchError] = useState<string | null>(null);
+  const [selectedAppIndex, setSelectedAppIndex] = useState(0);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const appSearchAbortRef = useRef<AbortController | null>(null);
   
   const debouncedText = useDebounce(text, 150);
+
+  const appSearchItems = useMemo<AppSearchItem[]>(() => {
+    const dealItems = appSearchResults.deals.map((deal) => ({
+      key: `deal-${deal.id}`,
+      icon: FileText,
+      label: compactLabel(deal.title, deal.property?.street || 'Deal'),
+      detail: [deal.property?.street, deal.property?.city, deal.property?.state].filter(Boolean).join(', ') || 'Deal workspace',
+      meta: compactLabel(deal.status, 'Deal').replace(/_/g, ' '),
+      route: `/deals/${encodeURIComponent(deal.id)}/detail`,
+      accent: 'text-sky-700 dark:text-sky-300 bg-sky-500/10 dark:bg-sky-500/15',
+    }));
+
+    const clientItems = appSearchResults.clients.map((client) => ({
+      key: `client-${client.id}`,
+      icon: UsersRound,
+      label: fullName(client),
+      detail: [client.email, client.phone].filter(Boolean).join(' • ') || 'Client record',
+      meta: compactLabel(client.stage || client.role, 'Client').replace(/_/g, ' '),
+      route: `/clients/${encodeURIComponent(client.id)}`,
+      accent: 'text-violet-700 dark:text-violet-300 bg-violet-500/10 dark:bg-violet-500/15',
+    }));
+
+    const leadItems = appSearchResults.leads.map((lead) => ({
+      key: `lead-${lead.id}`,
+      icon: UsersRound,
+      label: fullName(lead),
+      detail: [lead.email, lead.phone, lead.landingPage?.title || lead.listing?.addressLine1].filter(Boolean).join(' • ') || 'Lead record',
+      meta: compactLabel(lead.priority || lead.source, 'Lead').replace(/_/g, ' '),
+      route: `/leads/${encodeURIComponent(lead.id)}`,
+      accent: 'text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 dark:bg-emerald-500/15',
+    }));
+
+    const taskItems = appSearchResults.tasks.map((task) => ({
+      key: `task-${task.id}`,
+      icon: CheckCircle2,
+      label: compactLabel(task.title, 'Task'),
+      detail: task.deal?.title || optionalFullName(task.client) || task.listing?.addressLine1 || task.description || 'Task board',
+      meta: [task.status, task.dueAt ? formatDateShort(task.dueAt) : task.bucket].filter(Boolean).join(' • ').replace(/_/g, ' '),
+      route: '/tasks',
+      accent: 'text-amber-700 dark:text-amber-300 bg-amber-500/10 dark:bg-amber-500/15',
+    }));
+
+    const listingItems = appSearchResults.listings.map((listing) => ({
+      key: `listing-${listing.id}`,
+      icon: Home,
+      label: compactLabel(listing.addressLine1 || listing.headline, 'Listing'),
+      detail: [listing.city, listing.state, listing.mlsId ? `MLS #${listing.mlsId}` : null].filter(Boolean).join(' • ') || 'Listing hub',
+      meta: listing.price ? formatPrice(Number(listing.price)) : compactLabel(listing.status, 'Listing').replace(/_/g, ' '),
+      route: `/listings?id=${encodeURIComponent(listing.id)}`,
+      accent: 'text-cyan-700 dark:text-cyan-300 bg-cyan-500/10 dark:bg-cyan-500/15',
+    }));
+
+    const landingPageItems = appSearchResults.landingPages.map((landingPage) => ({
+      key: `landing-${landingPage.id}`,
+      icon: Megaphone,
+      label: compactLabel(landingPage.title, 'Landing page'),
+      detail: landingPage.listing?.addressLine1 || `/sites/${landingPage.slug}`,
+      meta: `${landingPage.isActive ? 'Live' : 'Draft'} • ${Number(landingPage.leadsGenerated || 0)} leads`,
+      route: `/landing-pages/${encodeURIComponent(landingPage.id)}/edit`,
+      accent: 'text-fuchsia-700 dark:text-fuchsia-300 bg-fuchsia-500/10 dark:bg-fuchsia-500/15',
+    }));
+
+    const marketingItems = appSearchResults.marketingBlasts.map((blast) => ({
+      key: `marketing-${blast.id}`,
+      icon: Megaphone,
+      label: compactLabel(blast.title, 'Marketing campaign'),
+      detail: blast.listing?.addressLine1 || compactLabel(blast.playbook, 'Marketing').replace(/_/g, ' '),
+      meta: compactLabel(blast.status, 'Campaign').replace(/_/g, ' '),
+      route: `/marketing/blasts/${encodeURIComponent(blast.id)}`,
+      accent: 'text-rose-700 dark:text-rose-300 bg-rose-500/10 dark:bg-rose-500/15',
+    }));
+
+    return [
+      ...dealItems,
+      ...leadItems,
+      ...clientItems,
+      ...taskItems,
+      ...listingItems,
+      ...landingPageItems,
+      ...marketingItems,
+    ].slice(0, 12);
+  }, [appSearchResults]);
 
   // Voice input
   const { isListening, isSupported: voiceSupported, toggleListening } = useVoiceInput({
@@ -126,43 +294,61 @@ export function CommandBar({ compact = false }: { compact?: boolean }) {
     },
   });
 
+  const openPropertyWorkspaceRoute = useCallback((rawQuery?: string) => {
+    const cleaned = String(rawQuery || text || '')
+      .replace(/^(search homes in|homes in)\s*/i, '')
+      .trim();
+    if (!cleaned) return '/search';
+    return `/search?q=${encodeURIComponent(cleaned)}`;
+  }, [text]);
+
   // Direct property search function
   const searchPropertiesDirect = useCallback(async (query: string) => {
+    const cleanedQuery = query.trim();
+    if (!cleanedQuery) {
+      setError('Type a city, ZIP, MLS number, or address to search properties.');
+      return;
+    }
+
     setLoading(true);
     setError(null);
     setSearchResults([]);
     
     try {
       // Determine search type and build payload
-      const isMls = /^(?:mls[#:\s]*)?\d{5,10}$/i.test(query.trim());
-      const isZip = /^\d{5}$/.test(query.trim());
-      const isAddress = /^\d+\s+\w/.test(query.trim());
+      const isZip = /^\d{5}$/.test(cleanedQuery);
+      const isMls = /^(?:mls[#:\s]*)?\d{6,10}$/i.test(cleanedQuery);
+      const isAddress = /^\d+\s+\w/.test(cleanedQuery);
       
       const payload: Record<string, any> = {};
       
-      if (isMls) {
-        payload.mlsNumber = query.replace(/[^0-9]/g, '');
+      if (isZip) {
+        payload.zipCode = cleanedQuery;
+      } else if (isMls) {
+        payload.mlsNumber = cleanedQuery.replace(/[^0-9]/g, '');
         payload.query = payload.mlsNumber;
-      } else if (isZip) {
-        payload.zipCode = query.trim();
       } else if (isAddress) {
-        payload.address = query.trim();
-        payload.query = query.trim();
+        payload.address = cleanedQuery;
+        payload.query = cleanedQuery;
       } else {
         // Could be city name or general search
-        payload.query = query.trim();
-        payload.city = query.trim().replace(/,?\s*(ut|utah)$/i, '').trim();
+        payload.query = cleanedQuery;
+        payload.city = cleanedQuery.replace(/,?\s*(ut|utah)$/i, '').trim();
       }
 
       const res = await api.post('/search/properties', payload);
       
-      if (res.data?.results?.length > 0) {
-        setSearchResults(res.data.results);
+      const normalizedResults = Array.isArray(res.data?.results)
+        ? res.data.results.map(normalizePropertyResult).filter(Boolean) as PropertyResult[]
+        : [];
+
+      if (normalizedResults.length > 0) {
+        setSearchResults(normalizedResults);
         setCachedListings(prev => {
-          const newListings = [...res.data.results, ...prev];
+          const newListings = [...normalizedResults, ...prev];
           const seen = new Set();
           return newListings.filter((l: PropertyResult) => {
-            const key = l.address?.fullAddress || l.mlsId;
+            const key = l.address?.fullAddress || l.address?.street || l.mlsId;
             if (seen.has(key)) return false;
             seen.add(key);
             return true;
@@ -188,7 +374,10 @@ export function CommandBar({ compact = false }: { compact?: boolean }) {
     // Try to load cached listings from search history
     api.get('/search/history?limit=20').then(res => {
       if (res.data?.results) {
-        setCachedListings(res.data.results);
+        const normalized = Array.isArray(res.data.results)
+          ? res.data.results.map(normalizePropertyResult).filter(Boolean) as PropertyResult[]
+          : [];
+        setCachedListings(normalized);
       }
     }).catch(() => {});
   }, []);
@@ -204,12 +393,14 @@ export function CommandBar({ compact = false }: { compact?: boolean }) {
       
       // Add property suggestions
       data.properties?.forEach((p: any) => {
+        const address = String(p.address || p.fullAddress || p.addressLine1 || 'Property').trim();
+        const mlsNumber = p.mlsNumber || p.mlsId ? String(p.mlsNumber || p.mlsId).trim() : '';
         liveSuggestions.push({
           type: 'listing',
           icon: Home,
-          text: p.address.split(',')[0],
-          subtext: `${formatPrice(p.price)} • MLS# ${p.mlsNumber}`,
-          value: `MLS# ${p.mlsNumber}`,
+          text: address.split(',')[0] || 'Property',
+          subtext: [formatPrice(Number(p.price) || 0), mlsNumber ? `MLS# ${mlsNumber}` : null].filter(Boolean).join(' • '),
+          value: mlsNumber ? `MLS# ${mlsNumber}` : address,
         });
       });
       
@@ -226,13 +417,15 @@ export function CommandBar({ compact = false }: { compact?: boolean }) {
       
       // Add listing suggestions
       data.listings?.forEach((l: any) => {
-        if (!liveSuggestions.find(s => s.value.includes(l.mlsNumber))) {
+        const address = String(l.address || l.addressLine1 || 'Listing').trim();
+        const mlsNumber = l.mlsNumber || l.mlsId ? String(l.mlsNumber || l.mlsId).trim() : '';
+        if (!mlsNumber || !liveSuggestions.find(s => s.value.includes(mlsNumber))) {
           liveSuggestions.push({
             type: 'listing',
             icon: FileText,
-            text: l.address.split(',')[0],
+            text: address.split(',')[0] || 'Listing',
             subtext: `${l.status} • ${formatPrice(l.price)}`,
-            value: `MLS# ${l.mlsNumber}`,
+            value: mlsNumber ? `MLS# ${mlsNumber}` : address,
           });
         }
       });
@@ -296,8 +489,8 @@ export function CommandBar({ compact = false }: { compact?: boolean }) {
       // Match cached listings by address (fallback)
       if (newSuggestions.length < 4) {
         const matchingListings = cachedListings.filter(l =>
-          l.address.fullAddress.toLowerCase().includes(query) ||
-          l.address.street.toLowerCase().includes(query) ||
+          String(l.address?.fullAddress || '').toLowerCase().includes(query) ||
+          String(l.address?.street || '').toLowerCase().includes(query) ||
           l.mlsId?.includes(query)
         ).slice(0, 3);
 
@@ -321,8 +514,22 @@ export function CommandBar({ compact = false }: { compact?: boolean }) {
       ).slice(0, 3);
       newSuggestions.push(...matchingCommands);
 
-      // If typing a number, suggest MLS lookup (prioritize this)
-      if (/^\\d+$/.test(query) && query.length >= 4) {
+      // If typing a zip code, keep the first action as a ZIP search.
+      if (/^\d{5}$/.test(query)) {
+        newSuggestions.unshift({
+          type: 'city',
+          icon: Mailbox,
+          text: `Homes in ${query}`,
+          subtext: 'Search by ZIP code',
+          value: `Search homes in ${query}`,
+        });
+        setSuggestions(newSuggestions.slice(0, 6));
+        setSelectedIndex(0);
+        return;
+      }
+
+      // If typing a longer number, suggest MLS lookup.
+      if (/^\d+$/.test(query) && query.length >= 6) {
         // Remove any existing MLS suggestions to avoid duplicates
         const filtered = newSuggestions.filter(s => !s.value.includes(`MLS# ${query}`));
         filtered.unshift({
@@ -348,23 +555,47 @@ export function CommandBar({ compact = false }: { compact?: boolean }) {
         });
       }
 
-      // If typing a zip code
-      if (/^\\d{5}$/.test(query)) {
-        newSuggestions.unshift({
-          type: 'city',
-          icon: Mailbox,
-          text: `Homes in ${query}`,
-          subtext: 'Search by ZIP code',
-          value: `Search homes in ${query}`,
-        });
-      }
-
       setSuggestions(newSuggestions.slice(0, 6));
       setSelectedIndex(0);
     };
 
     buildSuggestions();
   }, [debouncedText, recentSearches, cachedListings, text, fetchLiveSuggestions]);
+
+  useEffect(() => {
+    const query = debouncedText.trim();
+    appSearchAbortRef.current?.abort();
+
+    if (!open || query.length < 2) {
+      setAppSearchResults(emptyAppSearchResults);
+      setAppSearchLoading(false);
+      setAppSearchError(null);
+      setSelectedAppIndex(0);
+      return;
+    }
+
+    const controller = new AbortController();
+    appSearchAbortRef.current = controller;
+    setAppSearchLoading(true);
+    setAppSearchError(null);
+
+    api.get('/search', { params: { q: query, limit: 5 }, signal: controller.signal })
+      .then((res) => {
+        if (controller.signal.aborted) return;
+        setAppSearchResults({ ...emptyAppSearchResults, ...(res.data || {}) });
+        setSelectedAppIndex(0);
+      })
+      .catch((err) => {
+        if (controller.signal.aborted || err?.name === 'CanceledError') return;
+        setAppSearchResults(emptyAppSearchResults);
+        setAppSearchError('Workspace search is unavailable right now.');
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setAppSearchLoading(false);
+      });
+
+    return () => controller.abort();
+  }, [debouncedText, open]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -421,9 +652,9 @@ export function CommandBar({ compact = false }: { compact?: boolean }) {
     
     // Detect if this is a property search
     const trimmedQuery = query.trim().toLowerCase();
-    const isMlsSearch = /^(?:mls[#:\s]*)?\d{5,10}$/i.test(query.trim());
-    const isAddressSearch = /^\d+\s+\w/.test(query.trim());
     const isZipSearch = /^\d{5}$/.test(query.trim());
+    const isMlsSearch = /^(?:mls[#:\s]*)?\d{6,10}$/i.test(query.trim());
+    const isAddressSearch = /^\d+\s+\w/.test(query.trim());
     const isCitySearch = trimmedQuery.startsWith('search homes in') || 
                          trimmedQuery.startsWith('homes in') ||
                          /^(salt lake|park city|provo|orem|ogden|sandy|draper|lehi|herriman)/i.test(trimmedQuery);
@@ -516,9 +747,17 @@ export function CommandBar({ compact = false }: { compact?: boolean }) {
   if (aiLevel === 'OFF') return null;
 
   return (
-    <div ref={containerRef} className="relative z-[120] animate-slide-up">
+    <div ref={containerRef} className="relative z-[180] animate-slide-up">
+      {open && (
+        <div
+          className="fixed inset-0 z-[181] bg-transparent"
+          onMouseDown={() => setOpen(false)}
+          onTouchStart={() => setOpen(false)}
+          aria-hidden="true"
+        />
+      )}
       {/* Main command bar */}
-      <div className="relative group">
+      <div className="relative z-[182] group">
         <div className={`absolute inset-0 bg-gradient-to-r from-[#d6b56d] to-[#9f7933] ${compact ? 'rounded-xl' : 'rounded-2xl'} opacity-0 group-hover:opacity-20 blur-xl transition-opacity duration-300`} />
         <div
           className={`relative flex items-center gap-3 shadow-lg border border-slate-200/80 dark:border-[#f2d894]/[0.14] group-hover:border-[#d6b56d]/[0.45] dark:group-hover:border-[#f2d894]/[0.35] transition-all backdrop-blur-xl ae-surface ${
@@ -600,8 +839,8 @@ export function CommandBar({ compact = false }: { compact?: boolean }) {
 
       {/* Dropdown panel */}
       {open && (
-        <div className="absolute top-full left-0 right-0 mt-2 z-[130] animate-scale-in">
-          <div className="rounded-2xl shadow-2xl border border-slate-200/80 bg-white/96 dark:border-[#f2d894]/[0.14] dark:bg-[#0b1220]/[0.96] backdrop-blur-xl overflow-hidden max-h-[70vh] overflow-y-auto">
+        <div className="absolute top-full left-0 right-0 mt-2 z-[182] animate-scale-in">
+          <div className="rounded-2xl shadow-2xl border border-slate-200/80 bg-white/96 dark:border-[#f2d894]/[0.14] dark:bg-[#0b1220]/[0.96] backdrop-blur-xl overflow-hidden max-h-[min(72vh,680px)] overflow-y-auto">
             
             {/* Dropdown Header with Close Button */}
             <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200/80 bg-[#f8f3e6]/[0.70] dark:border-[#f2d894]/[0.12] dark:bg-[#d6b56d]/[0.06]">
@@ -637,6 +876,54 @@ export function CommandBar({ compact = false }: { compact?: boolean }) {
               </div>
             )}
 
+            {!resp && searchResults.length === 0 && (appSearchItems.length > 0 || appSearchLoading || appSearchError) && (
+              <div className="border-b border-slate-200/80 p-3 dark:border-white/10">
+                <div className="mb-2 flex items-center justify-between gap-3 px-1">
+                  <div>
+                    <div className="text-xs font-bold uppercase tracking-[0.18em] text-[#7a5a24] dark:text-[#f2d894]">Workspace search</div>
+                    <div className="text-[11px] text-slate-500 dark:text-slate-400">Deals, leads, clients, tasks, listings, pages, marketing</div>
+                  </div>
+                  {appSearchLoading && (
+                    <div className="h-4 w-4 rounded-full border-2 border-[#d6b56d]/30 border-t-[#9f7933] animate-spin" />
+                  )}
+                </div>
+
+                {appSearchError && (
+                  <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-200">
+                    {appSearchError}
+                  </div>
+                )}
+
+                {appSearchItems.length > 0 && (
+                  <div className="grid gap-2 md:grid-cols-2">
+                    {appSearchItems.map((item, index) => {
+                      const ItemIcon = item.icon;
+                      return (
+                        <button
+                          key={item.key}
+                          type="button"
+                          onClick={() => { navigate(item.route); setOpen(false); }}
+                          onMouseEnter={() => setSelectedAppIndex(index)}
+                          className={`group flex min-w-0 items-center gap-3 rounded-xl border p-3 text-left transition-all ${index === selectedAppIndex ? 'border-[#d6b56d]/45 bg-[#faf7ef] dark:border-[#f2d894]/25 dark:bg-[#d6b56d]/10' : 'border-slate-200 bg-white/70 hover:border-[#d6b56d]/35 hover:bg-[#faf7ef] dark:border-white/10 dark:bg-white/[0.03] dark:hover:border-white/20 dark:hover:bg-white/[0.07]'}`}
+                        >
+                          <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${item.accent}`}>
+                            <ItemIcon className="h-4 w-4" strokeWidth={2.2} />
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-sm font-semibold text-slate-900 dark:text-white">{item.label}</span>
+                            <span className="mt-0.5 block truncate text-xs text-slate-500 dark:text-slate-400">{item.detail}</span>
+                          </span>
+                          <span className="hidden max-w-[92px] truncate rounded-full bg-slate-100 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500 dark:bg-white/10 dark:text-slate-300 sm:block">
+                            {item.meta}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Direct Property Search Results */}
             {searchResults.length > 0 && (
               <div className="p-4 space-y-3">
@@ -649,7 +936,7 @@ export function CommandBar({ compact = false }: { compact?: boolean }) {
                   </h4>
                   <div className="flex items-center gap-2">
                     <button
-                      onClick={() => { navigate('/search'); setOpen(false); }}
+                      onClick={() => { navigate(openPropertyWorkspaceRoute()); setOpen(false); }}
                       className="text-xs text-[#7a5a24] hover:text-[#172235] dark:text-[#f2d894] dark:hover:text-[#f7e7b0]"
                     >
                       View all →
@@ -761,7 +1048,7 @@ export function CommandBar({ compact = false }: { compact?: boolean }) {
                 </div>
                 {searchResults.length > 5 && (
                   <button
-                    onClick={() => { navigate('/search'); setOpen(false); }}
+                    onClick={() => { navigate(openPropertyWorkspaceRoute()); setOpen(false); }}
                     className="w-full py-2 text-center text-sm text-[#7a5a24] hover:text-[#172235] bg-[#d6b56d]/[0.10] hover:bg-[#d6b56d]/[0.18] dark:text-[#f2d894] dark:hover:text-[#f7e7b0] rounded-xl transition-colors"
                   >
                     View all {searchResults.length} results →
@@ -803,7 +1090,7 @@ export function CommandBar({ compact = false }: { compact?: boolean }) {
                         {resp.data.properties.length} Properties Found
                       </h4>
                       <button
-                        onClick={() => { navigate('/search'); setOpen(false); }}
+                        onClick={() => { navigate(openPropertyWorkspaceRoute()); setOpen(false); }}
                         className="text-xs text-[#7a5a24] hover:text-[#172235] dark:text-[#f2d894] dark:hover:text-[#f7e7b0]"
                       >
                         View all →
@@ -1000,13 +1287,6 @@ export function CommandBar({ compact = false }: { compact?: boolean }) {
         </div>
       )}
 
-      {/* Backdrop */}
-      {open && (
-        <div 
-          className="fixed inset-0 bg-black/30 -z-10"
-          onClick={() => setOpen(false)}
-        />
-      )}
     </div>
   );
 }

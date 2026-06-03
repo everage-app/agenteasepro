@@ -123,33 +123,39 @@ model Agent {
   webhookSubscriptions    WebhookSubscription[]
   contactEmailTemplates   ContactEmailTemplate[]
   smartLists              SmartList[]
-  teamId      String?
-  team        Team?      @relation("AgentPrimaryTeam", fields: [teamId], references: [id])
-  brokerageId String?
-  brokerage   Brokerage? @relation(fields: [brokerageId], references: [id])
+  teamId                  String?
+  team                    Team?                     @relation("AgentPrimaryTeam", fields: [teamId], references: [id])
+  brokerageId             String?
+  brokerage               Brokerage?                @relation(fields: [brokerageId], references: [id])
+
+  @@index([createdAt], map: "Agent_createdAt_idx")
+  @@index([status, createdAt], map: "Agent_status_createdAt_idx")
+  @@index([subscriptionStatus, createdAt], map: "Agent_subscriptionStatus_createdAt_idx")
+  @@index([teamId], map: "Agent_teamId_idx")
+  @@index([brokerageId], map: "Agent_brokerageId_idx")
 }
 
 model SupportRequest {
-  id            String          @id @default(uuid())
-  agentId       String
-  agent         Agent           @relation("SupportOwner", fields: [agentId], references: [id], onDelete: Cascade)
+  id                String          @id @default(uuid())
+  agentId           String
+  agent             Agent           @relation("SupportOwner", fields: [agentId], references: [id], onDelete: Cascade)
   assignedToAgentId String?
-  assignedToAgent   Agent?      @relation("SupportAssignment", fields: [assignedToAgentId], references: [id], onDelete: SetNull)
-  category      SupportCategory @default(GENERAL)
-  subject       String
-  message       String
-  status        SupportStatus   @default(OPEN)
-  priority      SupportPriority @default(MEDIUM)
-  pagePath      String?
-  pageUrl       String?
-  userAgent     String?
-  meta          Json?
-  internalNotes String?
-  firstResponseAt DateTime?
-  dueAt         DateTime?
-  resolvedAt    DateTime?
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
+  assignedToAgent   Agent?          @relation("SupportAssignment", fields: [assignedToAgentId], references: [id], onDelete: SetNull)
+  category          SupportCategory @default(GENERAL)
+  subject           String
+  message           String
+  status            SupportStatus   @default(OPEN)
+  priority          SupportPriority @default(MEDIUM)
+  pagePath          String?
+  pageUrl           String?
+  userAgent         String?
+  meta              Json?
+  internalNotes     String?
+  firstResponseAt   DateTime?
+  dueAt             DateTime?
+  resolvedAt        DateTime?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
 
   @@index([agentId])
   @@index([assignedToAgentId, status])
@@ -158,16 +164,16 @@ model SupportRequest {
 }
 
 model InternalStaff {
-  id        String            @id @default(cuid())
-  agentId   String            @unique
-  agent     Agent             @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  role      InternalStaffRole @default(READ_ONLY)
-  title     String?
-  active    Boolean           @default(true)
-  notes     String?
+  id           String            @id @default(cuid())
+  agentId      String            @unique
+  agent        Agent             @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  role         InternalStaffRole @default(READ_ONLY)
+  title        String?
+  active       Boolean           @default(true)
+  notes        String?
   lastAccessAt DateTime?
-  createdAt DateTime          @default(now())
-  updatedAt DateTime          @updatedAt
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
 
   @@index([role, active])
 }
@@ -195,43 +201,43 @@ model InternalAuditLog {
 }
 
 model AgentProfileSettings {
-  id                String    @id @default(cuid())
-  agentId           String    @unique
-  agent             Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  firstName         String?
-  lastName          String?
-  phone             String?
-  licenseNumber     String?
-  licenseSuffix     String?
-  licenseState      String?
-  licenseExpiry     DateTime?
-  narMemberId       String?
-  timezone          String    @default("America/Denver")
-  signatureBlock    String?
-  photoUrl          String?
-  yearsExperience   Int?
-  specializations   String?
-  bio               String?
+  id                      String    @id @default(cuid())
+  agentId                 String    @unique
+  agent                   Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  firstName               String?
+  lastName                String?
+  phone                   String?
+  licenseNumber           String?
+  licenseSuffix           String?
+  licenseState            String?
+  licenseExpiry           DateTime?
+  narMemberId             String?
+  timezone                String    @default("America/Denver")
+  signatureBlock          String?
+  photoUrl                String?
+  yearsExperience         Int?
+  specializations         String?
+  bio                     String?
   // Branding
-  brokerageName     String?
-  brokerageLogoUrl  String?
-  brokerageLogoWidth Int       @default(260)
-  brokerageLogoBackground String @default("CARD")
-  brokerageAddress  String?
-  brokeragePhone    String?
-  officeAddress     String?
-  brokerageLicense  String?
-  brandColor        String    @default("#3B82F6")
-  accentColor       String    @default("#06B6D4")
-  logoUrl           String?
-  websiteUrl        String?
-  googleAnalyticsId String?
-  facebookUrl       String?
-  instagramUrl      String?
-  linkedinUrl       String?
-  emailFooter       String?
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+  brokerageName           String?
+  brokerageLogoUrl        String?
+  brokerageLogoWidth      Int       @default(260)
+  brokerageLogoBackground String    @default("CARD")
+  brokerageAddress        String?
+  brokeragePhone          String?
+  officeAddress           String?
+  brokerageLicense        String?
+  brandColor              String    @default("#3B82F6")
+  accentColor             String    @default("#06B6D4")
+  logoUrl                 String?
+  websiteUrl              String?
+  googleAnalyticsId       String?
+  facebookUrl             String?
+  instagramUrl            String?
+  linkedinUrl             String?
+  emailFooter             String?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
 }
 
 model AgentNotificationPrefs {
@@ -353,9 +359,13 @@ model Deal {
 
   @@index([agentId, archivedAt, status])
   @@index([agentId, deletedAt])
+  @@index([agentId, status, createdAt], map: "Deal_agentId_status_createdAt_idx")
+  @@index([agentId, lastActivityAt], map: "Deal_agentId_lastActivityAt_idx")
   @@index([propertyId])
   @@index([buyerId])
   @@index([sellerId])
+  @@index([teamId], map: "Deal_teamId_idx")
+  @@index([brokerageId], map: "Deal_brokerageId_idx")
 }
 
 enum DealStatus {
@@ -517,6 +527,8 @@ model Listing {
 
   @@index([agentId, status])
   @@index([agentId, createdAt])
+  @@index([agentId, status, createdAt], map: "Listing_agentId_status_createdAt_idx")
+  @@index([agentId, isFeatured, status], map: "Listing_agentId_isFeatured_status_idx")
 }
 
 enum ListingStatus {
@@ -610,6 +622,8 @@ model MarketingDeliveryLog {
   createdAt        DateTime       @default(now())
 
   @@index([agentId, createdAt])
+  @@index([agentId, status, createdAt], map: "MarketingDeliveryLog_agentId_status_createdAt_idx")
+  @@index([agentId, blastId, createdAt], map: "MarketingDeliveryLog_agentId_blastId_createdAt_idx")
   @@index([blastId, createdAt])
   @@index([channelId, createdAt])
   @@index([status, createdAt])
@@ -638,10 +652,14 @@ model MarketingEmailEvent {
 
   @@index([createdAt])
   @@index([agentId, occurredAt])
+  @@index([agentId, eventType, occurredAt], map: "MarketingEmailEvent_agentId_eventType_occurredAt_idx")
+  @@index([agentId, blastId, occurredAt], map: "MarketingEmailEvent_agentId_blastId_occurredAt_idx")
+  @@index([agentId, email, occurredAt], map: "MarketingEmailEvent_agentId_email_occurredAt_idx")
   @@index([blastId, occurredAt])
   @@index([channelId, occurredAt])
   @@index([eventType, occurredAt])
   @@index([messageId])
+  @@index([messageId, eventType], map: "MarketingEmailEvent_messageId_eventType_idx")
 }
 
 enum BlastPlaybook {
@@ -687,7 +705,11 @@ model SignatureEnvelope {
   audits             ESignAudit[]
 
   @@index([agentId])
+  @@index([agentId, createdAt], map: "SignatureEnvelope_agentId_createdAt_idx")
+  @@index([agentId, completedAt], map: "SignatureEnvelope_agentId_completedAt_idx")
   @@index([dealId])
+  @@index([dealId, createdAt], map: "SignatureEnvelope_dealId_createdAt_idx")
+  @@index([type, createdAt], map: "SignatureEnvelope_type_createdAt_idx")
 }
 
 enum SignatureEnvelopeType {
@@ -712,6 +734,9 @@ model Signer {
   auditHash     String?
 
   @@index([envelopeId])
+  @@index([envelopeId, role], map: "Signer_envelopeId_role_idx")
+  @@index([envelopeId, signedAt], map: "Signer_envelopeId_signedAt_idx")
+  @@index([email], map: "Signer_email_idx")
 }
 
 enum SignerRole {
@@ -1062,7 +1087,10 @@ model LandingPage {
   pageViews      PageView[]
 
   @@index([agentId])
+  @@index([agentId, isActive], map: "LandingPage_agentId_isActive_idx")
+  @@index([agentId, createdAt], map: "LandingPage_agentId_createdAt_idx")
   @@index([listingId])
+  @@index([customDomain], map: "LandingPage_customDomain_idx")
 }
 
 model PageView {
@@ -1089,7 +1117,10 @@ model PageView {
   createdAt     DateTime     @default(now())
 
   @@index([landingPageId])
+  @@index([landingPageId, visitorId], map: "PageView_landingPageId_visitorId_idx")
+  @@index([landingPageId, createdAt], map: "PageView_landingPageId_createdAt_idx")
   @@index([listingId])
+  @@index([listingId, createdAt], map: "PageView_listingId_createdAt_idx")
   @@index([visitorId])
   @@index([createdAt])
 }
@@ -1140,11 +1171,18 @@ model Lead {
 
   @@unique([agentId, email])
   @@index([agentId])
+  @@index([agentId, createdAt], map: "Lead_agentId_createdAt_idx")
+  @@index([agentId, source, createdAt], map: "Lead_agentId_source_createdAt_idx")
+  @@index([agentId, priority, createdAt], map: "Lead_agentId_priority_createdAt_idx")
+  @@index([agentId, converted, createdAt], map: "Lead_agentId_converted_createdAt_idx")
+  @@index([agentId, landingPageId, createdAt], map: "Lead_agentId_landingPageId_createdAt_idx")
   @@index([listingId])
   @@index([landingPageId])
   @@index([email])
   @@index([createdAt])
   @@index([agentId, deletedAt])
+  @@index([teamId, createdAt], map: "Lead_teamId_createdAt_idx")
+  @@index([brokerageId, createdAt], map: "Lead_brokerageId_createdAt_idx")
 }
 
 model LeadActivity {
@@ -1159,6 +1197,8 @@ model LeadActivity {
   createdAt    DateTime @default(now())
 
   @@index([leadId])
+  @@index([leadId, createdAt], map: "LeadActivity_leadId_createdAt_idx")
+  @@index([listingId, createdAt], map: "LeadActivity_listingId_createdAt_idx")
   @@index([createdAt])
 }
 
@@ -1197,7 +1237,9 @@ model Client {
   searchCriteria  SearchCriteria[]
 
   @@index([agentId, stage])
+  @@index([agentId, email], map: "Client_agentId_email_idx")
   @@index([agentId, lastContactAt])
+  @@index([agentId, lastMarketingAt], map: "Client_agentId_lastMarketingAt_idx")
   @@index([agentId, createdAt])
   @@index([agentId, deletedAt])
 }
@@ -1397,6 +1439,8 @@ model LoginAttemptRecord {
   createdAt   DateTime  @default(now())
 
   @@index([email, createdAt])
+  @@index([email, lockedUntil], map: "LoginAttemptRecord_email_lockedUntil_idx")
+  @@index([ipAddress, createdAt], map: "LoginAttemptRecord_ipAddress_createdAt_idx")
   @@index([agentId, createdAt])
 }
 
@@ -1420,6 +1464,8 @@ model DistributedLock {
   lockedBy  String // Instance identifier
   lockedAt  DateTime @default(now())
   expiresAt DateTime
+
+  @@index([expiresAt], map: "DistributedLock_expiresAt_idx")
 }
 
 // ==================== EMAIL / SMS SEQUENCES (Drip Campaigns) ====================
@@ -1499,6 +1545,7 @@ model SequenceEnrollment {
 
   @@index([sequenceId, status])
   @@index([agentId])
+  @@index([agentId, status], map: "SequenceEnrollment_agentId_status_idx")
   @@index([nextStepAt, status])
   @@index([contactType, contactId])
 }
@@ -1602,19 +1649,19 @@ model WebhookDeliveryLog {
 }
 
 model ContactEmailTemplate {
-  id         String   @id @default(cuid())
+  id         String    @id @default(cuid())
   agentId    String
-  agent      Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  agent      Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
   name       String
   subject    String
   body       String
-  usageCount Int      @default(0)
+  usageCount Int       @default(0)
   lastUsedAt DateTime?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
 
-  @@index([agentId, createdAt])
   @@unique([agentId, name])
+  @@index([agentId, createdAt])
 }
 
 // ==================== ORGANIZATION & STAKEHOLDERS ====================
@@ -1738,8 +1785,8 @@ model SmartList {
   agent     Agent    @relation(fields: [agentId], references: [id])
   name      String
   icon      String?
-  filters   Json     // Dynamic filters structure (e.g., status, notes count, tags)
-  sortOrder Json?    // Config for sorting (e.g., {"field": "lastActivityAt", "direction": "desc"})
+  filters   Json // Dynamic filters structure (e.g., status, notes count, tags)
+  sortOrder Json? // Config for sorting (e.g., {"field": "lastActivityAt", "direction": "desc"})
   isSystem  Boolean  @default(false) // e.g., "All Leads", "Hot Listings" (cannot be deleted)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

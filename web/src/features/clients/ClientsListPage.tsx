@@ -644,6 +644,7 @@ export function ClientsListPage() {
   return (
     <PageLayout
       title="Clients"
+      maxWidth="workspace"
       subtitle="A cleaner relationship hub for converted leads, active clients, deal handoffs, and follow-up work."
     >
       <div className="relative ae-content">

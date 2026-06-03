@@ -13,8 +13,7 @@ export function buildTrackedLandingQrUrl(baseUrl: string, slug: string, token?: 
   try {
     const url = new URL(baseUrl);
     if (trimmedToken) {
-      url.searchParams.set('lpqr', trimmedToken);
-      url.searchParams.set('utm_content', trimmedToken);
+      return `${url.origin}/q/${encodeURIComponent(trimmedToken)}`;
     }
     url.searchParams.set('utm_source', 'qr');
     url.searchParams.set('utm_medium', 'print');

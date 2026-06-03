@@ -117,6 +117,7 @@ export async function runLeadCaptureWorkflow(options: LeadCaptureWorkflowOptions
         message: body,
         actionUrl: leadUrl,
         actionText: 'Open lead',
+        replyTo: options.lead.email || undefined,
       });
     } catch (error) {
       console.error('Failed to send lead notification email:', error);

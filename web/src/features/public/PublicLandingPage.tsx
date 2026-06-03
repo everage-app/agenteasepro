@@ -1,9 +1,12 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
+import { ArrowRight, Award, Calendar, Check, Copy, ExternalLink, FileDown, Home, Link2, Mail, Phone, Share2, ShieldCheck, Star, Zap } from 'lucide-react';
 import { getTemplateMediaPack } from '../landing/templateMediaSuggestions';
 import { toDisplayErrorMessage } from '../../lib/errorMessages';
 import { buildTrackedLandingQrUrl } from '../../lib/landingQr';
+import { downloadLandingPagePdf } from '../../lib/landingPdf';
+import { getLandingPageIntent, looksLikePersonalHeadline, looksLikePersonalSubheadline } from '../../lib/landingPageIntent';
 
 function hexToRgb(hex?: string | null) {
   const value = String(hex || '').replace('#', '').trim();
@@ -48,6 +51,8 @@ type PublicLandingPageResponse = {
   title: string;
   description?: string | null;
   slug: string;
+  pageKind?: string | null;
+  publicUrl?: string;
   theme: {
     id: string;
     layout?: 'modern' | 'classic' | 'minimal' | 'bold' | 'elegant';
@@ -68,6 +73,7 @@ type PublicLandingPageResponse = {
     headline: string;
     subheadline?: string;
     ctaText?: string;
+    pageKind?: string | null;
     galleryImages?: string[];
     features?: string[];
     urgencyText?: string;
@@ -121,6 +127,7 @@ type PublicLandingPageResponse = {
     bio?: string | null;
     licenseNumber?: string | null;
     websiteUrl?: string | null;
+    profileUrl?: string | null;
     facebookUrl?: string | null;
     instagramUrl?: string | null;
     linkedinUrl?: string | null;
@@ -210,6 +217,13 @@ type LeadFormState = {
   prequalified: boolean;
 };
 
+type HeaderQrItem = {
+  key: 'listing' | 'personal';
+  label: string;
+  switchLabel: string;
+  url: string;
+};
+
 function formatCurrency(value?: number | null) {
   if (value == null || !Number.isFinite(Number(value))) return null;
   return new Intl.NumberFormat('en-US', {
@@ -241,6 +255,63 @@ function toEmbedUrl(url?: string | null): string | null {
   const vimeoMatch = trimmed.match(/vimeo\.com\/(?:video\/)?(\d+)/);
   if (vimeoMatch) return `https://player.vimeo.com/video/${vimeoMatch[1]}`;
   return trimmed;
+}
+
+function getQrDisplayLabel(value: string | undefined | null, fallback: string) {
+  const label = String(value || '').trim();
+  if (!label || /free\s*search/i.test(label)) return fallback;
+  if (/agent\s*info/i.test(fallback) && /^agent\s*(info|contact)(\s*qr)?$/i.test(label)) return fallback;
+  return label;
+}
+
+function slugToTitle(value: string | undefined | null) {
+  return String(value || '')
+    .split(/[-_]+/)
+    .filter(Boolean)
+    .map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`)
+    .join(' ');
+}
+
+function compactQrCardLabel(value: string | undefined | null, fallback: string, maxLength = 24) {
+  const label = String(value || '').replace(/\s+/g, ' ').replace(/^free\s+/i, '').trim();
+  if (!label) return fallback;
+  if (label.length <= maxLength) return label;
+  return `${label.slice(0, Math.max(8, maxLength - 3)).trimEnd()}...`;
+}
+
+function normalizeLeadCtaText(value: string | undefined | null, hasValuationSection: boolean, hasListing: boolean) {
+  const label = String(value || '').trim();
+  if (!label) return hasListing ? 'Request listing info' : 'Request agent info';
+  if (!hasValuationSection && /home\s*value|valuation\s*report/i.test(label)) {
+    return hasListing ? 'Request listing info' : 'Request agent info';
+  }
+  return label;
+}
+
+function buildUtahRealEstateMlsUrl(mlsNumber: string) {
+  const normalized = mlsNumber.replace(/[^0-9A-Za-z-]/g, '').trim();
+  return normalized ? `https://www.utahrealestate.com/${encodeURIComponent(normalized)}` : '';
+}
+
+function formatPhoneDisplay(value: string) {
+  const digits = value.replace(/\D/g, '');
+  if (digits.length === 10) return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+  if (digits.length === 11 && digits.startsWith('1')) return `+1 (${digits.slice(1, 4)}) ${digits.slice(4, 7)}-${digits.slice(7)}`;
+  return value;
+}
+
+function toRoundedNumber(value: unknown) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.round(numeric) : null;
+}
+
+function isValidEmailAddress(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
+function isValidPhoneNumber(value: string) {
+  const digits = value.replace(/\D/g, '');
+  return digits.length >= 10;
 }
 
 const LANDING_PAGE_FONT_ALLOWLIST = new Set([
@@ -354,7 +425,15 @@ export function PublicLandingPage() {
   const [gateSubmitting, setGateSubmitting] = useState(false);
   const [gateError, setGateError] = useState<string | null>(null);
   const [gateForm, setGateForm] = useState({ name: '', email: '', phone: '' });
-  const [headerQrVariant, setHeaderQrVariant] = useState<'listing' | 'personal'>('listing');
+  const [quickQuestionOpen, setQuickQuestionOpen] = useState(false);
+  const [quickQuestionSubmitting, setQuickQuestionSubmitting] = useState(false);
+  const [quickQuestionMessage, setQuickQuestionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [quickQuestionForm, setQuickQuestionForm] = useState({ name: '', email: '', phone: '', message: '' });
+  const [shareMenuOpen, setShareMenuOpen] = useState(false);
+  const [shareStatus, setShareStatus] = useState<'idle' | 'copied' | 'shared'>('idle');
+  const [pdfStatus, setPdfStatus] = useState<'idle' | 'building' | 'ready' | 'error'>('idle');
+  const [qrCopyStatus, setQrCopyStatus] = useState<'listing' | 'personal' | null>(null);
+  const [activeHeaderQrKey, setActiveHeaderQrKey] = useState<'listing' | 'personal'>('listing');
 
   useEffect(() => {
     let cancelled = false;
@@ -435,11 +514,16 @@ export function PublicLandingPage() {
   const safeHeroImage = page?.heroImage && !failedImages.hero ? page.heroImage : null;
   const safeGalleryPhotos = galleryPhotos.filter((_, index) => !failedImages[`gallery-${index}`]);
   const safeAgentPhoto = page?.agent.photoUrl && !failedImages.agent ? page.agent.photoUrl : null;
-  const safeBrandLogo = (page?.brokerage.logoUrl || page?.branding.logoUrl) && !failedImages.brand
-    ? page.brokerage.logoUrl || page.branding.logoUrl
-    : null;
+  const brandLogoCandidates = Array.from(new Set([
+    page?.brokerage.logoUrl,
+    page?.branding.logoUrl,
+  ].filter(Boolean) as string[]));
+  const safeBrandLogo = brandLogoCandidates.find((url) => !failedImages[`brand:${url}`]) || null;
+  const markBrandLogoFailed = (url: string | null) => {
+    if (!url) return;
+    setFailedImages((current) => ({ ...current, [`brand:${url}`]: true }));
+  };
   const brokerageLogoWidth = clampBrokerageLogoWidth(page?.brokerage.logoWidth);
-  const headerBrokerageLogoWidth = Math.min(brokerageLogoWidth, 420);
   const compactBrokerageLogoWidth = Math.min(brokerageLogoWidth, 260);
   const brokerageLogoBackground = normalizeBrokerageLogoBackground(page?.brokerage.logoBackground);
   const brandName = page?.brokerage.name || page?.agent.name || 'Agent';
@@ -450,14 +534,50 @@ export function PublicLandingPage() {
     .map((part) => part[0])
     .join('')
     .toUpperCase() || 'A';
-  const brokerageLogoClass = brokerageLogoBackground === 'TRANSPARENT'
-    ? 'h-14 rounded-2xl object-contain sm:h-16'
-    : 'h-14 rounded-2xl border border-white/10 bg-white/95 px-4 py-2 object-contain shadow-sm sm:h-16';
+  const agentInitials = (page?.agent.name || 'Agent')
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join('')
+    .toUpperCase() || 'A';
   const compactBrokerageLogoClass = brokerageLogoBackground === 'TRANSPARENT'
     ? 'h-11 rounded-xl object-contain'
     : 'h-11 rounded-xl border border-white/10 bg-white/90 p-2 object-contain shadow-sm';
+  const sections = page?.sections || {};
+  const locationLabel = [page?.listing?.city, page?.listing?.state].filter(Boolean).join(', ');
+  const pageIntent = getLandingPageIntent({
+    title: page?.title,
+    description: page?.description,
+    pageKind: page?.pageKind || page?.content.pageKind,
+    content: page?.content,
+    sections,
+    listing: page?.listing,
+  });
+  const heroHeadline = page
+    ? pageIntent.kind === 'listing' && page.listing && looksLikePersonalHeadline(page.content.headline, page.agent.name)
+      ? page.listing.address || page.title || page.content.headline
+      : page.content.headline || page.listing?.address || page.title
+    : '';
+  const listingSubheadlineFallback = page?.listing
+    ? page.listing.description ||
+      [
+        [
+          page.listing.beds != null && page.listing.baths != null ? `${page.listing.beds} beds, ${page.listing.baths} baths` : '',
+          page.listing.sqft ? `${Number(page.listing.sqft).toLocaleString()} sqft` : '',
+        ].filter(Boolean).join(' - '),
+        locationLabel,
+        'showing options and direct listing guidance',
+      ].filter(Boolean).join(' - ')
+    : '';
   const fallbackSubheadline = page
-    ? page.content.subheadline || page.description || `Private showings, pricing guidance, and direct local insight with ${page.agent.name}.`
+    ? pageIntent.kind === 'listing' && page.listing && looksLikePersonalSubheadline(page.content.subheadline)
+      ? listingSubheadlineFallback || page.description || `Private showings, pricing guidance, and direct listing insight with ${page.agent.name}.`
+      : page.content.subheadline || page.description || (
+          pageIntent.kind === 'agent-profile'
+            ? `Connect with ${page.agent.name} for buying, selling, home value questions, and next-step real estate guidance.`
+            : `Private showings, pricing guidance, and direct local insight with ${page.agent.name}.`
+        )
     : '';
 
   const appliedHeadingFont = page?.customStyles?.headingFont || page?.theme.fonts.heading || 'Playfair Display';
@@ -527,6 +647,10 @@ export function PublicLandingPage() {
   const primaryButtonStyle = useMemo(() => {
     const primary = page?.branding.primaryColor || page?.theme.colors.primary || '#1e40af';
     const secondary = page?.theme.colors.secondary || page?.branding.secondaryColor || '#0ea5e9';
+    const primaryLuminance = luminance(primary);
+    const secondaryLuminance = luminance(secondary);
+    const primaryTextColor = primaryLuminance > 0.56 ? '#0f172a' : '#ffffff';
+    const gradientTextColor = (primaryLuminance + secondaryLuminance) / 2 > 0.58 ? '#0f172a' : '#ffffff';
 
     switch (buttonStyleMode) {
       case 'outline':
@@ -540,21 +664,21 @@ export function PublicLandingPage() {
         return {
           backgroundColor: primary,
           border: `1px solid ${rgba(primary, 0.55)}`,
-          color: '#ffffff',
+          color: primaryTextColor,
           boxShadow: `0 18px 40px ${rgba(primary, 0.55)}`,
         } as React.CSSProperties;
       case 'solid':
         return {
           backgroundColor: primary,
           border: `1px solid ${rgba(primary, 0.45)}`,
-          color: '#ffffff',
+          color: primaryTextColor,
         } as React.CSSProperties;
       case 'gradient':
       default:
         return {
           background: `linear-gradient(135deg, ${primary} 0%, ${secondary} 100%)`,
           border: `1px solid ${rgba(primary, 0.45)}`,
-          color: '#ffffff',
+          color: gradientTextColor,
           boxShadow: `0 18px 40px ${rgba(primary, 0.45)}`,
         } as React.CSSProperties;
     }
@@ -625,10 +749,10 @@ export function PublicLandingPage() {
     link.href = `https://fonts.googleapis.com/css2?${families.map((family) => `family=${family}:wght@400;500;600;700`).join('&')}&display=swap`;
   }, [appliedHeadingFont, appliedBodyFont, slug]);
 
-  const sections = page?.sections || {};
   const requiredFields = page?.leadCapture?.requiredFields || ['name', 'email', 'phone'];
   const showLeadCapture = page?.leadCapture?.enabled !== false;
-  const socialProofLabel = page?.content?.socialProofText || null;
+  const leadCtaText = normalizeLeadCtaText(page?.content.ctaText || page?.leadCapture?.buttonText, sections.homeValuation === true, Boolean(page?.listing));
+  const landingContextLabel = pageIntent.publicLabel;
   const hasRichListingContent = Boolean(
     safeGalleryPhotos.length ||
     page?.content.features?.length ||
@@ -640,23 +764,59 @@ export function PublicLandingPage() {
     page?.content.testimonials?.length,
   );
   const showSparseGuidance = !hasRichListingContent;
-  const locationLabel = [page?.listing?.city, page?.listing?.state].filter(Boolean).join(', ');
-  const basePublicUrl = page && typeof window !== 'undefined' ? `${window.location.origin}/sites/${page.slug}` : '/';
+  const basePublicUrl = page?.publicUrl || (page && typeof window !== 'undefined' ? `${window.location.origin}/sites/${page.slug}` : '/');
   const listingQrToken = page?.content.qrListingToken?.trim() || '';
   const tokenizedListingQrUrl = listingQrToken && page ? buildTrackedLandingQrUrl(basePublicUrl, page.slug, listingQrToken) : '';
-  const listingQrUrl = page?.content.qrListingUrl?.trim() || tokenizedListingQrUrl || basePublicUrl;
-  const personalQrUrl = page?.content.qrPersonalUrl?.trim() || page?.agent.websiteUrl || (page?.agent.email ? `mailto:${page.agent.email}` : '');
-  const hasPersonalQr = Boolean(personalQrUrl);
+  const listingQrUrl = tokenizedListingQrUrl || page?.content.qrListingUrl?.trim() || basePublicUrl;
+  const personalQrUrl = page?.content.qrPersonalUrl?.trim() || page?.agent.profileUrl || page?.agent.websiteUrl || (page?.agent.email ? `mailto:${page.agent.email}` : '');
   const showHeaderQr = Boolean(page?.content.showHeaderQr && (listingQrUrl || personalQrUrl));
   const qrTokenFromUrl = typeof window !== 'undefined'
     ? (new URLSearchParams(window.location.search).get('lpqr') || new URLSearchParams(window.location.search).get('utm_content') || '').trim()
     : '';
   const qrLeadAttribution = qrTokenFromUrl ? `QR token: ${qrTokenFromUrl}` : '';
-  const activeHeaderQrVariant = headerQrVariant === 'personal' && hasPersonalQr ? 'personal' : 'listing';
-  const activeHeaderQrUrl = activeHeaderQrVariant === 'personal' ? personalQrUrl : listingQrUrl;
-  const activeHeaderQrLabel = activeHeaderQrVariant === 'personal'
-    ? (page?.content.qrPersonalLabel?.trim() || 'Agent info')
-    : 'Listing QR';
+  const personalQrLabel = getQrDisplayLabel(page?.content.qrPersonalLabel, 'Agent Info');
+  const agentPhone = page?.agent.phone?.trim() || '';
+  const agentPhoneLabel = agentPhone ? formatPhoneDisplay(agentPhone) : '';
+  const agentPhoneHref = agentPhone ? `tel:${agentPhone.replace(/[^\d+]/g, '') || agentPhone}` : '';
+  const listingMlsNumber = page?.listing?.mlsNumber?.trim() || '';
+  const utahRealEstateMlsUrl = listingMlsNumber ? buildUtahRealEstateMlsUrl(listingMlsNumber) : '';
+  const shareUrl = basePublicUrl;
+  const landingQrCardLabel = useMemo(() => {
+    if (!page) return 'Landing Page';
+
+    if (!page.listing && sections.homeValuation === true) {
+      const searchable = `${page.title || ''} ${page.content.headline || ''}`;
+      if (/home\s*value|valuation|worth|sell\s*for/i.test(searchable)) return 'Home Value Report';
+    }
+
+    const rawLabel = page.listing?.address || page.title || page.content.headline || slugToTitle(page.slug);
+    return compactQrCardLabel(rawLabel, pageIntent.publicLabel, page.listing ? 26 : 24);
+  }, [page, pageIntent.publicLabel, sections.homeValuation]);
+  const headerQrItems = useMemo(() => {
+    const items: HeaderQrItem[] = [];
+    const pageSwitchLabel = compactQrCardLabel(landingQrCardLabel.replace(/\s+report$/i, ''), 'Landing Page', 16);
+    if (listingQrUrl) {
+      items.push({
+        key: 'listing',
+        label: landingQrCardLabel,
+        switchLabel: pageSwitchLabel,
+        url: listingQrUrl,
+      });
+    }
+    if (personalQrUrl) {
+      items.push({
+        key: 'personal',
+        label: compactQrCardLabel(personalQrLabel || 'Agent Info', 'Agent Info', 22),
+        switchLabel: 'Agent Info',
+        url: personalQrUrl,
+      });
+    }
+    return items.slice(0, 2);
+  }, [landingQrCardLabel, listingQrToken, listingQrUrl, page?.slug, personalQrLabel, personalQrUrl]);
+  const activeHeaderQrItem = useMemo(
+    () => headerQrItems.find((item) => item.key === activeHeaderQrKey) || headerQrItems[0] || null,
+    [activeHeaderQrKey, headerQrItems],
+  );
   const headerMetaChips = useMemo(() => {
     const chips = [
       formatCurrency(page?.listing?.price),
@@ -664,14 +824,85 @@ export function PublicLandingPage() {
         ? `${page.listing.beds} bd • ${page.listing.baths} ba`
         : null,
       locationLabel || null,
-      page?.listing?.mlsNumber ? `MLS #${page.listing.mlsNumber}` : null,
-      showLeadCapture ? 'Lead capture active' : null,
+      listingMlsNumber ? `UtahRealEstate.com MLS #${listingMlsNumber}` : null,
     ].filter(Boolean) as string[];
-    return chips.slice(0, 4);
-  }, [locationLabel, page, showLeadCapture]);
+    return chips.slice(0, 3);
+  }, [listingMlsNumber, locationLabel, page]);
+
+  const hasListingFacts = useMemo(() => {
+    const l = page?.listing;
+    return Boolean(l && (l.price != null || (l.beds != null && l.baths != null) || listingMlsNumber));
+  }, [page?.listing, listingMlsNumber]);
+
+  const heroTrustBadges = useMemo(() => (
+    [
+      { icon: ShieldCheck, label: 'Free • No obligation' },
+      { icon: Zap, label: '24-hour reply' },
+      { icon: Home, label: 'Local market data' },
+    ]
+  ), []);
+
+  const topCardHighlights = useMemo(() => {
+    const highlights: string[] = [];
+    const priceText = formatCurrency(page?.listing?.price);
+    if (priceText) highlights.push(priceText);
+    if (page?.listing?.beds != null && page?.listing?.baths != null) {
+      highlights.push(`${page.listing.beds} bd • ${page.listing.baths} ba`);
+    }
+
+    const yearsExperience = page?.content?.stats?.yearsExperience;
+    if (yearsExperience != null && String(yearsExperience).trim()) {
+      highlights.push(`${yearsExperience} years experience`);
+    }
+
+    const homesSold = page?.content?.stats?.homesSold;
+    if (homesSold != null && String(homesSold).trim()) {
+      highlights.push(`${homesSold} homes sold`);
+    }
+
+    const avgDom = page?.content?.stats?.avgDaysOnMarket;
+    if (avgDom != null && String(avgDom).trim()) {
+      highlights.push(`${avgDom} day avg DOM`);
+    }
+
+    const clientRating = page?.content?.stats?.clientRating;
+    if (clientRating != null && String(clientRating).trim()) {
+      highlights.push(`${clientRating}/5 client rating`);
+    }
+
+    if (highlights.length === 0) {
+      highlights.push('Free no-obligation guidance');
+      highlights.push('24-hour follow-up');
+      highlights.push('Local market expertise');
+    } else if (highlights.length < 3) {
+      const fallback = ['Free no-obligation guidance', '24-hour follow-up', 'Local market expertise'];
+      for (const item of fallback) {
+        if (!highlights.includes(item)) highlights.push(item);
+        if (highlights.length >= 3) break;
+      }
+    }
+
+    return highlights.slice(0, 3);
+  }, [
+    page?.content?.stats?.avgDaysOnMarket,
+    page?.content?.stats?.clientRating,
+    page?.content?.stats?.homesSold,
+    page?.content?.stats?.yearsExperience,
+    page?.listing?.baths,
+    page?.listing?.beds,
+    page?.listing?.price,
+  ]);
+
+  const agentNameParts = (page?.agent.name || '').split(/\s+/).filter(Boolean);
+  const agentFirstName = agentNameParts[0] || 'agent';
+  const agentLastName = agentNameParts.length > 1 ? agentNameParts[agentNameParts.length - 1] : '';
+  const agentDisplayName = page?.agent.name || 'Your agent';
+  const agentProfessionalLine = [page?.agent.title, brandName].filter(Boolean).join(' • ') || 'Real Estate Professional';
+  const visibleOtherListings = useMemo(() => (
+    (page?.otherListings || []).filter((l) => Boolean(l.photo))
+  ), [page?.otherListings]);
   const agentBioText = page?.agent.bio?.trim() ||
     `${page?.agent.name || 'Your agent'} provides personalized guidance${locationLabel ? ` across ${locationLabel}` : ''}. Share your goals and you'll get a clear game plan, pricing insight, and next available showing times.`;
-  const mobileActionCount = page?.agent.phone ? 3 : 1;
   const heroBadges = useMemo(() => {
     const badges: string[] = [];
     const priceText = formatCurrency(page?.listing?.price);
@@ -679,17 +910,90 @@ export function PublicLandingPage() {
     if (page?.listing?.beds != null && page?.listing?.baths != null) {
       badges.push(`${page.listing.beds} bd • ${page.listing.baths} ba${page.listing?.sqft ? ` • ${page.listing.sqft.toLocaleString()} sqft` : ''}`);
     }
-    if (page?.listing?.mlsNumber) badges.push(`MLS #${page.listing.mlsNumber}`);
-    if (socialProofLabel) badges.push(socialProofLabel);
+    if (listingMlsNumber) badges.push(`UtahRealEstate.com MLS #${listingMlsNumber}`);
 
     if (badges.length === 0) {
-      badges.push('Private listing preview');
-      if (locationLabel) badges.push(locationLabel);
-      badges.push('Fast agent follow-up');
+      if (pageIntent.kind === 'agent-profile') {
+        badges.push('Agent profile');
+        badges.push('Buyer and seller guidance');
+        badges.push('Fast follow-up');
+      } else if (pageIntent.kind === 'seller') {
+        badges.push('Home value strategy');
+        if (locationLabel) badges.push(locationLabel);
+        badges.push('Local pricing guidance');
+      } else if (pageIntent.kind === 'buyer') {
+        badges.push('Buyer game plan');
+        if (locationLabel) badges.push(locationLabel);
+        badges.push('Showing strategy');
+      } else {
+        badges.push(pageIntent.kind === 'listing' ? 'Listing preview' : landingContextLabel);
+        if (locationLabel) badges.push(locationLabel);
+        badges.push('Fast agent follow-up');
+      }
     }
 
     return badges.slice(0, 4);
-  }, [locationLabel, page, socialProofLabel]);
+  }, [landingContextLabel, listingMlsNumber, locationLabel, page, pageIntent.kind]);
+
+  const agentValuePillars = useMemo(() => {
+    if (!page) return [];
+
+    const pillars: Array<{
+      label: string;
+      value: string;
+      icon: React.ComponentType<{ className?: string; strokeWidth?: number }>;
+      accent: string;
+    }> = [];
+
+    const yearsExperience = toRoundedNumber(page.content?.stats?.yearsExperience);
+    if (yearsExperience && yearsExperience > 0) {
+      pillars.push({
+        label: 'Experience',
+        value: `${yearsExperience}+ years guiding clients`,
+        icon: Award,
+        accent: page.branding.primaryColor,
+      });
+    }
+
+    const homesSold = toRoundedNumber(page.content?.stats?.homesSold);
+    if (homesSold && homesSold > 0) {
+      pillars.push({
+        label: 'Track Record',
+        value: `${homesSold}+ homes successfully navigated`,
+        icon: Star,
+        accent: page.theme.colors.accent,
+      });
+    }
+
+    if (locationLabel) {
+      pillars.push({
+        label: 'Local Focus',
+        value: `Hyper-local strategy for ${locationLabel}`,
+        icon: Home,
+        accent: page.theme.colors.secondary,
+      });
+    }
+
+    if (pillars.length < 3) {
+      pillars.push({
+        label: 'Fast Follow-Up',
+        value: 'Most inquiries receive a response within 24 hours',
+        icon: Zap,
+        accent: page.theme.colors.secondary,
+      });
+    }
+
+    if (pillars.length < 3) {
+      pillars.push({
+        label: 'Trusted Process',
+        value: 'Clear steps, low-pressure guidance, and direct communication',
+        icon: ShieldCheck,
+        accent: page.branding.primaryColor,
+      });
+    }
+
+    return pillars.slice(0, 3);
+  }, [locationLabel, page]);
 
   const submitLead = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -698,6 +1002,22 @@ export function PublicLandingPage() {
     const { firstName, lastName } = splitFullName(form.name);
     if (!firstName || !form.email.trim()) {
       setSubmitMessage({ type: 'error', text: 'Name and email are required.' });
+      return;
+    }
+    if (!isValidEmailAddress(form.email)) {
+      setSubmitMessage({ type: 'error', text: 'Enter a valid email address.' });
+      return;
+    }
+    if (requiredFields.includes('phone') && !form.phone.trim()) {
+      setSubmitMessage({ type: 'error', text: 'Phone number is required.' });
+      return;
+    }
+    if (form.phone.trim() && !isValidPhoneNumber(form.phone)) {
+      setSubmitMessage({ type: 'error', text: 'Enter a valid phone number.' });
+      return;
+    }
+    if (requiredFields.includes('message') && !form.message.trim()) {
+      setSubmitMessage({ type: 'error', text: 'Message is required.' });
       return;
     }
 
@@ -740,13 +1060,76 @@ export function PublicLandingPage() {
     }
   };
 
+  const submitQuickQuestion = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!page || quickQuestionSubmitting) return;
+
+    const { firstName, lastName } = splitFullName(quickQuestionForm.name);
+    const email = quickQuestionForm.email.trim();
+    const question = quickQuestionForm.message.trim();
+    if (!firstName || !email || !question) {
+      setQuickQuestionMessage({ type: 'error', text: 'Name, email, and your question are required.' });
+      return;
+    }
+    if (!isValidEmailAddress(email)) {
+      setQuickQuestionMessage({ type: 'error', text: 'Enter a valid email address.' });
+      return;
+    }
+    if (quickQuestionForm.phone.trim() && !isValidPhoneNumber(quickQuestionForm.phone)) {
+      setQuickQuestionMessage({ type: 'error', text: 'Enter a valid phone number.' });
+      return;
+    }
+
+    try {
+      setQuickQuestionSubmitting(true);
+      setQuickQuestionMessage(null);
+
+      const res = await fetch(`/api/sites/${encodeURIComponent(page.slug)}/lead`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          firstName,
+          lastName,
+          email,
+          phone: quickQuestionForm.phone.trim() || undefined,
+          message: [`Quick question: ${question}`, qrLeadAttribution].filter(Boolean).join(' | '),
+          source: 'LANDING_PAGE_EMAIL',
+          contactIntent: 'EMAIL_QUESTION',
+          qrToken: qrTokenFromUrl || undefined,
+          qrUrl: qrTokenFromUrl && typeof window !== 'undefined' ? window.location.href : undefined,
+        }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(toDisplayErrorMessage(data?.error ?? data, 'Failed to send your question'));
+      }
+
+      setQuickQuestionMessage({ type: 'success', text: `Thanks. Your question was sent to ${page.agent.name}.` });
+      setQuickQuestionForm({ name: '', email: '', phone: '', message: '' });
+    } catch (submitError) {
+      setQuickQuestionMessage({ type: 'error', text: toDisplayErrorMessage(submitError, 'Failed to send your question') });
+    } finally {
+      setQuickQuestionSubmitting(false);
+    }
+  };
+
   const submitValuation = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!page || valuationSubmitting) return;
     const address = valuationForm.address.trim();
     const email = valuationForm.email.trim();
-    if (!address || !email) {
-      setValuationMessage({ type: 'error', text: 'Property address and email are required.' });
+    const phone = valuationForm.phone.trim();
+    if (!address || !valuationForm.name.trim() || !email || !phone) {
+      setValuationMessage({ type: 'error', text: 'Property address, name, email, and phone are required.' });
+      return;
+    }
+    if (!isValidEmailAddress(email)) {
+      setValuationMessage({ type: 'error', text: 'Enter a valid email address.' });
+      return;
+    }
+    if (!isValidPhoneNumber(phone)) {
+      setValuationMessage({ type: 'error', text: 'Enter a valid phone number.' });
       return;
     }
     const { firstName, lastName } = splitFullName(valuationForm.name);
@@ -760,7 +1143,8 @@ export function PublicLandingPage() {
           firstName: firstName || 'Home Value',
           lastName: lastName || 'Request',
           email,
-          phone: valuationForm.phone.trim() || undefined,
+          phone,
+          propertyAddress: address,
           message: [`Home value request for: ${address}`, qrLeadAttribution].filter(Boolean).join(' | '),
           source: 'LANDING_PAGE_VALUATION',
           qrToken: qrTokenFromUrl || undefined,
@@ -809,8 +1193,16 @@ export function PublicLandingPage() {
       setGateError('Name and email are required.');
       return;
     }
+    if (!isValidEmailAddress(gateForm.email)) {
+      setGateError('Enter a valid email address.');
+      return;
+    }
     if (gateRequiresPhone && !gateForm.phone.trim()) {
       setGateError('Phone number is required to continue.');
+      return;
+    }
+    if (gateForm.phone.trim() && !isValidPhoneNumber(gateForm.phone)) {
+      setGateError('Enter a valid phone number.');
       return;
     }
     try {
@@ -846,6 +1238,100 @@ export function PublicLandingPage() {
     }
   };
 
+  const copyShareUrl = async () => {
+    if (!shareUrl || typeof navigator === 'undefined' || !navigator.clipboard) return;
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setShareStatus('copied');
+      if (typeof window !== 'undefined') {
+        window.setTimeout(() => setShareStatus('idle'), 2200);
+      }
+    } catch {
+      setShareStatus('idle');
+    }
+  };
+
+  const shareLandingPage = async () => {
+    if (!page || !shareUrl) return;
+    const shareText = page.listing?.address
+      ? `${page.listing.address} shared by ${page.agent.name}`
+      : `${heroHeadline || page.title} shared by ${page.agent.name}`;
+
+    try {
+      if (typeof navigator !== 'undefined' && navigator.share) {
+        await navigator.share({ title: page.title, text: shareText, url: shareUrl });
+        setShareStatus('shared');
+      } else if (typeof navigator !== 'undefined' && navigator.clipboard) {
+        await navigator.clipboard.writeText(shareUrl);
+        setShareStatus('copied');
+      }
+      if (typeof window !== 'undefined') {
+        window.setTimeout(() => setShareStatus('idle'), 2200);
+      }
+    } catch (err: any) {
+      if (err?.name !== 'AbortError') {
+        setShareStatus('idle');
+      }
+    }
+  };
+
+  const exportLandingPdf = async () => {
+    if (!page || pdfStatus === 'building') return;
+    if (typeof document === 'undefined') return;
+
+    const rootElement = document.getElementById('public-landing-root');
+    if (!rootElement) {
+      setPdfStatus('error');
+      if (typeof window !== 'undefined') {
+        window.setTimeout(() => setPdfStatus('idle'), 2800);
+      }
+      return;
+    }
+
+    try {
+      setPdfStatus('building');
+      setShareMenuOpen(false);
+
+      if (typeof window !== 'undefined') {
+        await new Promise<void>((resolve) => {
+          window.requestAnimationFrame(() => {
+            window.requestAnimationFrame(() => resolve());
+          });
+        });
+      }
+
+      await downloadLandingPagePdf({
+        rootElement,
+        fileName: `${page.slug || 'landing-page'}-full-page.pdf`,
+      });
+
+      setPdfStatus('ready');
+      if (typeof window !== 'undefined') {
+        window.setTimeout(() => setPdfStatus('idle'), 2800);
+      }
+    } catch {
+      setPdfStatus('error');
+      if (typeof window !== 'undefined') {
+        window.setTimeout(() => setPdfStatus('idle'), 3200);
+      }
+    }
+  };
+
+  const copyHeaderQrUrl = async (key: 'listing' | 'personal', url: string) => {
+    if (!url || typeof navigator === 'undefined' || !navigator.clipboard) return;
+    try {
+      await navigator.clipboard.writeText(url);
+      setQrCopyStatus(key);
+      if (typeof window !== 'undefined') {
+        window.setTimeout(() => {
+          setQrCopyStatus((current) => (current === key ? null : current));
+        }, 1800);
+      }
+    } catch {
+      setQrCopyStatus(null);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center">
@@ -866,8 +1352,67 @@ export function PublicLandingPage() {
     );
   }
 
+  const heroAgentCard = (
+    <div
+      className="w-full overflow-hidden border border-white/[0.18] p-4 text-white shadow-[0_28px_76px_rgba(0,0,0,0.46)] backdrop-blur-2xl sm:p-5"
+      style={{
+        background: 'linear-gradient(145deg, rgba(2,6,23,0.90), rgba(15,23,42,0.76))',
+        borderRadius: `${Math.max(cornerRadiusPx + 2, 20)}px`,
+      }}
+    >
+      <div className="flex items-center gap-4">
+        <div className="relative h-[4.5rem] w-[4.5rem] shrink-0">
+          {safeAgentPhoto ? (
+            <img
+              src={safeAgentPhoto}
+              alt={agentDisplayName}
+              className="h-[4.5rem] w-[4.5rem] rounded-2xl border border-white/[0.35] object-cover shadow-[0_16px_36px_rgba(0,0,0,0.38)] ring-2 ring-white/70"
+              onError={() => setFailedImages((current) => ({ ...current, agent: true }))}
+            />
+          ) : (
+            <div
+              className="flex h-[4.5rem] w-[4.5rem] items-center justify-center rounded-2xl border border-white/25 text-xl font-black text-white shadow-[0_16px_36px_rgba(0,0,0,0.34)]"
+              style={{ background: `linear-gradient(135deg, ${page.branding.primaryColor}, ${page.theme.colors.secondary})` }}
+            >
+              {agentInitials}
+            </div>
+          )}
+          {safeBrandLogo && (
+            <div className="absolute -bottom-2 -right-2.5 flex h-8 w-12 items-center justify-center rounded-xl border border-white/[0.35] bg-white p-1.5 shadow-lg">
+              <img
+                src={safeBrandLogo}
+                alt={brandName}
+                className="h-full w-full object-contain"
+                onError={() => markBrandLogoFailed(safeBrandLogo)}
+              />
+            </div>
+          )}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-cyan-200">Presented by</div>
+          <div className="mt-1 truncate text-xl font-black leading-none text-white sm:text-[1.55rem]">
+            {agentDisplayName}
+          </div>
+          <div className="mt-1.5 line-clamp-2 text-xs font-semibold leading-5 text-white/[0.80] sm:text-[13px]">
+            {agentProfessionalLine}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-4 flex min-w-0 items-center justify-between gap-3 border-t border-white/10 pt-3">
+        <span className="min-w-0 truncate text-[10px] font-bold uppercase tracking-[0.12em] text-white/[0.78]">
+          {agentLastName ? `${agentLastName} standard` : 'Local guidance'}
+        </span>
+        <span className="inline-flex shrink-0 items-center rounded-full border border-white/15 bg-white/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-white/[0.76]">
+          Fast reply
+        </span>
+      </div>
+    </div>
+  );
+
   return (
     <div
+      id="public-landing-root"
       className="min-h-screen"
       style={{
         backgroundColor: page.theme.colors.background,
@@ -884,145 +1429,300 @@ export function PublicLandingPage() {
         </div>
       )}
 
-      <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8">
-        <div className={`relative overflow-hidden border p-4 backdrop-blur-xl sm:p-5 ${cardMotionClass}`} style={{ ...surfaceStyle, borderRadius: `${cornerRadiusPx}px` }}>
-          <div className="pointer-events-none absolute -top-20 -right-20 h-48 w-48 rounded-full blur-[90px]" style={{ backgroundColor: rgba(page.branding.primaryColor, isLightTheme ? 0.16 : 0.3) }} />
-          <div className="pointer-events-none absolute -bottom-20 -left-20 h-48 w-48 rounded-full blur-[90px]" style={{ backgroundColor: rgba(page.theme.colors.secondary, isLightTheme ? 0.14 : 0.25) }} />
+      <div className="mx-auto max-w-7xl px-4 py-3 sm:px-6 sm:py-4 lg:px-8">
+        <div className={`relative overflow-hidden border p-3 backdrop-blur-xl sm:p-4 ${cardMotionClass}`} style={{ ...surfaceStyle, borderRadius: `${cornerRadiusPx}px` }}>
+          <div className="relative grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(206px,268px)] lg:grid-cols-[minmax(0,1fr)_minmax(230px,286px)] sm:items-stretch">
+            <div className="min-w-0 sm:pr-1 lg:pr-2 sm:flex sm:flex-col sm:gap-2.5">
+              <div className="rounded-2xl border p-2.5" style={nestedSurfaceStyle}>
+                <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="flex min-w-0 flex-1 items-center gap-3">
+                    <div className={`${safeAgentPhoto || !safeBrandLogo ? 'h-14 w-14' : 'h-14 w-20'} relative shrink-0`}>
+                      {safeAgentPhoto ? (
+                        <img
+                          src={safeAgentPhoto}
+                          alt={page.agent.name}
+                          className="h-14 w-14 rounded-2xl border border-white/40 object-cover shadow-[0_16px_32px_rgba(2,6,23,0.24)] ring-2 ring-white/70"
+                          onError={() => setFailedImages((current) => ({ ...current, agent: true }))}
+                        />
+                      ) : safeBrandLogo ? (
+                        <div className="flex h-14 w-20 items-center justify-center overflow-hidden rounded-2xl border border-white/20 bg-white p-2.5 shadow-[0_14px_28px_rgba(2,6,23,0.16)]">
+                          <img
+                            src={safeBrandLogo}
+                            alt={brandName}
+                            className="h-full w-full object-contain"
+                            onError={() => markBrandLogoFailed(safeBrandLogo)}
+                          />
+                        </div>
+                      ) : (
+                        <div className="flex h-14 w-14 items-center justify-center rounded-2xl text-sm font-bold text-white shadow-sm" style={{ backgroundColor: page.branding.primaryColor }}>
+                          {agentInitials}
+                        </div>
+                      )}
+                      {safeAgentPhoto && safeBrandLogo && (
+                        <div className="absolute -bottom-1 -right-4 flex h-7 w-11 items-center justify-center rounded-lg border border-white/[0.35] bg-white p-1.5 shadow-lg">
+                          <img
+                            src={safeBrandLogo}
+                            alt={brandName}
+                            className="h-full w-full object-contain"
+                            onError={() => markBrandLogoFailed(safeBrandLogo)}
+                          />
+                        </div>
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[10px] font-bold uppercase tracking-[0.18em]" style={{ color: eyebrowColor }}>Presented by</div>
+                      <div className="mt-0.5 truncate text-lg font-bold sm:text-[1.35rem]" style={{ color: isLightTheme ? '#0f172a' : '#ffffff' }}>{agentDisplayName}</div>
+                      <div className="mt-0.5 truncate text-sm font-semibold" style={{ color: mutedTextColor }}>
+                        {agentProfessionalLine}
+                      </div>
+                    </div>
+                  </div>
 
-          <div className="relative space-y-4">
-            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
-              <div className="min-w-0 space-y-3">
-                <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center">
-                  <div className="w-full min-w-0 shrink-0 sm:w-auto">
-                    {safeBrandLogo ? (
-                      <img
-                        src={safeBrandLogo}
-                        alt={brandName}
-                        className={brokerageLogoClass}
-                        style={{ width: `min(${headerBrokerageLogoWidth}px, 78vw)`, maxWidth: '100%' }}
-                        onError={() => setFailedImages((current) => ({ ...current, brand: true }))}
-                      />
-                    ) : (
-                      <div className="flex w-full max-w-[420px] min-w-0 items-center gap-3 rounded-2xl border px-3 py-2 shadow-sm sm:w-[420px]" style={nestedSurfaceStyle}>
-                        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl text-base font-semibold text-white shadow-sm" style={{ backgroundColor: page.branding.primaryColor }}>
-                          {brandInitials}
-                        </div>
-                        <div className="min-w-0">
-                          <div className="truncate text-base font-semibold" style={{ color: isLightTheme ? '#0f172a' : '#ffffff' }}>{brandName}</div>
-                          <div className="mt-0.5 truncate text-[11px] font-semibold uppercase tracking-[0.14em]" style={{ color: mutedTextColor }}>Real Estate Brokerage</div>
-                        </div>
+                  {utahRealEstateMlsUrl ? (
+                    <a
+                      href={utahRealEstateMlsUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex w-fit items-center gap-2 rounded-full border px-3 py-2 text-left text-xs font-bold shadow-sm transition-transform hover:-translate-y-0.5"
+                      style={{ ...nestedSurfaceStyle, color: isLightTheme ? '#0f172a' : '#ffffff' }}
+                    >
+                      <span>MLS #{listingMlsNumber}</span>
+                      <ExternalLink className="h-4 w-4 shrink-0" strokeWidth={2.2} />
+                    </a>
+                  ) : listingMlsNumber ? (
+                    <div className="inline-flex w-fit items-center rounded-full border px-3 py-2 text-xs font-bold shadow-sm" style={{ ...nestedSurfaceStyle, color: isLightTheme ? '#0f172a' : '#ffffff' }}>
+                      MLS #{listingMlsNumber}
+                    </div>
+                  ) : null}
+                </div>
+
+                {(gateEnabled || headerMetaChips.length > 0) && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    {gateEnabled && (
+                      <span className="rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.15em]" style={{ ...nestedSurfaceStyle, color: isLightTheme ? '#9a3412' : '#fdba74' }}>
+                        Registration Required
+                      </span>
+                    )}
+                    {headerMetaChips.map((chip, index) => {
+                      const isMlsChip = Boolean(utahRealEstateMlsUrl && chip.includes('MLS #'));
+                      return isMlsChip ? (
+                        <a key={`header-chip-${index}`} href={utahRealEstateMlsUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[10px] font-semibold sm:text-xs" style={{ ...nestedSurfaceStyle, color: isLightTheme ? '#0f172a' : '#e2e8f0' }}>
+                          {chip}
+                          <ExternalLink className="h-3 w-3" strokeWidth={2.2} />
+                        </a>
+                      ) : (
+                        <span key={`header-chip-${index}`} className="rounded-full border px-3 py-1 text-[10px] font-semibold sm:text-xs" style={{ ...nestedSurfaceStyle, color: isLightTheme ? '#0f172a' : '#e2e8f0' }}>
+                          {chip}
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <div className="relative rounded-2xl border p-2.5" style={nestedSurfaceStyle}>
+                <div className={`grid gap-2 ${showLeadCapture ? 'sm:grid-cols-2 lg:grid-cols-[minmax(220px,1.9fr)_repeat(3,minmax(128px,1fr))]' : 'sm:grid-cols-2 lg:grid-cols-3'}`}>
+                  {showLeadCapture && (
+                    <a href="#lead-form" className="group inline-flex h-11 w-full min-w-0 items-center justify-center gap-2 whitespace-nowrap rounded-2xl px-5 text-center text-sm font-semibold shadow-lg transition-transform hover:scale-[1.01]" style={primaryButtonStyle}>
+                      <span>{leadCtaText}</span>
+                      <ArrowRight className="h-4 w-4 shrink-0 transition-transform group-hover:translate-x-0.5" strokeWidth={2.2} />
+                    </a>
+                  )}
+                  {agentPhone && (
+                    <a
+                      href={agentPhoneHref}
+                      className="inline-flex h-11 w-full min-w-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-2xl border px-3 text-[13px] font-semibold transition-colors hover:bg-white/10"
+                      style={{
+                        ...nestedSurfaceStyle,
+                        color: isLightTheme ? '#0f172a' : '#ffffff',
+                        borderColor: isLightTheme ? 'rgba(148,163,184,0.32)' : 'rgba(255,255,255,0.16)',
+                      }}
+                    >
+                      <Phone className="h-3.5 w-3.5" strokeWidth={2.2} />
+                      <span className="truncate">{agentPhoneLabel}</span>
+                    </a>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => { setQuickQuestionOpen(true); setQuickQuestionMessage(null); }}
+                    className="inline-flex h-11 w-full min-w-0 items-center justify-center gap-1.5 rounded-2xl border px-3 text-[13px] font-semibold transition-colors hover:bg-white/10"
+                    style={{
+                      ...nestedSurfaceStyle,
+                      color: isLightTheme ? '#0f172a' : '#ffffff',
+                      borderColor: isLightTheme ? 'rgba(148,163,184,0.32)' : 'rgba(255,255,255,0.16)',
+                    }}
+                  >
+                    <Mail className="h-3.5 w-3.5" strokeWidth={2.2} />
+                    Email
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShareMenuOpen((current) => !current)}
+                    aria-expanded={shareMenuOpen}
+                    className="inline-flex h-11 w-full min-w-0 items-center justify-center gap-2 rounded-2xl border px-3 text-[13px] font-semibold shadow-sm transition-colors hover:bg-white/10"
+                    style={{
+                      ...nestedSurfaceStyle,
+                      color: isLightTheme ? '#0f172a' : '#ffffff',
+                      borderColor: isLightTheme ? 'rgba(148,163,184,0.32)' : 'rgba(255,255,255,0.16)',
+                      background: isLightTheme
+                        ? `linear-gradient(135deg, ${rgba(page.branding.primaryColor, 0.14)} 0%, ${rgba(page.theme.colors.secondary, 0.12)} 100%)`
+                        : `linear-gradient(135deg, ${rgba(page.branding.primaryColor, 0.28)} 0%, ${rgba(page.theme.colors.secondary, 0.22)} 100%)`,
+                    }}
+                  >
+                    <Share2 className="h-3.5 w-3.5" strokeWidth={2.2} />
+                    Share
+                  </button>
+                </div>
+
+                {shareMenuOpen && (
+                  <div className="relative z-40 mt-2 w-full rounded-2xl border p-3 shadow-2xl backdrop-blur-xl" style={{ ...surfaceStyle, color: isLightTheme ? '#0f172a' : '#ffffff' }}>
+                    <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em]" style={{ color: eyebrowColor }}>
+                      <Link2 className="h-3.5 w-3.5" strokeWidth={2.2} />
+                      Share URL
+                    </div>
+                    <div className="mt-2 flex flex-col gap-2 rounded-xl border px-3 py-2 sm:flex-row sm:items-center" style={nestedSurfaceStyle}>
+                      <div className="min-w-0 flex-1 break-all text-xs sm:truncate" title={shareUrl} style={{ color: mutedTextColor }}>{shareUrl}</div>
+                      <button
+                        type="button"
+                        onClick={copyShareUrl}
+                        className="inline-flex shrink-0 self-end items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-bold transition-colors hover:bg-white/10 sm:self-auto"
+                        style={{ borderColor: isLightTheme ? 'rgba(148,163,184,0.35)' : 'rgba(255,255,255,0.16)', color: isLightTheme ? '#0f172a' : '#ffffff' }}
+                      >
+                        {shareStatus === 'copied' ? <Check className="h-3.5 w-3.5" strokeWidth={2.4} /> : <Copy className="h-3.5 w-3.5" strokeWidth={2.2} />}
+                        {shareStatus === 'copied' ? 'Copied' : 'Copy'}
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={shareLandingPage}
+                      className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2 text-xs font-bold transition-transform hover:scale-[1.01]"
+                      style={primaryButtonStyle}
+                    >
+                      <Share2 className="h-3.5 w-3.5" strokeWidth={2.2} />
+                      Share from device
+                    </button>
+                    <button
+                      type="button"
+                      onClick={exportLandingPdf}
+                      disabled={pdfStatus === 'building'}
+                      className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-xl border px-3 py-2 text-xs font-bold transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-70"
+                      style={{ borderColor: isLightTheme ? 'rgba(148,163,184,0.35)' : 'rgba(255,255,255,0.16)', color: isLightTheme ? '#0f172a' : '#ffffff' }}
+                    >
+                      <FileDown className="h-3.5 w-3.5" strokeWidth={2.2} />
+                      {pdfStatus === 'building' ? 'Building PDF...' : 'Download full page PDF'}
+                    </button>
+                    {pdfStatus === 'ready' && (
+                      <div className="mt-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-[11px] font-semibold text-emerald-200">
+                        PDF downloaded.
+                      </div>
+                    )}
+                    {pdfStatus === 'error' && (
+                      <div className="mt-2 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-[11px] font-semibold text-rose-200">
+                        Could not generate PDF on this device. Try again.
                       </div>
                     )}
                   </div>
+                )}
+              </div>
 
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      {safeBrandLogo && (
-                        <div className="text-base font-semibold sm:text-lg" style={{ color: isLightTheme ? '#0f172a' : '#ffffff' }}>{brandName}</div>
-                      )}
-                      {gateEnabled && (
-                        <span className="rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.15em]" style={{ ...nestedSurfaceStyle, color: isLightTheme ? '#9a3412' : '#fdba74' }}>
-                          Registration Required
-                        </span>
-                      )}
-                    </div>
-                    <div className={`${safeBrandLogo ? 'mt-1' : ''} text-xs sm:text-sm`} style={{ color: mutedTextColor }}>{page.listing?.address || page.title}</div>
-                  </div>
-                </div>
-
-                {headerMetaChips.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 sm:gap-2">
-                    {headerMetaChips.map((chip, index) => (
-                      <span key={`header-chip-${index}`} className="rounded-full border px-3 py-1 text-[10px] font-semibold sm:text-xs" style={{ ...nestedSurfaceStyle, color: isLightTheme ? '#0f172a' : '#e2e8f0' }}>
-                        {chip}
+              {topCardHighlights.length > 0 && (
+                <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                  {topCardHighlights.map((item, index) => (
+                    <div
+                      key={`${item}-${index}`}
+                      className="flex items-center gap-2 rounded-xl border px-3 py-2 text-[11px] font-semibold"
+                      style={{ ...nestedSurfaceStyle, color: isLightTheme ? '#0f172a' : '#e2e8f0' }}
+                    >
+                      <span className="inline-flex h-5 w-5 flex-none items-center justify-center rounded-full" style={{ backgroundColor: rgba(page.branding.primaryColor, 0.16), color: page.branding.primaryColor }}>
+                        {index + 1}
                       </span>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="flex flex-col gap-3 lg:items-end">
-                <div className="flex flex-wrap items-center gap-2 lg:justify-end">
-                  {showLeadCapture && (
-                    <a href="#lead-form" className="min-w-[210px] rounded-full px-5 py-2.5 text-center text-xs font-semibold shadow-lg transition-transform hover:scale-[1.02] sm:min-w-0 sm:text-sm" style={primaryButtonStyle}>
-                      {page.content.ctaText || page.leadCapture?.buttonText || 'Request Information'}
-                    </a>
-                  )}
-                  {page.agent.phone && (
-                    <a href={`tel:${page.agent.phone}`} className="rounded-full border px-5 py-2.5 text-xs font-semibold transition-colors hover:bg-white/10 sm:text-sm" style={{ ...nestedSurfaceStyle, color: isLightTheme ? '#0f172a' : '#ffffff' }}>
-                      Call
-                    </a>
-                  )}
-                  <a href={`mailto:${page.agent.email}`} className="rounded-full border px-5 py-2.5 text-xs font-semibold transition-colors hover:bg-white/10 sm:text-sm" style={{ ...nestedSurfaceStyle, color: isLightTheme ? '#0f172a' : '#ffffff' }}>
-                    Email
-                  </a>
-                </div>
-
-                {showHeaderQr && activeHeaderQrUrl && (
-                  <div className="w-full rounded-2xl border p-3 shadow-sm lg:w-[330px]" style={nestedSurfaceStyle}>
-                    <div className="grid grid-cols-[auto_1fr] gap-3">
-                      <div className="rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
-                        <QRCodeSVG
-                          value={activeHeaderQrUrl}
-                          size={92}
-                          level="M"
-                          marginSize={1}
-                          bgColor="#ffffff"
-                          fgColor="#0f172a"
-                          title={`QR code for ${activeHeaderQrLabel}`}
-                        />
-                      </div>
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => setHeaderQrVariant('listing')}
-                            className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold ${activeHeaderQrVariant === 'listing' ? 'border-cyan-400/50 bg-cyan-500/20 text-cyan-100' : 'border-white/10 bg-white/5 text-slate-300'}`}
-                          >
-                            Listing QR
-                          </button>
-                          {hasPersonalQr && (
-                            <button
-                              type="button"
-                              onClick={() => setHeaderQrVariant('personal')}
-                              className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold ${activeHeaderQrVariant === 'personal' ? 'border-cyan-400/50 bg-cyan-500/20 text-cyan-100' : 'border-white/10 bg-white/5 text-slate-300'}`}
-                            >
-                              {page.content.qrPersonalLabel?.trim() || 'Personal QR'}
-                            </button>
-                          )}
-                        </div>
-                        <div className="mt-2 text-[10px] font-semibold uppercase tracking-[0.16em]" style={{ color: eyebrowColor }}>{activeHeaderQrLabel}</div>
-                        <div className="mt-1 truncate text-xs" title={activeHeaderQrUrl} style={{ color: mutedTextColor }}>{activeHeaderQrUrl}</div>
-                        <div className="mt-2 flex flex-wrap gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (typeof window !== 'undefined' && navigator.clipboard) {
-                                void navigator.clipboard.writeText(activeHeaderQrUrl);
-                              }
-                            }}
-                            className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1.5 text-[10px] font-semibold text-white hover:bg-white/10"
-                          >
-                            Copy
-                          </button>
-                          <a
-                            href={`https://api.qrserver.com/v1/create-qr-code/?size=600x600&margin=20&format=png&data=${encodeURIComponent(activeHeaderQrUrl)}`}
-                            download={`${page.slug}-${activeHeaderQrVariant}-qr.png`}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1.5 text-[10px] font-semibold text-white hover:bg-white/10"
-                          >
-                            Download
-                          </a>
-                        </div>
-                      </div>
+                      <span className="truncate">{item}</span>
                     </div>
-                  </div>
-                )}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
 
-            <div className="flex flex-wrap gap-2">
+            <div className="min-w-0 border-t pt-2 sm:border-l sm:border-t-0 sm:pl-3 sm:pt-0" style={{ borderColor: isLightTheme ? 'rgba(148,163,184,0.20)' : 'rgba(255,255,255,0.10)' }}>
+              {showHeaderQr && activeHeaderQrItem ? (
+                <div className="ml-auto w-full max-w-[270px] rounded-2xl border p-1.5" style={{ borderColor: isLightTheme ? 'rgba(148,163,184,0.26)' : 'rgba(255,255,255,0.12)', backgroundColor: isLightTheme ? 'rgba(255,255,255,0.62)' : 'rgba(15,23,42,0.28)' }}>
+                  <div className="flex flex-col gap-1.5">
+                    <div className="flex min-w-0 items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-[10px] font-bold uppercase tracking-[0.18em]" style={{ color: eyebrowColor }}>QR CODES</div>
+                        <a
+                          href={activeHeaderQrItem.url}
+                          target={activeHeaderQrItem.url.startsWith('mailto:') || activeHeaderQrItem.url.startsWith('tel:') ? undefined : '_blank'}
+                          rel={activeHeaderQrItem.url.startsWith('mailto:') || activeHeaderQrItem.url.startsWith('tel:') ? undefined : 'noreferrer'}
+                          className="mt-0.5 inline-flex max-w-full items-center gap-1 text-[12px] font-bold leading-tight transition-colors hover:underline"
+                          title={activeHeaderQrItem.url}
+                          style={{ color: isLightTheme ? '#0f172a' : '#ffffff' }}
+                        >
+                          <span className="min-w-0 break-words">{activeHeaderQrItem.label}</span>
+                          <ExternalLink className="h-3 w-3 shrink-0 opacity-70" strokeWidth={2.2} />
+                        </a>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <button
+                          type="button"
+                          aria-label={qrCopyStatus === activeHeaderQrItem.key ? `${activeHeaderQrItem.label} URL copied` : `Copy ${activeHeaderQrItem.label} URL`}
+                          title={qrCopyStatus === activeHeaderQrItem.key ? 'Copied' : `Copy ${activeHeaderQrItem.label} URL`}
+                          onClick={() => void copyHeaderQrUrl(activeHeaderQrItem.key, activeHeaderQrItem.url)}
+                          className="inline-flex h-6 w-6 items-center justify-center rounded-full border transition-colors hover:bg-white/10"
+                          style={{ borderColor: isLightTheme ? 'rgba(148,163,184,0.35)' : 'rgba(255,255,255,0.14)', color: isLightTheme ? '#334155' : '#f8fafc' }}
+                        >
+                          {qrCopyStatus === activeHeaderQrItem.key ? <Check className="h-3 w-3" strokeWidth={2.4} /> : <Copy className="h-3 w-3" strokeWidth={2.2} />}
+                        </button>
+                      </div>
+                    </div>
+
+                    {headerQrItems.length > 1 && (
+                      <div className="grid w-full grid-cols-2 rounded-full border p-1" style={{ borderColor: isLightTheme ? 'rgba(148,163,184,0.30)' : 'rgba(255,255,255,0.14)', backgroundColor: isLightTheme ? 'rgba(248,250,252,0.86)' : 'rgba(2,6,23,0.35)' }}>
+                        {headerQrItems.map((item) => {
+                          const active = activeHeaderQrItem.key === item.key;
+                          return (
+                            <button
+                              key={item.key}
+                              type="button"
+                              aria-pressed={active}
+                              onClick={() => setActiveHeaderQrKey(item.key)}
+                              className="min-h-6 rounded-full px-2 text-[10px] font-bold leading-none transition-colors sm:px-3"
+                              style={active ? { ...primaryButtonStyle, boxShadow: 'none' } : { color: mutedTextColor }}
+                            >
+                              <span className="block truncate whitespace-nowrap">{item.switchLabel}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    <div className="grid gap-2">
+                      <a
+                        href={activeHeaderQrItem.url}
+                        target={activeHeaderQrItem.url.startsWith('mailto:') || activeHeaderQrItem.url.startsWith('tel:') ? undefined : '_blank'}
+                        rel={activeHeaderQrItem.url.startsWith('mailto:') || activeHeaderQrItem.url.startsWith('tel:') ? undefined : 'noreferrer'}
+                        aria-label={`Open ${activeHeaderQrItem.label} scan link`}
+                        title={`Open ${activeHeaderQrItem.label}: ${activeHeaderQrItem.url}`}
+                        className="mx-auto inline-flex rounded-2xl border border-slate-200 bg-white p-0.5 shadow-sm transition-transform hover:scale-[1.02]"
+                      >
+                        <QRCodeSVG
+                          value={activeHeaderQrItem.url}
+                          size={108}
+                          level="M"
+                          marginSize={2}
+                          bgColor="#ffffff"
+                          fgColor="#0f172a"
+                          title={`QR code for ${activeHeaderQrItem.label}`}
+                        />
+                      </a>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="mt-4 flex flex-wrap gap-2">
               {page.agent.websiteUrl && (
                 <a href={page.agent.websiteUrl} target="_blank" rel="noreferrer" className="rounded-full border px-3 py-1.5 text-[11px] font-medium hover:bg-white/10" style={{ ...nestedSurfaceStyle, color: isLightTheme ? '#0f172a' : 'rgba(255,255,255,0.92)' }}>
                   Website
@@ -1046,7 +1746,51 @@ export function PublicLandingPage() {
             </div>
           </div>
         </div>
-      </div>
+
+        {agentValuePillars.length > 0 && (
+          <section className="mx-auto max-w-7xl px-4 pb-8 sm:px-6 lg:px-8">
+            <div
+              className={`grid gap-3 border p-4 backdrop-blur-xl sm:grid-cols-3 ${cardMotionClass}`}
+              style={{ ...surfaceStyle, borderRadius: `${cornerRadiusPx}px` }}
+            >
+              {agentValuePillars.map((pillar, index) => {
+                const PillarIcon = pillar.icon;
+                return (
+                  <div
+                    key={`${pillar.label}-${index}`}
+                    className="relative overflow-hidden rounded-2xl border px-4 py-3"
+                    style={nestedSurfaceStyle}
+                  >
+                    <div
+                      className="pointer-events-none absolute -top-8 -right-8 h-20 w-20 rounded-full blur-2xl"
+                      style={{ backgroundColor: rgba(pillar.accent, isLightTheme ? 0.3 : 0.4) }}
+                    />
+                    <div className="relative flex items-start gap-3">
+                      <span
+                        className="inline-flex h-9 w-9 flex-none items-center justify-center rounded-xl border"
+                        style={{
+                          backgroundColor: rgba(pillar.accent, isLightTheme ? 0.18 : 0.28),
+                          borderColor: rgba(pillar.accent, isLightTheme ? 0.45 : 0.35),
+                          color: isLightTheme ? '#0f172a' : '#ffffff',
+                        }}
+                      >
+                        <PillarIcon className="h-4 w-4" strokeWidth={2.2} />
+                      </span>
+                      <div className="min-w-0">
+                        <div className="text-[10px] font-bold uppercase tracking-[0.18em]" style={{ color: mutedTextColor }}>
+                          {pillar.label}
+                        </div>
+                        <div className="mt-1 text-sm font-semibold leading-5" style={{ color: isLightTheme ? '#0f172a' : '#ffffff' }}>
+                          {pillar.value}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
 
       <section className="mx-auto max-w-7xl px-4 pb-8 sm:px-6 lg:px-8">
         <div className={`overflow-hidden border shadow-[0_40px_100px_rgba(0,0,0,0.55)] ${cardMotionClass}`} style={{ ...surfaceStyle, borderRadius: `${Math.max(cornerRadiusPx + 4, 16)}px` }}>
@@ -1073,9 +1817,10 @@ export function PublicLandingPage() {
             )}
             {heroLayoutVariant === 'split' ? (
               <>
-                <div className="absolute inset-0" style={{ background: `linear-gradient(95deg, rgba(255,255,255,${isLightTheme ? '0.88' : '0.14'}), rgba(255,255,255,0))` }} />
-                <div className="relative z-10 grid gap-8 px-6 py-10 sm:px-10 lg:grid-cols-[1fr_1.1fr] lg:items-center lg:px-12 lg:py-14">
-                  <div className="max-w-2xl">
+                <div className="absolute inset-0" style={{ background: `linear-gradient(96deg, rgba(255,255,255,${isLightTheme ? '0.92' : '0.16'}) 0%, rgba(255,255,255,${isLightTheme ? '0.78' : '0.10'}) 43%, rgba(2,6,23,${isLightTheme ? '0.08' : '0.24'}) 100%)` }} />
+                <div className="pointer-events-none absolute inset-y-0 right-0 hidden w-1/2 lg:block" style={{ background: `linear-gradient(270deg, rgba(2,6,23,${isLightTheme ? '0.12' : '0.42'}), transparent 68%)` }} />
+                <div className="relative z-10 grid gap-8 px-6 py-10 sm:px-10 lg:grid-cols-[minmax(0,0.95fr)_minmax(300px,0.78fr)] lg:items-end lg:px-12 lg:py-14" style={{ minHeight: `${heroMinHeightPx}px` }}>
+                  <div className="max-w-2xl self-center lg:pb-8">
                     <div className="flex flex-wrap gap-2">
                       {heroBadges.map((badge, index) => (
                         <span key={`split-badge-${index}`} className="rounded-full border px-3 py-1 text-xs font-semibold" style={{ ...nestedSurfaceStyle, color: isLightTheme ? '#0f172a' : '#ffffff' }}>
@@ -1084,35 +1829,41 @@ export function PublicLandingPage() {
                       ))}
                     </div>
                     <h1 className="mt-5 text-4xl font-bold tracking-tight sm:text-5xl" style={{ color: isLightTheme ? '#0f172a' : '#ffffff', fontFamily: appliedHeadingFont }}>
-                      {page.content.headline}
+                      {heroHeadline}
                     </h1>
-                    <p className="mt-4 max-w-xl text-base leading-7 sm:text-lg" style={{ color: isLightTheme ? 'rgba(15,23,42,0.82)' : 'rgba(226,232,240,0.92)' }}>
+                    <p className="mt-4 max-w-xl text-base leading-7 line-clamp-2 sm:text-lg" style={{ color: isLightTheme ? 'rgba(15,23,42,0.82)' : 'rgba(226,232,240,0.92)' }}>
                       {fallbackSubheadline}
                     </p>
                     <div className="mt-7 flex flex-wrap gap-3">
                       {showLeadCapture && (
                         <a href="#lead-form" className="group relative rounded-full px-6 py-3.5 text-sm font-semibold shadow-xl transition-transform hover:scale-[1.03]" style={primaryButtonStyle}>
-                          {page.content.ctaText || page.leadCapture?.buttonText || 'Request Information'}
+                          {leadCtaText}
                         </a>
                       )}
                       {page.agent.phone && (
                         <a href={`tel:${page.agent.phone}`} className="inline-flex items-center gap-2 rounded-full border px-6 py-3.5 text-sm font-semibold" style={{ ...nestedSurfaceStyle, color: isLightTheme ? '#0f172a' : '#ffffff' }}>
-                          Call Agent
+                          Call {agentFirstName}
                         </a>
                       )}
                     </div>
-                  </div>
-                  <div className="space-y-4">
-                    <div style={imageFrameStyle}>
-                      {(safeHeroImage || safeGalleryPhotos[0]) ? (
-                        <img src={safeHeroImage || safeGalleryPhotos[0]} alt={page.title} className="h-[360px] w-full object-cover" />
-                      ) : (
-                        <div className="h-[360px] w-full" style={{ background: `linear-gradient(135deg, ${rgba(page.branding.primaryColor, 0.55)}, ${rgba(page.theme.colors.secondary, 0.55)})` }} />
-                      )}
+                    <div className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-2 text-[11px] font-semibold uppercase tracking-[0.14em]" style={{ color: isLightTheme ? 'rgba(15,23,42,0.75)' : 'rgba(226,232,240,0.85)' }}>
+                      {heroTrustBadges.map(({ icon: Icon, label }) => (
+                        <span key={label} className="inline-flex items-center gap-1.5">
+                          <Icon className="h-3.5 w-3.5" />
+                          {label}
+                        </span>
+                      ))}
                     </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <SnapshotItem label="Price" value={formatCurrency(page.listing?.price) || 'Contact agent'} />
-                      <SnapshotItem label="Beds/Baths" value={page.listing?.beds != null && page.listing?.baths != null ? `${page.listing.beds}/${page.listing.baths}` : 'Ask agent'} />
+                  </div>
+                  <div className="self-end lg:justify-self-end">
+                    <div className="ml-auto w-full max-w-[390px] space-y-3">
+                      {heroAgentCard}
+                      {hasListingFacts && (
+                        <div className="grid grid-cols-2 gap-3 rounded-[22px] border border-white/15 bg-slate-950/70 p-3 text-white shadow-[0_20px_50px_rgba(0,0,0,0.34)] backdrop-blur-2xl">
+                          <SnapshotItem label="Price" value={formatCurrency(page.listing?.price) || 'Contact agent'} />
+                          <SnapshotItem label="Beds/Baths" value={page.listing?.beds != null && page.listing?.baths != null ? `${page.listing.beds}/${page.listing.baths}` : 'Ask agent'} />
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -1130,37 +1881,54 @@ export function PublicLandingPage() {
                   </div>
 
                   <h1 className="mt-6 text-4xl font-bold tracking-tight text-white drop-shadow-[0_4px_12px_rgba(0,0,0,0.45)] sm:text-5xl lg:text-6xl" style={{ fontFamily: appliedHeadingFont }}>
-                    {page.content.headline}
+                    {heroHeadline}
                   </h1>
-                  <p className="mx-auto mt-4 max-w-3xl text-base leading-7 text-white/95 sm:text-lg">
+                  <p className="mx-auto mt-4 max-w-3xl text-base leading-7 line-clamp-2 text-white/95 sm:text-lg">
                     {fallbackSubheadline}
                   </p>
 
                   <div className="mt-8 flex flex-wrap justify-center gap-3">
                     {showLeadCapture && (
                       <a href="#lead-form" className="rounded-full px-6 py-3.5 text-sm font-semibold shadow-2xl transition-transform hover:scale-[1.03]" style={heroPrimaryButtonStyle}>
-                        {page.content.ctaText || page.leadCapture?.buttonText || 'Request Information'}
+                        {leadCtaText}
                       </a>
                     )}
                     {page.agent.phone && (
                       <a href={`tel:${page.agent.phone}`} className="inline-flex items-center gap-2 rounded-full border border-white/30 bg-white/15 px-6 py-3.5 text-sm font-semibold text-white backdrop-blur-md transition-all hover:bg-white/25">
-                        Call Agent
+                        Call {agentFirstName}
                       </a>
                     )}
                   </div>
 
-                  <div className="mx-auto mt-8 grid max-w-3xl gap-3 sm:grid-cols-4">
-                    <SnapshotItem label="Price" value={formatCurrency(page.listing?.price) || 'Contact agent'} />
-                    <SnapshotItem label="MLS" value={page.listing?.mlsNumber || 'Private'} />
-                    <SnapshotItem label="Bedrooms" value={page.listing?.beds != null ? String(page.listing.beds) : 'Ask agent'} />
-                    <SnapshotItem label="Bathrooms" value={page.listing?.baths != null ? String(page.listing.baths) : 'Ask agent'} />
+                  <div className="mx-auto mt-6 flex max-w-3xl flex-wrap items-center justify-center gap-x-5 gap-y-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-white/80">
+                    {heroTrustBadges.map(({ icon: Icon, label }) => (
+                      <span key={label} className="inline-flex items-center gap-1.5">
+                        <Icon className="h-3.5 w-3.5" />
+                        {label}
+                      </span>
+                    ))}
                   </div>
+
+                  {hasListingFacts && (
+                    <div className="mx-auto mt-8 grid max-w-3xl gap-3 sm:grid-cols-4">
+                      <SnapshotItem label="Price" value={formatCurrency(page.listing?.price) || 'Contact agent'} />
+                      <SnapshotItem label="MLS Source" value={listingMlsNumber ? `UtahRealEstate.com #${listingMlsNumber}` : 'Private'} />
+                      <SnapshotItem label="Bedrooms" value={page.listing?.beds != null ? String(page.listing.beds) : 'Ask agent'} />
+                      <SnapshotItem label="Bathrooms" value={page.listing?.baths != null ? String(page.listing.baths) : 'Ask agent'} />
+                    </div>
+                  )}
+                  <div className="mx-auto mt-8 max-w-sm text-left xl:hidden">
+                    {heroAgentCard}
+                  </div>
+                </div>
+                <div className="absolute bottom-7 right-7 z-20 hidden w-[340px] xl:block">
+                  {heroAgentCard}
                 </div>
               </>
             ) : (
               <>
                 <div className="absolute inset-0" style={{ background: `linear-gradient(135deg, ${page.theme.colors.heroOverlay}, rgba(2,6,23,${safeHeroImage || safeGalleryPhotos[0] ? (isLightTheme ? '0.45' : '0.65') : '0.30'}))` }} />
-                <div className="relative z-10 grid gap-8 px-6 py-10 sm:px-10 lg:grid-cols-[1.15fr_0.85fr] lg:px-12 lg:py-14">
+                <div className="relative z-10 grid gap-8 px-6 py-10 sm:px-10 lg:grid-cols-[1.15fr_0.85fr] lg:items-end lg:px-12 lg:py-14" style={{ minHeight: `${heroMinHeightPx}px` }}>
                   <div className="max-w-3xl self-end">
                     <div className="flex flex-wrap gap-2">
                       {heroBadges.map((badge, index) => (
@@ -1171,16 +1939,16 @@ export function PublicLandingPage() {
                     </div>
 
                     <h1 className="mt-5 text-4xl font-bold tracking-tight text-white drop-shadow-[0_4px_12px_rgba(0,0,0,0.45)] sm:text-5xl lg:text-6xl" style={{ fontFamily: appliedHeadingFont }}>
-                      {page.content.headline}
+                      {heroHeadline}
                     </h1>
-                    <p className="mt-4 max-w-2xl text-base leading-7 text-white/95 drop-shadow-[0_2px_6px_rgba(0,0,0,0.45)] sm:text-lg">
+                    <p className="mt-4 max-w-2xl text-base leading-7 line-clamp-2 text-white/95 drop-shadow-[0_2px_6px_rgba(0,0,0,0.45)] sm:text-lg">
                       {fallbackSubheadline}
                     </p>
 
                     <div className="mt-8 flex flex-wrap gap-3">
                       {showLeadCapture && (
                         <a href="#lead-form" className="group relative rounded-full px-6 py-3.5 text-sm font-semibold shadow-2xl transition-transform hover:scale-[1.03]" style={heroPrimaryButtonStyle}>
-                          <span className="relative z-10">{page.content.ctaText || page.leadCapture?.buttonText || 'Request Information'}</span>
+                          <span className="relative z-10">{leadCtaText}</span>
                           <span aria-hidden className="pointer-events-none absolute inset-0 rounded-full opacity-0 transition-opacity group-hover:opacity-100" style={{ background: `linear-gradient(135deg, ${rgba('#ffffff', 0.2, '255,255,255')}, transparent 60%)` }} />
                         </a>
                       )}
@@ -1189,28 +1957,42 @@ export function PublicLandingPage() {
                           <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
                           </svg>
-                          Call Agent
+                          Call {agentFirstName}
                         </a>
                       )}
+                    </div>
+
+                    <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-white/85">
+                      {heroTrustBadges.map(({ icon: Icon, label }) => (
+                        <span key={label} className="inline-flex items-center gap-1.5 drop-shadow-[0_1px_3px_rgba(0,0,0,0.6)]">
+                          <Icon className="h-3.5 w-3.5" />
+                          {label}
+                        </span>
+                      ))}
                     </div>
                   </div>
 
                   <div className="self-end lg:justify-self-end">
-                    <div className="border border-white/15 p-6 text-white backdrop-blur-2xl shadow-[0_24px_60px_rgba(0,0,0,0.45)]" style={{ backgroundColor: 'rgba(2,6,23,0.72)', borderRadius: `${Math.max(cornerRadiusPx, 14)}px` }}>
-                      <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.2em]" style={{ color: '#a5f3fc' }}>
-                        <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ backgroundColor: '#22d3ee', boxShadow: '0 0 10px #22d3ee' }} />
-                        Property snapshot
-                      </div>
-                      <div className="mt-3 text-xl font-bold text-white">{page.listing?.address || page.title}</div>
-                      <div className="mt-2 text-sm text-white/75">
-                        {[page.listing?.city, page.listing?.state, page.listing?.zip].filter(Boolean).join(', ') || 'Private listing'}
-                      </div>
-                      <div className="mt-5 grid grid-cols-2 gap-3">
-                        <SnapshotItem label="Price" value={formatCurrency(page.listing?.price) || 'Contact agent'} />
-                        <SnapshotItem label="MLS" value={page.listing?.mlsNumber || 'Private'} />
-                        <SnapshotItem label="Bedrooms" value={page.listing?.beds != null ? String(page.listing.beds) : 'Ask agent'} />
-                        <SnapshotItem label="Bathrooms" value={page.listing?.baths != null ? String(page.listing.baths) : 'Ask agent'} />
-                      </div>
+                    <div className="ml-auto w-full max-w-[350px] space-y-3">
+                      {heroAgentCard}
+                      {hasListingFacts && (
+                        <div className="border border-white/15 p-6 text-white backdrop-blur-2xl shadow-[0_24px_60px_rgba(0,0,0,0.45)]" style={{ backgroundColor: 'rgba(2,6,23,0.72)', borderRadius: `${Math.max(cornerRadiusPx, 14)}px` }}>
+                          <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.2em]" style={{ color: '#a5f3fc' }}>
+                            <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ backgroundColor: '#22d3ee', boxShadow: '0 0 10px #22d3ee' }} />
+                            Property snapshot
+                          </div>
+                          <div className="mt-3 text-xl font-bold text-white">{page.listing?.address || page.title}</div>
+                          <div className="mt-2 text-sm text-white/75">
+                            {[page.listing?.city, page.listing?.state, page.listing?.zip].filter(Boolean).join(', ') || 'Private listing'}
+                          </div>
+                          <div className="mt-5 grid grid-cols-2 gap-3">
+                            <SnapshotItem label="Price" value={formatCurrency(page.listing?.price) || 'Contact agent'} />
+                            <SnapshotItem label="MLS Source" value={listingMlsNumber ? `UtahRealEstate.com #${listingMlsNumber}` : 'Private'} />
+                            <SnapshotItem label="Bedrooms" value={page.listing?.beds != null ? String(page.listing.beds) : 'Ask agent'} />
+                            <SnapshotItem label="Bathrooms" value={page.listing?.baths != null ? String(page.listing.baths) : 'Ask agent'} />
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -1224,16 +2006,16 @@ export function PublicLandingPage() {
         <section className="mx-auto max-w-7xl px-4 pb-8 sm:px-6 lg:px-8">
           <div className={`grid gap-3 border p-5 backdrop-blur-xl sm:grid-cols-2 lg:grid-cols-4 ${cardMotionClass}`} style={{ ...surfaceStyle, borderRadius: `${cornerRadiusPx}px` }}>
             {page.content.stats.yearsExperience != null && (
-              <StatBlock label="Years Experience" value={String(page.content.stats.yearsExperience)} accent={page.branding.primaryColor} mutedTextColor={mutedTextColor} isLightTheme={isLightTheme} />
+              <StatBlock label="Years Experience" value={String(page.content.stats.yearsExperience)} icon={Award} accent={page.branding.primaryColor} mutedTextColor={mutedTextColor} isLightTheme={isLightTheme} />
             )}
             {page.content.stats.homesSold != null && (
-              <StatBlock label="Homes Sold" value={String(page.content.stats.homesSold)} accent={page.theme.colors.secondary} mutedTextColor={mutedTextColor} isLightTheme={isLightTheme} />
+              <StatBlock label="Homes Sold" value={String(page.content.stats.homesSold)} icon={Home} accent={page.theme.colors.secondary} mutedTextColor={mutedTextColor} isLightTheme={isLightTheme} />
             )}
             {page.content.stats.avgDaysOnMarket != null && (
-              <StatBlock label="Avg Days on Market" value={String(page.content.stats.avgDaysOnMarket)} accent={page.theme.colors.accent} mutedTextColor={mutedTextColor} isLightTheme={isLightTheme} />
+              <StatBlock label="Avg Days on Market" value={`${page.content.stats.avgDaysOnMarket} days`} icon={Calendar} accent={page.theme.colors.accent} mutedTextColor={mutedTextColor} isLightTheme={isLightTheme} />
             )}
             {page.content.stats.clientRating != null && (
-              <StatBlock label="Client Rating" value={`${page.content.stats.clientRating}/5`} accent="#fbbf24" mutedTextColor={mutedTextColor} isLightTheme={isLightTheme} />
+              <StatBlock label="Client Rating" value={`${page.content.stats.clientRating}/5 ★`} icon={Star} accent="#fbbf24" mutedTextColor={mutedTextColor} isLightTheme={isLightTheme} />
             )}
           </div>
         </section>
@@ -1258,8 +2040,11 @@ export function PublicLandingPage() {
               {page.content.features?.length ? (
                 <div className="grid gap-3 sm:grid-cols-2">
                   {page.content.features.map((feature) => (
-                    <div key={feature} className="rounded-2xl border px-4 py-3 text-sm" style={{ ...nestedSurfaceStyle, color: isLightTheme ? '#0f172a' : '#f8fafc' }}>
-                      {feature}
+                    <div key={feature} className="flex items-start gap-3 rounded-2xl border px-4 py-3 text-sm" style={{ ...nestedSurfaceStyle, color: isLightTheme ? '#0f172a' : '#f8fafc' }}>
+                      <span className="mt-0.5 inline-flex h-7 w-7 flex-none items-center justify-center rounded-full" style={{ backgroundColor: rgba(page.branding.primaryColor, 0.18), color: page.branding.primaryColor }}>
+                        <Check className="h-4 w-4" strokeWidth={2.5} />
+                      </span>
+                      <span className="leading-6">{feature}</span>
                     </div>
                   ))}
                 </div>
@@ -1347,10 +2132,10 @@ export function PublicLandingPage() {
             </SurfaceCard>
           )}
 
-          {page.otherListings && page.otherListings.length > 0 && (
+          {visibleOtherListings.length > 0 && (
             <SurfaceCard title={`More listings from ${page.agent.name}`} surfaceStyle={surfaceStyle} eyebrowColor={eyebrowColor}>
               <div className="grid gap-3 sm:grid-cols-2">
-                {page.otherListings.map((l) => (
+                {visibleOtherListings.map((l) => (
                   <a key={l.slug} href={`/sites/${l.slug}`} className={`group overflow-hidden border transition-transform hover:scale-[1.02] ${cardMotionClass}`} style={{ ...nestedSurfaceStyle, borderRadius: `${Math.max(10, cornerRadiusPx - 8)}px` }}>
                     <div className="relative aspect-[16/10] overflow-hidden bg-slate-800" style={imageFrameStyle}>
                       {l.photo ? (
@@ -1388,13 +2173,13 @@ export function PublicLandingPage() {
 
           {page.content.whyChooseBullets && page.content.whyChooseBullets.length > 0 && (
             <SurfaceCard title="Why work with me" surfaceStyle={surfaceStyle} eyebrowColor={eyebrowColor}>
-              <ul className="grid gap-2 sm:grid-cols-2">
+              <ul className="grid gap-3 sm:grid-cols-2">
                 {page.content.whyChooseBullets.map((bullet, i) => (
-                  <li key={`${bullet}-${i}`} className="flex items-start gap-2 rounded-2xl border px-4 py-3 text-sm" style={{ ...nestedSurfaceStyle, color: isLightTheme ? '#0f172a' : '#f8fafc' }}>
-                    <svg className="mt-0.5 h-4 w-4 flex-none" fill="none" viewBox="0 0 24 24" stroke={page.branding.primaryColor} strokeWidth={2.5}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                    </svg>
-                    <span>{bullet}</span>
+                  <li key={`${bullet}-${i}`} className="flex items-start gap-3 rounded-2xl border px-4 py-3 text-sm" style={{ ...nestedSurfaceStyle, color: isLightTheme ? '#0f172a' : '#f8fafc' }}>
+                    <span className="mt-0.5 inline-flex h-7 w-7 flex-none items-center justify-center rounded-full" style={{ backgroundColor: rgba(page.branding.primaryColor, 0.18), color: page.branding.primaryColor }}>
+                      <Check className="h-4 w-4" strokeWidth={2.5} />
+                    </span>
+                    <span className="leading-6">{bullet}</span>
                   </li>
                 ))}
               </ul>
@@ -1450,7 +2235,7 @@ export function PublicLandingPage() {
           )}
 
           {sections.homeValuation === true && (
-            <SurfaceCard title="What's your home worth?" surfaceStyle={surfaceStyle} eyebrowColor={eyebrowColor}>
+            <SurfaceCard title="What's your home worth?" id="lead-form" surfaceStyle={surfaceStyle} eyebrowColor={eyebrowColor}>
               <p className="text-sm" style={{ color: mutedTextColor }}>
                 Get a free, no-obligation custom valuation report based on recent comparable sales in your neighborhood.
               </p>
@@ -1502,6 +2287,11 @@ export function PublicLandingPage() {
                 >
                   {valuationSubmitting ? 'Sending...' : 'Get my free home value report'}
                 </button>
+                <div className="sm:col-span-2 -mt-1 flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-[11px] font-medium" style={{ color: mutedTextColor }}>
+                  <span className="inline-flex items-center gap-1"><ShieldCheck className="h-3.5 w-3.5" /> Free & no obligation</span>
+                  <span className="inline-flex items-center gap-1"><Zap className="h-3.5 w-3.5" /> Reply within 24 hrs</span>
+                  <span className="inline-flex items-center gap-1"><Mail className="h-3.5 w-3.5" /> We never share your info</span>
+                </div>
               </form>
             </SurfaceCard>
           )}
@@ -1524,16 +2314,34 @@ export function PublicLandingPage() {
               </div>
               <p className="mt-4 text-sm leading-7" style={{ color: mutedTextColor }}>{agentBioText}</p>
               <div className="mt-4 grid gap-2 text-sm" style={{ color: isLightTheme ? '#0f172a' : '#e2e8f0' }}>
-                <a href={`mailto:${page.agent.email}`} className="rounded-xl border px-3 py-2 hover:bg-white/10" style={nestedSurfaceStyle}>{page.agent.email}</a>
-                {page.agent.phone && <a href={`tel:${page.agent.phone}`} className="rounded-xl border px-3 py-2 hover:bg-white/10" style={nestedSurfaceStyle}>{page.agent.phone}</a>}
-                {page.brokerage.phone && <div className="rounded-xl border px-3 py-2" style={nestedSurfaceStyle}>{page.brokerage.phone}</div>}
+                <button
+                  type="button"
+                  onClick={() => { setQuickQuestionOpen(true); setQuickQuestionMessage(null); }}
+                  className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-left hover:bg-white/10"
+                  style={nestedSurfaceStyle}
+                >
+                  <Mail className="h-4 w-4 flex-none" />
+                  <span>Email {agentFirstName}</span>
+                </button>
+                {agentPhone && (
+                  <a href={agentPhoneHref} className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 hover:bg-white/10" style={nestedSurfaceStyle}>
+                    <Phone className="h-4 w-4 flex-none" />
+                    <span>{agentPhoneLabel || agentPhone}</span>
+                  </a>
+                )}
+                {page.brokerage.phone && (
+                  <div className="inline-flex items-center gap-2 rounded-xl border px-3 py-2" style={nestedSurfaceStyle}>
+                    <Phone className="h-4 w-4 flex-none opacity-60" />
+                    <span>{formatPhoneDisplay(page.brokerage.phone)} <span className="text-xs opacity-70">(brokerage)</span></span>
+                  </div>
+                )}
                 {page.brokerage.address && <div className="rounded-xl border px-3 py-2" style={nestedSurfaceStyle}>{page.brokerage.address}</div>}
                 {page.brokerage.license && <div className="rounded-xl border px-3 py-2" style={nestedSurfaceStyle}>Brokerage License {page.brokerage.license}</div>}
               </div>
             </SurfaceCard>
           )}
 
-          {showLeadCapture && sections.contact !== false && (
+          {showLeadCapture && sections.contact !== false && sections.homeValuation !== true && (
             <SurfaceCard title={page.leadCapture?.formTitle || 'Request information'} id="lead-form" surfaceStyle={surfaceStyle} eyebrowColor={eyebrowColor}>
               <p className="text-sm" style={{ color: mutedTextColor }}>{page.leadCapture?.formSubtitle || 'Tell us how to reach you and we will follow up shortly.'}</p>
 
@@ -1603,8 +2411,12 @@ export function PublicLandingPage() {
                   className="w-full rounded-2xl px-4 py-3 text-sm font-semibold transition-opacity disabled:opacity-60"
                   style={primaryButtonStyle}
                 >
-                  {submitting ? 'Sending...' : page.leadCapture?.buttonText || page.content.ctaText || 'Send request'}
+                  {submitting ? 'Sending...' : leadCtaText || 'Send request'}
                 </button>
+                <div className="mt-1 flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-[11px] font-medium" style={{ color: mutedTextColor }}>
+                  <span className="inline-flex items-center gap-1"><ShieldCheck className="h-3.5 w-3.5" /> Free & no obligation</span>
+                  <span className="inline-flex items-center gap-1"><Zap className="h-3.5 w-3.5" /> Reply within 24 hrs</span>
+                </div>
               </form>
             </SurfaceCard>
           )}
@@ -1627,17 +2439,24 @@ export function PublicLandingPage() {
             <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
               {showLeadCapture && (
                 <a href="#lead-form" className="rounded-full px-6 py-3 text-sm font-semibold shadow-xl transition-transform hover:scale-[1.03]" style={primaryButtonStyle}>
-                  {page.content.ctaText || 'Schedule a Showing'}
+                  {leadCtaText}
                 </a>
               )}
-              {page.agent.phone && (
-                <a href={`tel:${page.agent.phone}`} className="rounded-full border px-6 py-3 text-sm font-semibold transition-colors hover:bg-white/10" style={{ ...nestedSurfaceStyle, color: isLightTheme ? '#0f172a' : '#ffffff' }}>
-                  Call {page.agent.phone}
+              {agentPhone && (
+                <a href={agentPhoneHref} className="inline-flex items-center gap-2 rounded-full border px-6 py-3 text-sm font-semibold transition-colors hover:bg-white/10" style={{ ...nestedSurfaceStyle, color: isLightTheme ? '#0f172a' : '#ffffff' }}>
+                  <Phone className="h-4 w-4" />
+                  Call {agentPhoneLabel || agentPhone}
                 </a>
               )}
-              <a href={`mailto:${page.agent.email}`} className="rounded-full border px-6 py-3 text-sm font-semibold transition-colors hover:bg-white/10" style={{ ...nestedSurfaceStyle, color: isLightTheme ? '#0f172a' : '#ffffff' }}>
-                Email Agent
-              </a>
+              <button
+                type="button"
+                onClick={() => { setQuickQuestionOpen(true); setQuickQuestionMessage(null); }}
+                className="inline-flex items-center gap-2 rounded-full border px-6 py-3 text-sm font-semibold transition-colors hover:bg-white/10"
+                style={{ ...nestedSurfaceStyle, color: isLightTheme ? '#0f172a' : '#ffffff' }}
+              >
+                <Mail className="h-4 w-4" />
+                Email {agentFirstName}
+              </button>
             </div>
           </div>
         </div>
@@ -1659,6 +2478,89 @@ export function PublicLandingPage() {
         </div>
       </footer>
 
+      {quickQuestionOpen && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(2,6,23,0.72)', backdropFilter: 'blur(10px)' }} role="dialog" aria-modal="true">
+          <button
+            type="button"
+            className="absolute inset-0 cursor-default"
+            aria-label="Close email form"
+            onClick={() => setQuickQuestionOpen(false)}
+          />
+          <div className="relative w-full max-w-lg border p-6 shadow-2xl sm:p-7" style={{ ...surfaceStyle, borderRadius: `${Math.max(cornerRadiusPx, 18)}px` }}>
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-[0.2em]" style={{ color: eyebrowColor }}>Email {page.agent.name}</div>
+                <h2 className="mt-2 text-2xl font-bold" style={{ color: isLightTheme ? '#0f172a' : '#ffffff', fontFamily: appliedHeadingFont }}>Ask a quick question</h2>
+                <p className="mt-2 text-sm" style={{ color: mutedTextColor }}>
+                  Your note goes to {page.agent.email} and creates a lead so {page.agent.name.split(' ')[0]} can follow up cleanly.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setQuickQuestionOpen(false)}
+                className="rounded-full border px-3 py-1.5 text-xs font-semibold hover:bg-white/10"
+                style={{ ...nestedSurfaceStyle, color: isLightTheme ? '#0f172a' : '#ffffff' }}
+              >
+                Close
+              </button>
+            </div>
+
+            <form className="mt-5 grid gap-3" onSubmit={submitQuickQuestion}>
+              <input
+                type="text"
+                value={quickQuestionForm.name}
+                onChange={(event) => setQuickQuestionForm((current) => ({ ...current, name: event.target.value }))}
+                placeholder="Full name"
+                className="w-full rounded-2xl border px-4 py-3 text-sm placeholder:text-slate-500 focus:border-cyan-400 focus:outline-none"
+                style={{ ...nestedSurfaceStyle, color: isLightTheme ? '#0f172a' : '#ffffff' }}
+                required
+              />
+              <div className="grid gap-3 sm:grid-cols-2">
+                <input
+                  type="email"
+                  value={quickQuestionForm.email}
+                  onChange={(event) => setQuickQuestionForm((current) => ({ ...current, email: event.target.value }))}
+                  placeholder="Email address"
+                  className="w-full rounded-2xl border px-4 py-3 text-sm placeholder:text-slate-500 focus:border-cyan-400 focus:outline-none"
+                  style={{ ...nestedSurfaceStyle, color: isLightTheme ? '#0f172a' : '#ffffff' }}
+                  required
+                />
+                <input
+                  type="tel"
+                  value={quickQuestionForm.phone}
+                  onChange={(event) => setQuickQuestionForm((current) => ({ ...current, phone: event.target.value }))}
+                  placeholder="Phone (optional)"
+                  className="w-full rounded-2xl border px-4 py-3 text-sm placeholder:text-slate-500 focus:border-cyan-400 focus:outline-none"
+                  style={{ ...nestedSurfaceStyle, color: isLightTheme ? '#0f172a' : '#ffffff' }}
+                />
+              </div>
+              <textarea
+                value={quickQuestionForm.message}
+                onChange={(event) => setQuickQuestionForm((current) => ({ ...current, message: event.target.value }))}
+                placeholder="What would you like to know?"
+                rows={5}
+                className="w-full rounded-2xl border px-4 py-3 text-sm placeholder:text-slate-500 focus:border-cyan-400 focus:outline-none"
+                style={{ ...nestedSurfaceStyle, color: isLightTheme ? '#0f172a' : '#ffffff' }}
+                required
+              />
+              {quickQuestionMessage && (
+                <div className={`rounded-2xl px-4 py-3 text-sm ${quickQuestionMessage.type === 'success' ? 'bg-emerald-500/10 text-emerald-200 border border-emerald-500/20' : 'bg-rose-500/10 text-rose-200 border border-rose-500/20'}`}>
+                  {quickQuestionMessage.text}
+                </div>
+              )}
+              <button
+                type="submit"
+                disabled={quickQuestionSubmitting}
+                className="rounded-2xl px-4 py-3 text-sm font-semibold transition-opacity disabled:opacity-60"
+                style={primaryButtonStyle}
+              >
+                {quickQuestionSubmitting ? 'Sending...' : 'Send question'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Force-capture gate */}
       {gateEnabled && !gateUnlocked && gateVisible && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(2,6,23,0.78)', backdropFilter: 'blur(10px)' }} role="dialog" aria-modal="true">
@@ -1670,6 +2572,7 @@ export function PublicLandingPage() {
                   alt=""
                   className={compactBrokerageLogoClass}
                   style={{ width: compactBrokerageLogoWidth, maxWidth: '48vw' }}
+                  onError={() => markBrandLogoFailed(safeBrandLogo)}
                 />
               ) : (
                 <div className="flex h-11 w-11 items-center justify-center rounded-xl text-sm font-semibold text-white" style={{ backgroundColor: page.branding.primaryColor }}>
@@ -1731,29 +2634,6 @@ export function PublicLandingPage() {
         </div>
       )}
 
-      {/* Sticky mobile contact bar */}
-      {(page.agent.phone || page.agent.email) && (
-        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-white/10 bg-slate-950/90 px-3 py-2 backdrop-blur-xl lg:hidden">
-          <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${mobileActionCount}, minmax(0, 1fr))` }}>
-            {page.agent.phone && (
-              <a href={`tel:${page.agent.phone}`} className="flex flex-col items-center gap-0.5 rounded-xl border border-white/10 bg-white/5 py-2 text-[11px] font-semibold text-white">
-                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" /></svg>
-                Call
-              </a>
-            )}
-            {page.agent.phone && (
-              <a href={`sms:${page.agent.phone}`} className="flex flex-col items-center gap-0.5 rounded-xl border border-white/10 bg-white/5 py-2 text-[11px] font-semibold text-white">
-                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" /></svg>
-                Text
-              </a>
-            )}
-            <a href="#lead-form" className="flex flex-col items-center gap-0.5 rounded-xl py-2 text-[11px] font-semibold shadow-lg" style={primaryButtonStyle}>
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 8l9 6 9-6M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
-              Inquire
-            </a>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -1788,13 +2668,20 @@ function SnapshotItem({ label, value }: { label: string; value: string }) {
   );
 }
 
-function StatBlock({ label, value, accent, mutedTextColor, isLightTheme }: { label: string; value: string; accent: string; mutedTextColor: string; isLightTheme: boolean }) {
+function StatBlock({ label, value, accent, mutedTextColor, isLightTheme, icon: Icon }: { label: string; value: string; accent: string; mutedTextColor: string; isLightTheme: boolean; icon?: React.ComponentType<{ className?: string }> }) {
   return (
     <div className="relative overflow-hidden border border-white/10 bg-white/5 px-5 py-4" style={{ borderRadius: 'var(--lp-card-radius, 28px)' }}>
       <div className="pointer-events-none absolute -top-8 -right-8 h-24 w-24 rounded-full blur-2xl" style={{ backgroundColor: accent, opacity: 0.2 }} />
-      <div className="relative">
-        <div className="text-3xl font-bold" style={{ color: isLightTheme ? '#0f172a' : '#ffffff' }}>{value}</div>
-        <div className="mt-1 text-[11px] font-semibold uppercase tracking-[0.18em]" style={{ color: mutedTextColor }}>{label}</div>
+      <div className="relative flex items-start gap-3">
+        {Icon && (
+          <span className="inline-flex h-9 w-9 flex-none items-center justify-center rounded-xl" style={{ backgroundColor: `${accent}26`, color: accent }}>
+            <Icon className="h-4 w-4" />
+          </span>
+        )}
+        <div className="min-w-0">
+          <div className="text-3xl font-bold leading-none" style={{ color: isLightTheme ? '#0f172a' : '#ffffff' }}>{value}</div>
+          <div className="mt-2 text-[11px] font-semibold uppercase tracking-[0.18em]" style={{ color: mutedTextColor }}>{label}</div>
+        </div>
       </div>
     </div>
   );

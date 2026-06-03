@@ -17,6 +17,7 @@ import { UnsavedChangesDialog } from '../../components/ui/UnsavedChangesDialog';
 import { LeadSmartView, SmartListFilters, SmartListsSidebar } from './SmartListsSidebar';
 import { LeadConvertModal } from './LeadConvertModal';
 import { resolveLeadMailingAddress } from './leadMailingAddress';
+import { toDisplayErrorMessage } from '../../lib/errorMessages';
 
 const ARCHIVED_TAG = 'ARCHIVED';
 
@@ -237,6 +238,7 @@ export default function LeadsDashboard() {
   const [showNewLead, setShowNewLead] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [actionSuccess, setActionSuccess] = useState<string | null>(null);
 
   const [newLead, setNewLead] = useState({
     firstName: '',
@@ -249,6 +251,8 @@ export default function LeadsDashboard() {
     mailingZip: '',
     source: LeadSource.WEBSITE as LeadSource,
     priority: LeadPriority.WARM as LeadPriority,
+    nextTask: '',
+    tags: '',
     notes: '',
   });
 
@@ -263,6 +267,8 @@ export default function LeadsDashboard() {
     mailingZip: '',
     source: LeadSource.WEBSITE as LeadSource,
     priority: LeadPriority.WARM as LeadPriority,
+    nextTask: '',
+    tags: '',
     notes: '',
   }), []);
 
@@ -382,6 +388,25 @@ export default function LeadsDashboard() {
   }, [priorityFilter, sourceFilter, searchQuery, archivedView]);
 
   useEffect(() => {
+    let lastRefreshAt = Date.now();
+    const refreshIfStale = () => {
+      if (document.visibilityState !== 'visible') return;
+      const now = Date.now();
+      if (now - lastRefreshAt < 10_000) return;
+      lastRefreshAt = now;
+      void loadData();
+    };
+
+    window.addEventListener('focus', refreshIfStale);
+    document.addEventListener('visibilitychange', refreshIfStale);
+    return () => {
+      window.removeEventListener('focus', refreshIfStale);
+      document.removeEventListener('visibilitychange', refreshIfStale);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [priorityFilter, sourceFilter, searchQuery, archivedView]);
+
+  useEffect(() => {
     const focusId = searchParams.get('focusId');
     if (!focusId) return;
 
@@ -456,6 +481,16 @@ export default function LeadsDashboard() {
   }, [searchParams, setSearchParams, leads]);
 
   useEffect(() => {
+    if (searchParams.get('new') !== '1') return;
+    setActionError(null);
+    setShowImport(false);
+    setShowNewLead(true);
+    const next = new URLSearchParams(searchParams);
+    next.delete('new');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
+
+  useEffect(() => {
     const leadId = selectedLead?.id;
     if (!leadId) {
       setLeadDetail(null);
@@ -522,6 +557,7 @@ export default function LeadsDashboard() {
     setShowNewLead(false);
     setShowImport(false);
     setActionError(null);
+    setActionSuccess(null);
   }, []);
 
   const resetPanels = useCallback(() => {
@@ -536,17 +572,23 @@ export default function LeadsDashboard() {
     const firstName = newLead.firstName.trim();
     const lastName = newLead.lastName.trim();
     const email = newLead.email.trim();
-    if (!firstName || !lastName || !email) {
-      setActionError('First name, last name, and email are required.');
+    if (!firstName || !email) {
+      setActionSuccess(null);
+      setActionError('First name and email are required.');
       return;
     }
 
     try {
       setSavingDetail(true);
       setActionError(null);
-      await leadsApi.createLead({
+      setActionSuccess(null);
+      const tags = newLead.tags
+        .split(',')
+        .map((tag) => tag.trim())
+        .filter(Boolean);
+      const created = await leadsApi.createLead({
         firstName,
-        lastName,
+        lastName: lastName || undefined,
         email,
         phone: newLead.phone.trim() || undefined,
         mailingAddress: newLead.mailingAddress.trim() || undefined,
@@ -555,6 +597,8 @@ export default function LeadsDashboard() {
         mailingZip: newLead.mailingZip.trim() || undefined,
         source: newLead.source,
         priority: newLead.priority,
+        nextTask: newLead.nextTask.trim() || undefined,
+        tags: tags.length ? tags : undefined,
         notes: newLead.notes.trim() || undefined,
       });
 
@@ -569,14 +613,19 @@ export default function LeadsDashboard() {
         mailingZip: '',
         source: LeadSource.WEBSITE,
         priority: LeadPriority.WARM,
+        nextTask: '',
+        tags: '',
         notes: '',
       });
       newLeadUnsaved.clearDraft();
       setShowNewLead(false);
       await loadData();
+      setSelectedLead(created.data);
+      setActionSuccess(`${firstName} ${lastName}`.trim() || email);
     } catch (e) {
       console.error('Failed to create lead:', e);
-      setActionError('Failed to create lead.');
+      setActionSuccess(null);
+      setActionError(toDisplayErrorMessage((e as any)?.response?.data ?? e, 'Failed to create lead.'));
     } finally {
       setSavingDetail(false);
     }
@@ -1334,6 +1383,9 @@ export default function LeadsDashboard() {
 
     return queue;
   }, [leads]);
+  const actionErrorTone = actionError && /complete|succeeded|updated|saved|created/i.test(actionError) && !/failed|missing|select|required|invalid|error/i.test(actionError)
+    ? 'success'
+    : 'error';
 
   return (
     <>
@@ -1346,6 +1398,7 @@ export default function LeadsDashboard() {
           <button
             onClick={() => {
               setActionError(null);
+              setActionSuccess(null);
               setShowImport((v) => !v);
               setShowNewLead(false);
             }}
@@ -1356,6 +1409,7 @@ export default function LeadsDashboard() {
           <button
             onClick={() => {
               setActionError(null);
+              setActionSuccess(null);
               setShowNewLead((v) => !v);
               setShowImport(false);
             }}
@@ -1376,8 +1430,17 @@ export default function LeadsDashboard() {
         </div>
         <div className="flex-1 w-full min-w-0">
           {actionError && (
-            <div className="mb-4 bg-slate-950/40 backdrop-blur-xl border border-slate-800/50 rounded-[18px] px-4 py-3 text-sm text-slate-200">
+            <div className={`mb-4 rounded-[18px] border px-4 py-3 text-sm font-medium backdrop-blur-xl ${
+              actionErrorTone === 'success'
+                ? 'border-emerald-400/30 bg-emerald-500/10 text-emerald-100'
+                : 'border-rose-400/30 bg-rose-500/10 text-rose-100'
+            }`}>
               {actionError}
+            </div>
+          )}
+          {actionSuccess && (
+            <div className="mb-4 rounded-[18px] border border-emerald-400/30 bg-emerald-500/10 px-4 py-3 text-sm font-medium text-emerald-100 backdrop-blur-xl">
+              Lead created: {actionSuccess}
             </div>
           )}
 
@@ -1387,7 +1450,7 @@ export default function LeadsDashboard() {
               <div>
                 <h3 className="text-lg font-bold text-white">{showNewLead ? 'Create Lead' : 'Import Leads (CSV)'}</h3>
                 <p className="text-sm text-slate-400 mt-1">
-                  {showNewLead ? 'Add a lead manually in seconds.' : 'Upload a CSV with at least an email column.'}
+                  {showNewLead ? 'Capture the contact, source, follow-up task, and tags in one pass.' : 'Upload a CSV with at least an email column.'}
                 </p>
               </div>
               <button onClick={resetPanels} className="text-slate-400 hover:text-white transition-colors" aria-label="Close">
@@ -1425,7 +1488,7 @@ export default function LeadsDashboard() {
                     className={inputClass}
                   />
                 </Field>
-                <Field label="Last name">
+                <Field label="Last name (optional)">
                   <input
                     value={newLead.lastName}
                     onChange={(e) => setNewLead({ ...newLead, lastName: e.target.value })}
@@ -1472,6 +1535,22 @@ export default function LeadsDashboard() {
                       </option>
                     ))}
                   </select>
+                </Field>
+                <Field label="Next task">
+                  <input
+                    value={newLead.nextTask}
+                    onChange={(e) => setNewLead({ ...newLead, nextTask: e.target.value })}
+                    className={inputClass}
+                    placeholder="Call within 5 minutes"
+                  />
+                </Field>
+                <Field label="Tags">
+                  <input
+                    value={newLead.tags}
+                    onChange={(e) => setNewLead({ ...newLead, tags: e.target.value })}
+                    className={inputClass}
+                    placeholder="buyer, hot, open house"
+                  />
                 </Field>
                 <div className="md:col-span-2">
                   <Field label="Mailing street (optional)">
@@ -1532,7 +1611,7 @@ export default function LeadsDashboard() {
                     disabled={savingDetail}
                     className="px-4 py-2 rounded-xl bg-blue-500 text-white hover:bg-blue-600 transition-colors disabled:opacity-60"
                   >
-                    Create Lead
+                    {savingDetail ? 'Creating...' : 'Create Lead'}
                   </button>
                 </div>
               </div>
@@ -2948,10 +3027,10 @@ const inputClass =
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div>
-      <label className="block text-xs font-semibold text-slate-400 mb-2">{label}</label>
+    <label className="block">
+      <span className="block text-xs font-semibold text-slate-400 mb-2">{label}</span>
       {children}
-    </div>
+    </label>
   );
 }
 

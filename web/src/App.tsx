@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom';
 import { lazy, Suspense, useEffect, useRef } from 'react';
 import { ProtectedRoute } from './features/auth/ProtectedRoute';
 import { AppShell } from './components/layout/AppShell';
@@ -19,6 +19,7 @@ import { PublicSignPage } from './features/esign/PublicSignPage';
 import { BillingAccessGate } from './features/billing/BillingAccessGate';
 import { InternalLoginPage } from './features/internal/InternalLoginPage';
 import { PublicLandingPage } from './features/public/PublicLandingPage';
+import PropertyWorkspace from './features/properties/PropertyWorkspace';
 
 // ─── Lazy-loaded feature pages (code-split per route) ────────────────
 const DashboardPage = lazy(() => import('./features/deals/DashboardPage').then(m => ({ default: m.DashboardPage })));
@@ -55,7 +56,6 @@ const DataSettingsPage = lazy(() => import('./features/settings/DataSettingsPage
 const IdxSettingsPage = lazy(() => import('./features/settings/IdxSettingsPage').then(m => ({ default: m.IdxSettingsPage })));
 const LandingPagesSettingsPage = lazy(() => import('./features/settings/LandingPagesSettingsPage').then(m => ({ default: m.LandingPagesSettingsPage })));
 const LandingPageEditorPage = lazy(() => import('./features/settings/LandingPageEditorPage').then(m => ({ default: m.LandingPageEditorPage })));
-const PropertySearch = lazy(() => import('./features/properties/PropertyWorkspace'));
 const ReportingPage = lazy(() => import('./features/reporting/ReportingPage').then(m => ({ default: m.ReportingPage })));
 
 // Internal admin pages (lazy — rarely visited)
@@ -68,6 +68,12 @@ const InternalSystemPage = lazy(() => import('./features/internal/pages/Internal
 const InternalBillingPage = lazy(() => import('./features/internal/pages/InternalBillingPage').then(m => ({ default: m.InternalBillingPage })));
 const InternalActivityPage = lazy(() => import('./features/internal/pages/InternalActivityPage').then(m => ({ default: m.InternalActivityPage })));
 const InternalUsagePage = lazy(() => import('./features/internal/pages/InternalUsagePage').then(m => ({ default: m.InternalUsagePage })));
+
+function DealContractRedirect() {
+  const { dealId } = useParams<{ dealId: string }>();
+  const location = useLocation();
+  return <Navigate to={dealId ? `/contracts/${dealId}` : '/contracts'} replace state={location.state} />;
+}
 const InternalSupportPage = lazy(() => import('./features/internal/pages/InternalSupportPage').then(m => ({ default: m.InternalSupportPage })));
 const InternalCalculationsPage = lazy(() => import('./features/internal/pages/InternalCalculationsPage').then(m => ({ default: m.InternalCalculationsPage })));
 const InternalCampaignsPage = lazy(() => import('./features/internal/pages/InternalCampaignsPage').then(m => ({ default: m.InternalCampaignsPage })));
@@ -98,7 +104,8 @@ function isNonActionableRejection(reason: unknown): boolean {
   return false;
 }
 
-const CHUNK_RELOAD_KEY = 'aep_chunk_reload_once';
+const CHUNK_RELOAD_KEY = 'aep_chunk_reload_attempts';
+const MAX_CHUNK_RELOAD_ATTEMPTS = 2;
 
 function tryReloadForChunkError(rawMessage: unknown): boolean {
   const message = String(rawMessage || '').toLowerCase();
@@ -109,18 +116,21 @@ function tryReloadForChunkError(rawMessage: unknown): boolean {
 
   if (!isChunkError) return false;
 
+  let attempts = 0;
   try {
-    const alreadyReloaded = window.sessionStorage.getItem(CHUNK_RELOAD_KEY) === '1';
-    if (alreadyReloaded) {
+    attempts = Number(window.sessionStorage.getItem(CHUNK_RELOAD_KEY) || '0');
+    if (attempts >= MAX_CHUNK_RELOAD_ATTEMPTS) {
       window.sessionStorage.removeItem(CHUNK_RELOAD_KEY);
       return false;
     }
-    window.sessionStorage.setItem(CHUNK_RELOAD_KEY, '1');
+    window.sessionStorage.setItem(CHUNK_RELOAD_KEY, String(attempts + 1));
   } catch {
     // Continue when sessionStorage is unavailable.
   }
 
-  window.location.reload();
+  const nextUrl = new URL(window.location.href);
+  nextUrl.searchParams.set('_aep_refresh', String(Date.now()));
+  window.location.replace(nextUrl.toString());
   return true;
 }
 
@@ -290,7 +300,7 @@ export default function App() {
           <Route path="tasks" element={<TasksPage />} />
           <Route path="leads" element={<LeadsDashboard />} />
           <Route path="leads/:id" element={<LeadDetailPage />} />
-          <Route path="search" element={<PropertySearch />} />
+          <Route path="search" element={<PropertyWorkspace />} />
           <Route path="deals" element={<DealsKanban />} />
           <Route path="deals/new" element={<DealCreateWizard />} />
           <Route path="deals/:dealId" element={<DealsKanban />} />
@@ -298,11 +308,13 @@ export default function App() {
           <Route path="deals/world-class-preview" element={<Navigate to="/deals/command-center" replace />} />
           <Route path="deals/:dealId/cockpit" element={<DealExecutionCockpitPage />} />
           <Route path="deals/:dealId/detail" element={<DealDetailPage />} />
-          <Route path="deals/:dealId/repc" element={<RepcWizard />} />
+          <Route path="deals/:dealId/repc" element={<DealContractRedirect />} />
           <Route path="clients" element={<ClientsListPage />} />
           <Route path="clients/:id" element={<ClientDetailPage />} />
           <Route path="contracts" element={<ContractsHub />} />
           <Route path="contracts/pdf-editor" element={<PdfEditor />} />
+          <Route path="contracts/:dealId" element={<RepcWizard />} />
+          <Route path="contracts/:dealId/forms/:formCode" element={<DealTemplateFormPage />} />
           <Route path="deals/:dealId/forms/:formCode" element={<DealTemplateFormPage />} />
           <Route path="listings" element={<ListingsPage />} />
           <Route path="landing-pages" element={<LandingPagesSettingsPage />} />

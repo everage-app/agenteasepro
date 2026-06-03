@@ -23,6 +23,7 @@ import crypto from 'crypto';
 import { prisma } from '../lib/prisma';
 import { auditLog, extractIp } from './securityAuditService';
 import { sendVerificationEmail } from './emailService';
+import { ensureDefaultAgentLandingPage } from './defaultAgentLandingPage';
 
 // ── Configuration ─────────────────────────────────────────────────────
 
@@ -298,6 +299,12 @@ export async function signup(
       emailVerifyExpiry: verifyExpiry,
     },
   });
+
+  try {
+    await ensureDefaultAgentLandingPage(agent.id);
+  } catch (defaultPageError) {
+    console.error('Failed to create default agent landing page:', defaultPageError);
+  }
 
   // Issue token (limited access until verified)
   const token = signAccessToken(agent.id, agent.email);

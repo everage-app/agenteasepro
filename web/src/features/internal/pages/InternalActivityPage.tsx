@@ -144,6 +144,23 @@ export function InternalActivityPage() {
       : 10;
   });
   const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null);
+  const [alertThresholds, setAlertThresholds] = useState(() => {
+    if (typeof window === 'undefined') {
+      return { errorPressureMax: 3, momentumMin: -15, engagementMin: 35 };
+    }
+    const raw = window.localStorage.getItem('internal.activity.alertThresholds');
+    if (!raw) return { errorPressureMax: 3, momentumMin: -15, engagementMin: 35 };
+    try {
+      const parsed = JSON.parse(raw);
+      return {
+        errorPressureMax: Number(parsed?.errorPressureMax ?? 3),
+        momentumMin: Number(parsed?.momentumMin ?? -15),
+        engagementMin: Number(parsed?.engagementMin ?? 35),
+      };
+    } catch {
+      return { errorPressureMax: 3, momentumMin: -15, engagementMin: 35 };
+    }
+  });
   const [hoveredPointIndex, setHoveredPointIndex] = useState<number | null>(null);
   const [liveHealth, setLiveHealth] = useState<LiveHealthTile | null>(null);
   const [visibleSeries, setVisibleSeries] = useState<Record<GraphKey, boolean>>({
@@ -175,6 +192,11 @@ export function InternalActivityPage() {
     if (typeof window === 'undefined') return;
     window.localStorage.setItem('internal.activity.refreshSeconds', String(refreshSeconds));
   }, [refreshSeconds]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem('internal.activity.alertThresholds', JSON.stringify(alertThresholds));
+  }, [alertThresholds]);
 
   useEffect(() => {
     const tabParam = searchParams.get('tab');
@@ -286,6 +308,111 @@ export function InternalActivityPage() {
     if (barPoints.length === 0) return null;
     return barPoints.reduce((max, point) => (point.combined > max.combined ? point : max), barPoints[0]);
   }, [barPoints]);
+
+  const activityScanner = useMemo(() => {
+    const points = graphPoints;
+    if (points.length === 0) {
+      return {
+        volumeMomentumPct: 0,
+        errorPressurePct: 0,
+        engagementQuality: 0,
+        anomalies: [] as Array<{ date: string; reason: string; severity: 'high' | 'medium' }>,
+        recommendations: [] as string[],
+      };
+    }
+
+    const windowSize = Math.min(7, points.length);
+    const recent = points.slice(-windowSize);
+    const previous = points.slice(-windowSize * 2, -windowSize);
+
+    const sum = (rows: ActivityGraphPoint[], selector: (row: ActivityGraphPoint) => number) =>
+      rows.reduce((acc, row) => acc + selector(row), 0);
+
+    const recentVolume = sum(recent, (row) => row.events + row.webViews + row.webVisitors + row.activeAgents);
+    const previousVolume = previous.length
+      ? sum(previous, (row) => row.events + row.webViews + row.webVisitors + row.activeAgents)
+      : recentVolume;
+
+    const recentErrors = sum(recent, (row) => row.errors);
+    const recentEvents = sum(recent, (row) => row.events);
+    const recentViews = sum(recent, (row) => row.webViews);
+    const recentVisitors = sum(recent, (row) => row.webVisitors);
+
+    const volumeMomentumPct = computeDeltaPct(recentVolume, previousVolume);
+    const errorPressurePct = recentEvents > 0 ? Number(((recentErrors / recentEvents) * 100).toFixed(2)) : 0;
+    const engagementQuality = recentViews > 0 ? Number(((recentVisitors / recentViews) * 100).toFixed(2)) : 0;
+
+    const errorSeries = points.map((row) => row.errors);
+    const errorMean = errorSeries.reduce((acc, value) => acc + value, 0) / Math.max(1, errorSeries.length);
+    const variance = errorSeries.reduce((acc, value) => acc + (value - errorMean) ** 2, 0) / Math.max(1, errorSeries.length);
+    const stdDev = Math.sqrt(variance);
+    const errorThreshold = errorMean + stdDev * 1.8;
+
+    const anomalies = points
+      .filter((row) => row.errors > Math.max(3, errorThreshold) || (row.events > 0 && row.activeAgents === 0))
+      .map((row) => ({
+        date: row.date,
+        severity: row.errors > Math.max(6, errorThreshold * 1.4) ? 'high' : 'medium',
+        reason:
+          row.events > 0 && row.activeAgents === 0
+            ? 'Events recorded with zero active agents'
+            : `Error spike: ${row.errors.toLocaleString()} errors`,
+      }))
+      .slice(-6)
+      .reverse();
+
+    const recommendations: string[] = [];
+    if (errorPressurePct > 3) recommendations.push('High error pressure: prioritize top client/server error sources this week.');
+    if (engagementQuality < 35) recommendations.push('Visitor quality is soft: tighten campaigns and landing-page relevance.');
+    if (volumeMomentumPct > 20) recommendations.push('Strong usage growth: reinforce top workflows in onboarding and sales demos.');
+    if (volumeMomentumPct < -15) recommendations.push('Usage cooled materially: review recent releases and friction points.');
+    if (recommendations.length === 0) recommendations.push('Signals are stable: keep monitoring and double down on top-converting workflows.');
+
+    return {
+      volumeMomentumPct,
+      errorPressurePct,
+      engagementQuality,
+      anomalies,
+      recommendations,
+    };
+  }, [graphPoints]);
+
+  const errorRevenueCorrelation = useMemo(() => {
+    const points = graphPoints;
+    if (points.length < 3) return null;
+    const errorsSeries = points.map((point) => point.errors);
+    const revenueSeries = points.map((point) => point.revenue);
+    return computeCorrelation(errorsSeries, revenueSeries);
+  }, [graphPoints]);
+
+  const activeAlerts = useMemo(() => {
+    const alerts: Array<{ severity: 'high' | 'medium'; message: string }> = [];
+    if (activityScanner.errorPressurePct > alertThresholds.errorPressureMax) {
+      alerts.push({
+        severity: 'high',
+        message: `Error pressure ${activityScanner.errorPressurePct.toFixed(2)}% exceeds threshold ${alertThresholds.errorPressureMax.toFixed(2)}%.`,
+      });
+    }
+    if (activityScanner.volumeMomentumPct < alertThresholds.momentumMin) {
+      alerts.push({
+        severity: 'medium',
+        message: `Usage momentum ${activityScanner.volumeMomentumPct.toFixed(1)}% is below threshold ${alertThresholds.momentumMin.toFixed(1)}%.`,
+      });
+    }
+    if (activityScanner.engagementQuality < alertThresholds.engagementMin) {
+      alerts.push({
+        severity: 'medium',
+        message: `Engagement quality ${activityScanner.engagementQuality.toFixed(1)}% is below threshold ${alertThresholds.engagementMin.toFixed(1)}%.`,
+      });
+    }
+    if ((errorRevenueCorrelation ?? 0) > 0.25) {
+      alerts.push({
+        severity: 'high',
+        message: `Error/revenue correlation is positive (${(errorRevenueCorrelation ?? 0).toFixed(2)}), indicating error spikes align with revenue periods.`,
+      });
+    }
+    return alerts;
+  }, [activityScanner, alertThresholds, errorRevenueCorrelation]);
 
   const volumeAreaPath = useMemo(() => {
     if (barPoints.length < 2) return '';
@@ -650,6 +777,130 @@ export function InternalActivityPage() {
             {peakVolume && <span>Peak volume: <span className="text-slate-300 font-semibold">{peakVolume.combined.toLocaleString()}</span> on {peakVolume.point.date}</span>}
           </div>
         </Card>
+      )}
+
+      {activityGraph && (
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 mb-5">
+          <Card title="Signal scanner" description="7-day behavior diagnostics" hover={false}>
+            <div className="space-y-2 text-sm">
+              <div className="flex items-center justify-between rounded-lg border border-white/10 bg-white/5 px-3 py-2">
+                <span className="text-slate-400">Volume momentum</span>
+                <span className={`font-semibold ${activityScanner.volumeMomentumPct >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
+                  {activityScanner.volumeMomentumPct >= 0 ? '+' : ''}{activityScanner.volumeMomentumPct.toFixed(1)}%
+                </span>
+              </div>
+              <div className="flex items-center justify-between rounded-lg border border-white/10 bg-white/5 px-3 py-2">
+                <span className="text-slate-400">Error pressure</span>
+                <span className={`font-semibold ${activityScanner.errorPressurePct > 3 ? 'text-rose-300' : 'text-emerald-300'}`}>
+                  {activityScanner.errorPressurePct.toFixed(2)}%
+                </span>
+              </div>
+              <div className="flex items-center justify-between rounded-lg border border-white/10 bg-white/5 px-3 py-2">
+                <span className="text-slate-400">Engagement quality</span>
+                <span className={`font-semibold ${activityScanner.engagementQuality >= 35 ? 'text-emerald-300' : 'text-amber-300'}`}>
+                  {activityScanner.engagementQuality.toFixed(1)}%
+                </span>
+              </div>
+            </div>
+          </Card>
+
+          <Card title="Anomaly watchlist" description="Recent days worth investigating" hover={false}>
+            <div className="space-y-2">
+              {activityScanner.anomalies.length === 0 ? (
+                <div className="text-sm text-slate-400">No significant anomalies detected in selected period.</div>
+              ) : (
+                activityScanner.anomalies.map((item) => (
+                  <div key={`${item.date}-${item.reason}`} className="rounded-lg border border-white/10 bg-white/5 px-3 py-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-xs text-slate-400">{item.date}</span>
+                      <Badge variant={item.severity === 'high' ? 'danger' : 'warning'}>{item.severity.toUpperCase()}</Badge>
+                    </div>
+                    <div className="text-sm text-slate-200 mt-1">{item.reason}</div>
+                  </div>
+                ))
+              )}
+            </div>
+          </Card>
+
+          <Card title="Focus recommendations" description="What to do next" hover={false}>
+            <div className="space-y-2">
+              {activityScanner.recommendations.map((item) => (
+                <div key={item} className="rounded-lg border border-cyan-300/20 bg-cyan-500/10 px-3 py-2 text-sm text-cyan-50">
+                  {item}
+                </div>
+              ))}
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {activityGraph && (
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-5">
+          <Card title="Error-to-revenue impact" description="Correlation signal for operational risk" hover={false}>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between rounded-lg border border-white/10 bg-white/5 px-3 py-2">
+                <span className="text-sm text-slate-400">Correlation coefficient</span>
+                <span className={`font-semibold ${(errorRevenueCorrelation ?? 0) > 0.25 ? 'text-rose-300' : (errorRevenueCorrelation ?? 0) < -0.2 ? 'text-emerald-300' : 'text-slate-300'}`}>
+                  {errorRevenueCorrelation == null ? '—' : errorRevenueCorrelation.toFixed(2)}
+                </span>
+              </div>
+              <div className="text-xs text-slate-500">
+                Positive means errors rise during high-revenue days, negative means cleaner operations during revenue peaks.
+              </div>
+            </div>
+          </Card>
+
+          <Card title="Alert thresholds" description="Live guardrails for launch monitoring" hover={false}>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mb-3">
+              <label className="text-xs text-slate-400">
+                Error pressure max %
+                <input
+                  type="number"
+                  step="0.1"
+                  value={alertThresholds.errorPressureMax}
+                  onChange={(e) => setAlertThresholds((prev) => ({ ...prev, errorPressureMax: Number(e.target.value) }))}
+                  className="mt-1 w-full px-2 py-1.5 rounded-lg bg-white/5 border border-white/10 text-slate-200"
+                />
+              </label>
+              <label className="text-xs text-slate-400">
+                Momentum min %
+                <input
+                  type="number"
+                  step="0.1"
+                  value={alertThresholds.momentumMin}
+                  onChange={(e) => setAlertThresholds((prev) => ({ ...prev, momentumMin: Number(e.target.value) }))}
+                  className="mt-1 w-full px-2 py-1.5 rounded-lg bg-white/5 border border-white/10 text-slate-200"
+                />
+              </label>
+              <label className="text-xs text-slate-400">
+                Engagement min %
+                <input
+                  type="number"
+                  step="0.1"
+                  value={alertThresholds.engagementMin}
+                  onChange={(e) => setAlertThresholds((prev) => ({ ...prev, engagementMin: Number(e.target.value) }))}
+                  className="mt-1 w-full px-2 py-1.5 rounded-lg bg-white/5 border border-white/10 text-slate-200"
+                />
+              </label>
+            </div>
+
+            <div className="space-y-2">
+              {activeAlerts.length === 0 ? (
+                <div className="text-sm text-emerald-300">No active alerts. Current signals are within your thresholds.</div>
+              ) : (
+                activeAlerts.map((alert) => (
+                  <div key={alert.message} className="rounded-lg border border-white/10 bg-white/5 px-3 py-2">
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <span className="text-xs text-slate-400">Launch monitor</span>
+                      <Badge variant={alert.severity === 'high' ? 'danger' : 'warning'}>{alert.severity.toUpperCase()}</Badge>
+                    </div>
+                    <div className="text-sm text-slate-200">{alert.message}</div>
+                  </div>
+                ))
+              )}
+            </div>
+          </Card>
+        </div>
       )}
 
       {website && (
@@ -1022,4 +1273,27 @@ function formatCurrency(value: number) {
     currency: 'USD',
     maximumFractionDigits: 0,
   }).format(value);
+}
+
+function computeCorrelation(x: number[], y: number[]) {
+  if (x.length !== y.length || x.length < 2) return null;
+  const n = x.length;
+  const meanX = x.reduce((sum, value) => sum + value, 0) / n;
+  const meanY = y.reduce((sum, value) => sum + value, 0) / n;
+
+  let num = 0;
+  let denX = 0;
+  let denY = 0;
+
+  for (let i = 0; i < n; i += 1) {
+    const dx = x[i] - meanX;
+    const dy = y[i] - meanY;
+    num += dx * dy;
+    denX += dx * dx;
+    denY += dy * dy;
+  }
+
+  const den = Math.sqrt(denX * denY);
+  if (!Number.isFinite(den) || den === 0) return 0;
+  return Number((num / den).toFixed(3));
 }

@@ -127,10 +127,13 @@ const safePdfFilename = (value: string) => {
 
 async function sendEnvelopeEmails(params: {
   envelopeId: string;
-  signers: Array<{ id: string; name: string; email?: string | null }>;
+  agentId?: string;
+  signers: Array<{ id: string; name: string; email?: string | null; role?: string | null }>;
   subject: string;
   message: string;
   propertyLabel: string;
+  documentName?: string;
+  deliveryType?: 'initial' | 'reminder' | 'auto_reminder';
   agentName?: string;
   agentEmail?: string;
   branding?: {
@@ -141,6 +144,7 @@ async function sendEnvelopeEmails(params: {
     emailSignature?: string;
   };
 }) {
+  const deliveryType = params.deliveryType || 'initial';
   const emailResults = await Promise.all(
     params.signers.map(async (signer) => {
       const email = String(signer.email || '').trim();
@@ -164,6 +168,15 @@ async function sendEnvelopeEmails(params: {
         agentName: params.agentName,
         agentEmail: params.agentEmail,
         branding: params.branding,
+        categories: ['esign', deliveryType === 'initial' ? 'esign_initial' : 'esign_reminder'],
+        customArgs: {
+          agentId: params.agentId || '',
+          envelopeId: params.envelopeId,
+          signerId: signer.id,
+          signerRole: String(signer.role || ''),
+          deliveryType,
+          documentName: params.documentName || params.propertyLabel,
+        },
       });
 
       return {
@@ -222,7 +235,7 @@ router.get('/envelopes', async (req: AuthenticatedRequest, res) => {
   ]);
 
   const branding = {
-    logoUrl: profileSettings?.logoUrl || profileSettings?.brokerageLogoUrl || undefined,
+    logoUrl: profileSettings?.brokerageLogoUrl || profileSettings?.logoUrl || undefined,
     primaryColor: profileSettings?.brandColor || undefined,
     secondaryColor: profileSettings?.accentColor || undefined,
     brokerageName: profileSettings?.brokerageName || agent?.brokerageName || undefined,
@@ -246,15 +259,19 @@ router.get('/envelopes', async (req: AuthenticatedRequest, res) => {
     const propertyLabel = item.envelope.documentName || item.envelope.deal?.property?.street || item.envelope.deal?.title || 'Document packet';
     const emailStatus = await sendEnvelopeEmails({
       envelopeId: item.envelope.id,
+      agentId: req.agentId,
       signers: item.pendingSigners.map((signer) => ({
         id: signer.id,
         name: signer.name,
         email: signer.email,
+        role: signer.role,
       })),
       subject: `Reminder: Signature needed for ${propertyLabel}`,
       message:
         'Automated reminder: your contract packet is still awaiting signature. Please review and sign when ready.',
       propertyLabel,
+      documentName: item.envelope.documentName || propertyLabel,
+      deliveryType: 'auto_reminder',
       agentName: agent?.name || undefined,
       agentEmail: agent?.email || undefined,
       branding,
@@ -409,7 +426,7 @@ router.post('/envelopes', async (req: AuthenticatedRequest, res) => {
   const agentName = agent?.name || undefined;
   const agentEmail = agent?.email || undefined;
   const branding = {
-    logoUrl: profileSettings?.logoUrl || profileSettings?.brokerageLogoUrl || undefined,
+    logoUrl: profileSettings?.brokerageLogoUrl || profileSettings?.logoUrl || undefined,
     primaryColor: profileSettings?.brandColor || undefined,
     secondaryColor: profileSettings?.accentColor || undefined,
     brokerageName: profileSettings?.brokerageName || agent?.brokerageName || undefined,
@@ -421,10 +438,13 @@ router.post('/envelopes', async (req: AuthenticatedRequest, res) => {
   const emailStatus = sendEmails
     ? await sendEnvelopeEmails({
         envelopeId: envelope.id,
-        signers: envelope.signers.map((s) => ({ id: s.id, name: s.name, email: s.email })),
+        agentId: req.agentId,
+        signers: envelope.signers.map((s) => ({ id: s.id, name: s.name, email: s.email, role: s.role })),
         subject: subject || defaultSubject,
         message: message || defaultMessage,
         propertyLabel,
+        documentName: type,
+        deliveryType: 'initial',
         agentName,
         agentEmail,
         branding,
@@ -580,7 +600,7 @@ router.post('/document-envelopes', handleDocumentEnvelopeUpload, async (req: Aut
   });
 
   const branding = {
-    logoUrl: profileSettings?.logoUrl || profileSettings?.brokerageLogoUrl || undefined,
+    logoUrl: profileSettings?.brokerageLogoUrl || profileSettings?.logoUrl || undefined,
     primaryColor: profileSettings?.brandColor || undefined,
     secondaryColor: profileSettings?.accentColor || undefined,
     brokerageName: profileSettings?.brokerageName || agent?.brokerageName || undefined,
@@ -594,10 +614,13 @@ router.post('/document-envelopes', handleDocumentEnvelopeUpload, async (req: Aut
   const emailStatus = sendEmails
     ? await sendEnvelopeEmails({
         envelopeId: envelope.id,
-        signers: envelope.signers.map((signer) => ({ id: signer.id, name: signer.name, email: signer.email })),
+        agentId: req.agentId,
+        signers: envelope.signers.map((signer) => ({ id: signer.id, name: signer.name, email: signer.email, role: signer.role })),
         subject,
         message,
         propertyLabel,
+        documentName,
+        deliveryType: 'initial',
         agentName: agent?.name || undefined,
         agentEmail: agent?.email || undefined,
         branding,
@@ -703,7 +726,7 @@ router.post('/envelopes/:envelopeId/remind', async (req: AuthenticatedRequest, r
 
   const propertyLabel = envelope.documentName || envelope.deal?.property?.street || envelope.deal?.title || 'Document packet';
   const branding = {
-    logoUrl: profileSettings?.logoUrl || profileSettings?.brokerageLogoUrl || undefined,
+    logoUrl: profileSettings?.brokerageLogoUrl || profileSettings?.logoUrl || undefined,
     primaryColor: profileSettings?.brandColor || undefined,
     secondaryColor: profileSettings?.accentColor || undefined,
     brokerageName: profileSettings?.brokerageName || agent?.brokerageName || undefined,
@@ -711,10 +734,13 @@ router.post('/envelopes/:envelopeId/remind', async (req: AuthenticatedRequest, r
   };
   const emailStatus = await sendEnvelopeEmails({
     envelopeId: envelope.id,
-    signers: pendingSigners.map((s) => ({ id: s.id, name: s.name, email: s.email })),
+    agentId: req.agentId,
+    signers: pendingSigners.map((s) => ({ id: s.id, name: s.name, email: s.email, role: s.role })),
     subject: `Reminder: Signature needed for ${propertyLabel}`,
     message: 'This is a friendly reminder to review and sign your contract packet. It usually takes less than 2 minutes.',
     propertyLabel,
+    documentName: envelope.documentName || propertyLabel,
+    deliveryType: 'reminder',
     agentName: agent?.name || undefined,
     agentEmail: agent?.email || undefined,
     branding,

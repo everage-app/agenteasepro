@@ -1,9 +1,20 @@
 import { Router, Request, Response } from 'express';
 import { LeadPriority } from '@prisma/client';
+import rateLimit from 'express-rate-limit';
 import { prisma } from '../lib/prisma';
 import { runLeadCaptureWorkflow } from '../services/leadCaptureWorkflow';
+import { buildPublicSiteUrl, ensureDefaultAgentLandingPage } from '../services/defaultAgentLandingPage';
 
 const router = Router();
+
+const publicLeadLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 12,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: () => process.env.NODE_ENV === 'test',
+  message: { error: 'Too many landing page requests. Please try again shortly.' },
+});
 
 // Theme definitions (matching frontend)
 const themes: Record<string, {
@@ -138,6 +149,34 @@ function detectBrowser(userAgent?: string | null) {
   return 'Other';
 }
 
+function cleanText(value: unknown) {
+  return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+function isUnsupportedPublicImageUrl(value: string) {
+  return /^data:image\/hei[cf]/i.test(value) || /\.hei[cf](?:$|[?#])/i.test(value);
+}
+
+function cleanRenderableImageUrl(preferred: unknown, fallback?: unknown) {
+  const preferredUrl = cleanText(preferred);
+  if (preferredUrl && !isUnsupportedPublicImageUrl(preferredUrl)) return preferredUrl;
+
+  const fallbackUrl = cleanText(fallback);
+  if (fallbackUrl && !isUnsupportedPublicImageUrl(fallbackUrl)) return fallbackUrl;
+
+  return null;
+}
+
+function isValidEmail(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
+function normalizePhone(value: unknown) {
+  const raw = cleanText(value);
+  const digits = raw.replace(/\D/g, '');
+  return { raw, digits };
+}
+
 function extractPhotoUrls(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value
@@ -239,39 +278,61 @@ router.get('/:slug', async (req: Request, res: Response) => {
     
     // Parse custom content and styles
     const { customContent, customStyles, seoSettings, leadCapture, sections } = extractConfig(landingPage);
+    const pageKind = cleanText(customContent.pageKind || (landingPage.listingId ? 'LISTING' : ''));
+
+    let defaultAgentPage = null;
+    try {
+      defaultAgentPage = await ensureDefaultAgentLandingPage(landingPage.agentId);
+    } catch (defaultPageError) {
+      console.error('Error ensuring default agent profile page:', defaultPageError);
+    }
+
+    const publicUrl = buildPublicSiteUrl(landingPage.slug, req);
+    const defaultAgentProfileUrl = defaultAgentPage?.slug ? buildPublicSiteUrl(defaultAgentPage.slug, req) : null;
 
     // Build agent info
     const agentSettings = landingPage.agent.profileSettings;
+    const profileDisplayName = cleanText([
+      agentSettings?.firstName,
+      agentSettings?.lastName,
+    ].filter(Boolean).join(' '));
+    const customAgentDisplayName = cleanText(customContent.agentDisplayName);
+    const storedAgentName = cleanText(landingPage.agent.name);
+    const customNameLooksComplete = customAgentDisplayName.split(/\s+/).filter(Boolean).length > 1;
+    const agentDisplayName = customNameLooksComplete
+      ? customAgentDisplayName
+      : profileDisplayName || customAgentDisplayName || storedAgentName;
     const agentInfo = {
-      name: customContent.agentDisplayName || landingPage.agent.name,
-      title: customContent.agentTitle || null,
-      email: customContent.agentEmail || landingPage.agent.email,
-      phone: customContent.agentPhone || agentSettings?.phone || null,
-      photoUrl: customContent.agentPhotoUrl || agentSettings?.photoUrl || null,
-      bio: customContent.agentBio || agentSettings?.bio || null,
+      name: agentDisplayName || landingPage.agent.name,
+      title: cleanText(customContent.agentTitle) || null,
+      email: cleanText(customContent.agentEmail) || cleanText(landingPage.agent.email),
+      phone: cleanText(customContent.agentPhone) || cleanText(agentSettings?.phone) || null,
+      photoUrl: cleanRenderableImageUrl(customContent.agentPhotoUrl, agentSettings?.photoUrl),
+      bio: cleanText(customContent.agentBio) || cleanText(agentSettings?.bio) || null,
       licenseNumber: agentSettings?.licenseNumber || landingPage.agent.licenseNumber,
-      websiteUrl: customContent.agentWebsiteUrl || agentSettings?.websiteUrl || null,
-      facebookUrl: customContent.agentFacebookUrl || agentSettings?.facebookUrl || null,
-      instagramUrl: customContent.agentInstagramUrl || agentSettings?.instagramUrl || null,
-      linkedinUrl: customContent.agentLinkedinUrl || agentSettings?.linkedinUrl || null,
+      websiteUrl: cleanText(customContent.agentWebsiteUrl) || cleanText(agentSettings?.websiteUrl) || null,
+      profileUrl: cleanText(customContent.agentProfileUrl) || defaultAgentProfileUrl,
+      facebookUrl: cleanText(customContent.agentFacebookUrl) || cleanText(agentSettings?.facebookUrl) || null,
+      instagramUrl: cleanText(customContent.agentInstagramUrl) || cleanText(agentSettings?.instagramUrl) || null,
+      linkedinUrl: cleanText(customContent.agentLinkedinUrl) || cleanText(agentSettings?.linkedinUrl) || null,
     };
 
     // Build brokerage info
     const brokerageInfo = {
-      name: customContent.brokerageDisplayName || agentSettings?.brokerageName || landingPage.agent.brokerageName || null,
-      logoUrl: customContent.brokerageLogoUrl || (agentSettings as any)?.brokerageLogoUrl || null,
+      name: cleanText(customContent.brokerageDisplayName) || cleanText(agentSettings?.brokerageName) || cleanText(landingPage.agent.brokerageName) || null,
+      logoUrl: cleanRenderableImageUrl(customContent.brokerageLogoUrl, (agentSettings as any)?.brokerageLogoUrl),
       logoWidth: (agentSettings as any)?.brokerageLogoWidth || 260,
       logoBackground: (agentSettings as any)?.brokerageLogoBackground === 'TRANSPARENT' ? 'TRANSPARENT' : 'CARD',
-      address: customContent.brokerageAddress || agentSettings?.brokerageAddress || agentSettings?.officeAddress || null,
-      phone: customContent.brokeragePhone || agentSettings?.brokeragePhone || null,
+      address: cleanText(customContent.brokerageAddress) || cleanText(agentSettings?.brokerageAddress) || cleanText(agentSettings?.officeAddress) || null,
+      phone: cleanText(customContent.brokeragePhone) || cleanText(agentSettings?.brokeragePhone) || null,
       license: (agentSettings as any)?.brokerageLicense || null,
     };
 
     // Build branding from agent settings or custom styles
     const branding = {
-      primaryColor: customStyles.primaryColor || agentSettings?.brandColor || theme.colors.primary,
-      secondaryColor: customStyles.secondaryColor || agentSettings?.accentColor || theme.colors.secondary,
-      logoUrl: customContent.brokerageLogoUrl || agentSettings?.brokerageLogoUrl || agentSettings?.logoUrl || null,
+      primaryColor: cleanText(customStyles.primaryColor) || cleanText(agentSettings?.brandColor) || theme.colors.primary,
+      secondaryColor: cleanText(customStyles.secondaryColor) || cleanText(agentSettings?.accentColor) || theme.colors.secondary,
+      logoUrl: cleanRenderableImageUrl(customContent.brokerageLogoUrl, agentSettings?.brokerageLogoUrl || agentSettings?.logoUrl),
       heroOpacity: customStyles.heroOpacity || 60,
     };
 
@@ -307,6 +368,8 @@ router.get('/:slug', async (req: Request, res: Response) => {
       title: landingPage.title,
       description: landingPage.description,
       slug: landingPage.slug,
+      pageKind: pageKind || null,
+      publicUrl,
       theme: {
         id: themeId,
         ...theme,
@@ -326,6 +389,7 @@ router.get('/:slug', async (req: Request, res: Response) => {
         bodyFont: customStyles.bodyFont || theme.fonts.body,
       },
       content: {
+        pageKind: pageKind || null,
         headline: customContent.headline || listingInfo?.headline || landingPage.title || listingInfo?.address,
         subheadline: customContent.subheadline || landingPage.description || '',
         ctaText: customContent.ctaText || 'Schedule a Showing',
@@ -377,48 +441,97 @@ router.get('/:slug', async (req: Request, res: Response) => {
 });
 
 // Submit lead from landing page
-router.post('/:slug/lead', async (req: Request, res: Response) => {
+router.post('/:slug/lead', publicLeadLimiter, async (req: Request, res: Response) => {
   try {
     const { slug } = req.params;
-    const { firstName, lastName, email, phone, message, source, qrToken, qrUrl } = req.body;
+    const { firstName, lastName, email, phone, message, source, qrToken, qrUrl, contactIntent, propertyAddress, website, company } = req.body;
 
-    if (!firstName || !email) {
+    if (cleanText(website) || cleanText(company)) {
+      return res.status(201).json({ success: true, leadId: null });
+    }
+
+    if (!cleanText(firstName) || !cleanText(email)) {
       return res.status(400).json({ error: 'Name and email are required' });
     }
 
     const landingPage = await prisma.landingPage.findUnique({
       where: { slug },
-      select: { id: true, agentId: true, listingId: true, title: true },
+      select: { id: true, agentId: true, listingId: true, title: true, customContent: true },
     });
 
     if (!landingPage) {
       return res.status(404).json({ error: 'Landing page not found' });
     }
 
-    const normalizedEmail = String(email).trim().toLowerCase();
+    const customContent = asRecord(landingPage.customContent);
+    const leadCapture = asRecord(customContent.leadCapture);
+    const sections = asRecord(customContent.sections);
+    const requiredFields = Array.isArray(leadCapture.requiredFields)
+      ? leadCapture.requiredFields.map(cleanText).filter(Boolean)
+      : ['name', 'email', 'phone'];
+    const sourceValue = cleanText(source);
+    const isEmailQuestion = sourceValue === 'LANDING_PAGE_EMAIL' || cleanText(contactIntent) === 'EMAIL_QUESTION';
+    const isHomeValuation = sourceValue === 'LANDING_PAGE_VALUATION' || sections.homeValuation === true;
+    const normalizedEmail = cleanText(email).toLowerCase();
+    const normalizedFirstName = cleanText(firstName);
+    const normalizedLastName = cleanText(lastName);
+    const normalizedPhone = normalizePhone(phone);
+    const normalizedPropertyAddress = cleanText(propertyAddress);
+    const notes = cleanText(message);
+
+    if (!isValidEmail(normalizedEmail)) {
+      return res.status(400).json({ error: 'Enter a valid email address' });
+    }
+
+    if (!isEmailQuestion && requiredFields.includes('phone') && !normalizedPhone.raw) {
+      return res.status(400).json({ error: 'Phone number is required' });
+    }
+
+    if (normalizedPhone.raw && normalizedPhone.digits.length < 10) {
+      return res.status(400).json({ error: 'Enter a valid phone number' });
+    }
+
+    if (!isEmailQuestion && requiredFields.includes('message') && !notes) {
+      return res.status(400).json({ error: 'Message is required' });
+    }
+
+    if (isHomeValuation && sourceValue === 'LANDING_PAGE_VALUATION' && !normalizedPropertyAddress) {
+      return res.status(400).json({ error: 'Property address is required for a home value report' });
+    }
+
     const existingLead = normalizedEmail
       ? await prisma.lead.findFirst({
           where: { agentId: landingPage.agentId, email: normalizedEmail },
         })
       : null;
 
-    const notes = String(message || '').trim();
-    const normalizedQrToken = String(qrToken || '').trim().slice(0, 64);
-    const normalizedQrUrl = String(qrUrl || '').trim().slice(0, 2048);
+    const sourceLabel = isEmailQuestion ? 'landing page email question' : 'landing page';
+    const normalizedQrToken = cleanText(qrToken).slice(0, 64);
+    const normalizedQrUrl = cleanText(qrUrl).slice(0, 2048);
     const followUpTask = `Follow up on ${landingPage.title || 'landing page'} inquiry today`;
-    const landingTags = [`SOURCE:landing page`, `LP:${slug}`, ...(normalizedQrToken ? [`QR:${normalizedQrToken}`] : [])];
+    const landingTags = [
+      `SOURCE:landing page`,
+      `LP:${slug}`,
+      ...(isHomeValuation ? ['INTENT:home-value'] : []),
+      ...(isEmailQuestion ? ['INTENT:question'] : []),
+      ...(normalizedQrToken ? [`QR:${normalizedQrToken}`] : []),
+    ];
+    const existingLeadTags = existingLead?.tags || [];
+    const resurfacedTags = existingLeadTags.filter((tag) => tag !== 'ARCHIVED');
     const lead = existingLead
       ? await prisma.lead.update({
           where: { id: existingLead.id },
           data: {
-            firstName: existingLead.firstName || firstName,
-            lastName: existingLead.lastName || lastName || '',
-            phone: existingLead.phone || phone || null,
+            firstName: existingLead.firstName || normalizedFirstName,
+            lastName: existingLead.lastName || normalizedLastName || '',
+            phone: existingLead.phone || normalizedPhone.raw || null,
+            mailingAddress: existingLead.mailingAddress || normalizedPropertyAddress || undefined,
             source: 'LANDING_PAGE',
             landingPageId: landingPage.id,
             listingId: landingPage.listingId,
             priority: existingLead.priority === LeadPriority.HOT ? LeadPriority.HOT : LeadPriority.WARM,
-            tags: Array.from(new Set([...(existingLead.tags || []), ...landingTags])),
+            tags: Array.from(new Set([...resurfacedTags, ...landingTags])),
+            deletedAt: null,
             nextTask: existingLead.nextTask || followUpTask,
             visitCount: { increment: 1 },
             lastVisit: new Date(),
@@ -435,10 +548,11 @@ router.post('/:slug/lead', async (req: Request, res: Response) => {
             agentId: landingPage.agentId,
             landingPageId: landingPage.id,
             listingId: landingPage.listingId,
-            firstName,
-            lastName: lastName || '',
+            firstName: normalizedFirstName,
+            lastName: normalizedLastName || '',
             email: normalizedEmail,
-            phone,
+            phone: normalizedPhone.raw || null,
+            mailingAddress: normalizedPropertyAddress || undefined,
             notes: notes || undefined,
             source: 'LANDING_PAGE',
             priority: LeadPriority.WARM,
@@ -454,12 +568,15 @@ router.post('/:slug/lead', async (req: Request, res: Response) => {
       data: {
         leadId: lead.id,
         listingId: landingPage.listingId || undefined,
-        activityType: 'LANDING_PAGE_CAPTURE',
-        description: `Lead captured from ${landingPage.title || `public landing page ${slug}`}`,
+        activityType: isEmailQuestion ? 'LANDING_PAGE_EMAIL_QUESTION' : 'LANDING_PAGE_CAPTURE',
+        description: isEmailQuestion
+          ? `Question sent from ${landingPage.title || `public landing page ${slug}`}`
+          : `Lead captured from ${landingPage.title || `public landing page ${slug}`}`,
         metadata: {
           slug,
           landingPageTitle: landingPage.title,
-          source: source || 'landing-page-form',
+          source: sourceValue || 'landing-page-form',
+          contactIntent: isEmailQuestion ? 'EMAIL_QUESTION' : null,
           qrToken: normalizedQrToken || null,
           qrUrl: normalizedQrUrl || null,
           message: notes || null,
@@ -479,13 +596,15 @@ router.post('/:slug/lead', async (req: Request, res: Response) => {
         email: lead.email,
         phone: lead.phone,
       },
-      sourceLabel: 'landing page',
+      sourceLabel,
       message: notes || null,
       contextPath: `/api/sites/${slug}/lead`,
       listingId: landingPage.listingId,
       landingPageId: landingPage.id,
       createTask: true,
-      taskDescription: `New lead from landing page /sites/${slug}. Reach out while interest is fresh.`,
+      taskDescription: isEmailQuestion
+        ? `Reply to this landing page question while the visitor is warm: ${notes || `/sites/${slug}`}`
+        : `New lead from landing page /sites/${slug}. Reach out while interest is fresh.`,
     });
 
     // Update landing page lead count

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import api from '../../../lib/api';
 import { PageLayout } from '../../../components/layout/PageLayout';
 import { Card } from '../../../components/ui/Card';
@@ -80,6 +80,17 @@ type InternalStaffRow = {
   };
 };
 
+type StaffRole = InternalStaffRow['role'];
+
+type InternalAgentOption = {
+  id: string;
+  name: string;
+  email: string;
+  status: 'ACTIVE' | 'SUSPENDED' | 'REVOKED';
+};
+
+const STAFF_ROLE_OPTIONS: StaffRole[] = ['OWNER', 'ADMIN', 'SUPPORT', 'BILLING', 'SALES', 'PRODUCT', 'ENGINEERING', 'READ_ONLY'];
+
 type InternalAuditRow = {
   id: string;
   action: string;
@@ -92,26 +103,136 @@ type InternalAuditRow = {
 export function InternalSystemPage() {
   const [data, setData] = useState<SystemResponse | null>(null);
   const [staff, setStaff] = useState<InternalStaffRow[]>([]);
+  const [agentOptions, setAgentOptions] = useState<InternalAgentOption[]>([]);
   const [audit, setAudit] = useState<InternalAuditRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [staffSaving, setStaffSaving] = useState(false);
+  const [inviteSaving, setInviteSaving] = useState(false);
+  const [message, setMessage] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
+  const [inviteLink, setInviteLink] = useState('');
+  const [staffForm, setStaffForm] = useState<{ agentId: string; role: StaffRole; title: string; notes: string }>({
+    agentId: '',
+    role: 'SUPPORT',
+    title: '',
+    notes: '',
+  });
+  const [inviteForm, setInviteForm] = useState<{
+    email: string;
+    name: string;
+    role: StaffRole;
+    title: string;
+    notes: string;
+    sendEmail: boolean;
+  }>({
+    email: '',
+    name: '',
+    role: 'SUPPORT',
+    title: '',
+    notes: '',
+    sendEmail: true,
+  });
 
   async function load() {
     setLoading(true);
     setError(null);
     try {
-      const [res, staffRes, auditRes] = await Promise.all([
+      const [res, staffRes, auditRes, agentsRes] = await Promise.all([
         api.get('/internal/system'),
         api.get('/internal/ops/staff'),
         api.get('/internal/ops/audit-log', { params: { page: 1, pageSize: 8 } }),
+        api.get('/internal/agents', { params: { page: 1, pageSize: 100, view: 'active' } }),
       ]);
       setData(res.data);
       setStaff((staffRes.data?.staff ?? []).filter((row: InternalStaffRow) => row.active));
       setAudit(auditRes.data?.logs ?? []);
+      const options = agentsRes.data?.agents ?? [];
+      setAgentOptions(options);
+      setStaffForm((prev) => ({
+        ...prev,
+        agentId: prev.agentId || options[0]?.id || '',
+      }));
     } catch (err: any) {
       setError(err.message || 'Failed to load system status');
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function addInternalUser(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setMessage(null);
+    setInviteLink('');
+
+    if (!staffForm.agentId) {
+      setMessage({ tone: 'error', text: 'Choose an existing account before adding internal access.' });
+      return;
+    }
+
+    setStaffSaving(true);
+    try {
+      const res = await api.put('/internal/ops/staff', {
+        agentId: staffForm.agentId,
+        role: staffForm.role,
+        active: true,
+        title: staffForm.title || null,
+        notes: staffForm.notes || null,
+        reason: 'Added from internal system page',
+      });
+      const email = res.data?.staff?.agent?.email || 'User';
+      setMessage({ tone: 'success', text: `${email} now has internal role ${staffForm.role}.` });
+      await load();
+    } catch (err: any) {
+      const text = err?.response?.data?.error || err?.message || 'Unable to add internal access';
+      setMessage({ tone: 'error', text });
+    } finally {
+      setStaffSaving(false);
+    }
+  }
+
+  async function inviteInternalUser(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setMessage(null);
+    setInviteLink('');
+
+    if (!inviteForm.email.trim()) {
+      setMessage({ tone: 'error', text: 'Invite email is required.' });
+      return;
+    }
+
+    setInviteSaving(true);
+    try {
+      const res = await api.post('/internal/ops/staff/invite', {
+        email: inviteForm.email,
+        name: inviteForm.name || undefined,
+        role: inviteForm.role,
+        title: inviteForm.title || null,
+        notes: inviteForm.notes || null,
+        sendEmail: inviteForm.sendEmail,
+        reason: 'Invited from internal system page',
+      });
+      const invitation = res.data?.invitation;
+      const email = invitation?.email || inviteForm.email;
+      const sentText = invitation?.emailSent ? 'Invite email sent.' : 'Invite created. Share link manually.';
+      setMessage({ tone: 'success', text: `${email} added as ${inviteForm.role}. ${sentText}` });
+      setInviteLink(invitation?.resetUrl || '');
+      setInviteForm((prev) => ({ ...prev, email: '', name: '', title: '', notes: '' }));
+      await load();
+    } catch (err: any) {
+      const text = err?.response?.data?.error || err?.message || 'Unable to send invite';
+      setMessage({ tone: 'error', text });
+    } finally {
+      setInviteSaving(false);
+    }
+  }
+
+  async function copyInviteLink() {
+    if (!inviteLink) return;
+    try {
+      await navigator.clipboard.writeText(inviteLink);
+      setMessage({ tone: 'success', text: 'Invite link copied to clipboard.' });
+    } catch {
+      setMessage({ tone: 'error', text: 'Clipboard copy failed. Copy the link manually.' });
     }
   }
 
@@ -256,6 +377,146 @@ export function InternalSystemPage() {
                     </div>
                   ))
                 )}
+              </div>
+            </Card>
+
+            <Card title="Add or invite internal users" description="Grant internal roles to existing users or send a secure setup invite.">
+              <div className="space-y-4">
+                {message ? (
+                  <div
+                    className={`rounded-xl border px-3 py-2 text-sm ${
+                      message.tone === 'success'
+                        ? 'border-emerald-400/30 bg-emerald-500/10 text-emerald-100'
+                        : 'border-rose-400/30 bg-rose-500/10 text-rose-100'
+                    }`}
+                  >
+                    {message.text}
+                  </div>
+                ) : null}
+
+                <form onSubmit={addInternalUser} className="space-y-3 rounded-xl border border-white/10 bg-white/5 p-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">Add existing account</div>
+                  <select
+                    value={staffForm.agentId}
+                    onChange={(event) => setStaffForm((prev) => ({ ...prev, agentId: event.target.value }))}
+                    className="w-full rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2 text-sm text-slate-100"
+                  >
+                    <option value="">Select account</option>
+                    {agentOptions.map((agent) => (
+                      <option key={agent.id} value={agent.id}>
+                        {agent.name || agent.email} ({agent.email})
+                      </option>
+                    ))}
+                  </select>
+                  <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                    <select
+                      value={staffForm.role}
+                      onChange={(event) => setStaffForm((prev) => ({ ...prev, role: event.target.value as StaffRole }))}
+                      className="rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2 text-sm text-slate-100"
+                    >
+                      {STAFF_ROLE_OPTIONS.map((role) => (
+                        <option key={role} value={role}>
+                          {role}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      value={staffForm.title}
+                      onChange={(event) => setStaffForm((prev) => ({ ...prev, title: event.target.value }))}
+                      placeholder="Title (optional)"
+                      className="rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500"
+                    />
+                  </div>
+                  <textarea
+                    value={staffForm.notes}
+                    onChange={(event) => setStaffForm((prev) => ({ ...prev, notes: event.target.value }))}
+                    placeholder="Notes (optional)"
+                    rows={2}
+                    className="w-full rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500"
+                  />
+                  <button
+                    type="submit"
+                    disabled={staffSaving}
+                    className="rounded-xl border border-cyan-400/30 bg-cyan-500/15 px-3 py-2 text-xs font-semibold tracking-wide text-cyan-100 hover:bg-cyan-500/25 disabled:opacity-60"
+                  >
+                    {staffSaving ? 'Adding…' : 'Add internal access'}
+                  </button>
+                </form>
+
+                <form onSubmit={inviteInternalUser} className="space-y-3 rounded-xl border border-white/10 bg-white/5 p-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">Invite by email</div>
+                  <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                    <input
+                      type="email"
+                      value={inviteForm.email}
+                      onChange={(event) => setInviteForm((prev) => ({ ...prev, email: event.target.value }))}
+                      placeholder="user@company.com"
+                      className="rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500"
+                    />
+                    <input
+                      value={inviteForm.name}
+                      onChange={(event) => setInviteForm((prev) => ({ ...prev, name: event.target.value }))}
+                      placeholder="Name (optional)"
+                      className="rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500"
+                    />
+                  </div>
+                  <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                    <select
+                      value={inviteForm.role}
+                      onChange={(event) => setInviteForm((prev) => ({ ...prev, role: event.target.value as StaffRole }))}
+                      className="rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2 text-sm text-slate-100"
+                    >
+                      {STAFF_ROLE_OPTIONS.map((role) => (
+                        <option key={role} value={role}>
+                          {role}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      value={inviteForm.title}
+                      onChange={(event) => setInviteForm((prev) => ({ ...prev, title: event.target.value }))}
+                      placeholder="Title (optional)"
+                      className="rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500"
+                    />
+                  </div>
+                  <textarea
+                    value={inviteForm.notes}
+                    onChange={(event) => setInviteForm((prev) => ({ ...prev, notes: event.target.value }))}
+                    placeholder="Notes (optional)"
+                    rows={2}
+                    className="w-full rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500"
+                  />
+                  <label className="inline-flex items-center gap-2 text-xs text-slate-300">
+                    <input
+                      type="checkbox"
+                      checked={inviteForm.sendEmail}
+                      onChange={(event) => setInviteForm((prev) => ({ ...prev, sendEmail: event.target.checked }))}
+                      className="h-4 w-4 rounded border-white/20 bg-slate-950/70"
+                    />
+                    Send invite email automatically
+                  </label>
+                  <button
+                    type="submit"
+                    disabled={inviteSaving}
+                    className="rounded-xl border border-emerald-400/30 bg-emerald-500/15 px-3 py-2 text-xs font-semibold tracking-wide text-emerald-100 hover:bg-emerald-500/25 disabled:opacity-60"
+                  >
+                    {inviteSaving ? 'Inviting…' : 'Invite internal user'}
+                  </button>
+
+                  {inviteLink ? (
+                    <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 px-3 py-2">
+                      <div className="text-xs font-semibold uppercase tracking-[0.12em] text-amber-100">Manual invite link</div>
+                      <div className="mt-1 break-all text-xs text-amber-50">{inviteLink}</div>
+                      <button
+                        type="button"
+                        onClick={copyInviteLink}
+                        className="mt-2 rounded-lg border border-amber-300/30 bg-amber-500/20 px-2.5 py-1 text-[11px] font-semibold text-amber-50"
+                      >
+                        Copy link
+                      </button>
+                    </div>
+                  ) : null}
+                </form>
               </div>
             </Card>
           </div>

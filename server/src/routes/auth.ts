@@ -48,12 +48,27 @@ router.use(authLimiter);
 
 const normalizeEmail = (email: string) => email.trim().toLowerCase();
 
+const MarketingAttributionSchema = z.object({
+  visitorId: z.string().trim().max(100).optional(),
+  sessionId: z.string().trim().max(100).optional(),
+  landingPath: z.string().trim().max(300).optional(),
+  entryPath: z.string().trim().max(300).optional(),
+  referrer: z.string().trim().max(500).optional(),
+  utmSource: z.string().trim().max(120).optional(),
+  utmMedium: z.string().trim().max(120).optional(),
+  utmCampaign: z.string().trim().max(160).optional(),
+  utmContent: z.string().trim().max(160).optional(),
+  utmTerm: z.string().trim().max(160).optional(),
+  capturedAt: z.string().trim().max(80).optional(),
+}).partial();
+
 const SignupSchema = z.object({
   name: z.string().trim().min(1).max(80).optional(),
   email: z.string().trim().email(),
   password: z.string().min(8).max(200),
   acceptTerms: z.literal(true),
   acceptPrivacy: z.literal(true),
+  marketingAttribution: MarketingAttributionSchema.optional(),
 });
 
 const LoginSchema = z.object({
@@ -688,7 +703,7 @@ router.post('/signup', async (req, res) => {
       return res.status(400).json({ error: 'Invalid signup data' });
     }
 
-    const { email, password, name } = parsed.data;
+    const { email, password, name, marketingAttribution } = parsed.data;
 
     const result = await idSignup(email, password, name, reqCtx(req));
     if (!result.success) {
@@ -702,6 +717,26 @@ router.post('/signup', async (req, res) => {
       }
     } catch (legalErr) {
       console.error('Failed to record legal acceptance during signup:', legalErr);
+    }
+
+    try {
+      if (result.agent?.id) {
+        await prisma.internalEvent.create({
+          data: {
+            agentId: result.agent.id,
+            kind: 'signup_created',
+            path: '/api/auth/signup',
+            meta: {
+              emailDomain: result.agent.email.split('@')[1] || null,
+              origin: req.get('origin') || null,
+              referrer: req.get('referer') || null,
+              marketingAttribution: marketingAttribution || null,
+            } as any,
+          },
+        });
+      }
+    } catch (eventErr) {
+      console.warn('Failed to record signup telemetry:', eventErr);
     }
 
     return res.json({
@@ -1011,6 +1046,21 @@ router.post('/verify-email', authMiddleware, async (req: AuthenticatedRequest, r
 
   if (!result.success) {
     return res.status(400).json({ error: result.error });
+  }
+
+  try {
+    await prisma.internalEvent.create({
+      data: {
+        agentId: req.agentId,
+        kind: 'signup_email_verified',
+        path: '/api/auth/verify-email',
+        meta: {
+          origin: req.get('origin') || null,
+        } as any,
+      },
+    });
+  } catch (eventErr) {
+    console.warn('Failed to record email verification telemetry:', eventErr);
   }
 
   return res.json({ success: true, emailVerified: true });

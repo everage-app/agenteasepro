@@ -168,6 +168,22 @@ const playbooksInOrder: BlastPlaybook[] = [
   'CUSTOM',
 ];
 
+const recommendedListingBlastChannels: ChannelConnectionType[] = ['EMAIL', 'WEBSITE', 'FACEBOOK', 'INSTAGRAM', 'LINKEDIN'];
+
+const readyNowChannelTypes: ChannelConnectionType[] = ['EMAIL', 'WEBSITE'];
+
+const copyReadyChannelTypes: ChannelConnectionType[] = ['FACEBOOK', 'INSTAGRAM', 'LINKEDIN', 'X', 'SMS'];
+
+const channelDescriptions: Record<ChannelConnectionType, string> = {
+  EMAIL: 'Send to clients and leads with tracking',
+  WEBSITE: 'Listing spotlight and share link',
+  FACEBOOK: 'Post copy ready to paste',
+  INSTAGRAM: 'Caption copy ready to paste',
+  LINKEDIN: 'Professional post copy',
+  X: 'Short social update',
+  SMS: 'Text follow-up snippet',
+};
+
 const emailBlastTemplates: EmailBlastTemplate[] = [
   {
     id: 'MARKET_UPDATE',
@@ -213,6 +229,34 @@ function formatCurrency(value?: string | number | null): string {
 function formatDate(value?: string | null): string {
   if (!value) return 'Draft';
   return new Date(value).toLocaleString();
+}
+
+function buildListingEmailPrefill(listing: ListingSummary, playbook: BlastPlaybook): MassEmailPrefillState {
+  const price = formatCurrency(listing.price);
+  const priceText = price ? ` at ${price}` : '';
+  const playbookLabel = playbookLabels[playbook].toLowerCase();
+  const subjectByPlaybook: Record<BlastPlaybook, string> = {
+    NEW_LISTING: `New listing: ${listing.headline}${priceText}`,
+    PRICE_REDUCTION: `Price improvement: ${listing.headline}${priceText}`,
+    OPEN_HOUSE: `Open house invite: ${listing.headline}`,
+    UNDER_CONTRACT: `Under contract update: ${listing.headline}`,
+    JUST_SOLD: `Just sold: ${listing.headline}`,
+    CUSTOM: `Real estate update: ${listing.headline}`,
+  };
+  const description = (listing.description || '').trim();
+  const detailLine = description
+    ? `${description.slice(0, 520)}${description.length > 520 ? '...' : ''}`
+    : 'This one is worth a look if you know someone watching the market right now.';
+
+  return {
+    audienceType: 'CLIENTS_AND_LEADS',
+    audienceMode: 'ALL',
+    subject: subjectByPlaybook[playbook],
+    message:
+      `Hi there,\n\nI wanted to share this ${playbookLabel} with you: ${listing.headline}${priceText}.\n\n${detailLine}\n\nReply if you want the full details, a private showing, or similar options that fit your goals.\n\nThanks!`,
+    limit: 200,
+    sourceLabel: listing.headline,
+  };
 }
 
 function getChannelIcon(type: ChannelConnectionType) {
@@ -507,6 +551,7 @@ export function MarketingPage() {
   return (
     <PageLayout
       title="Marketing"
+      maxWidth="workspace"
       subtitle="Launch and track marketing campaigns for your listings"
       actions={
         <div className="flex items-center gap-2">
@@ -928,6 +973,14 @@ export function MarketingPage() {
           onCreated={(blastId) => {
             closeDrawerAndClearParams();
             navigate(`/marketing/blasts/${blastId}`);
+          }}
+          onStartEmail={(prefill) => {
+            closeDrawerAndClearParams();
+            openMassEmailWithPrefill(prefill);
+          }}
+          onStartDirectMail={() => {
+            closeDrawerAndClearParams();
+            setDirectMailOpen(true);
           }}
         />
       )}
@@ -1730,22 +1783,43 @@ function NewBlastPanel({
   channels, 
   prefillListingId, 
   onClose, 
-  onCreated 
+  onCreated,
+  onStartEmail,
+  onStartDirectMail,
 }: { 
   channels: ChannelConnection[]; 
   prefillListingId?: string | null;
   onClose: () => void; 
-  onCreated: (blastId: string) => void 
+  onCreated: (blastId: string) => void;
+  onStartEmail: (prefill: MassEmailPrefillState) => void;
+  onStartDirectMail: () => void;
 }) {
   const [listings, setListings] = useState<ListingSummary[]>([]);
   const [selectedListing, setSelectedListing] = useState<string>('');
   const [playbook, setPlaybook] = useState<BlastPlaybook>('NEW_LISTING');
-  const [selectedChannels, setSelectedChannels] = useState<ChannelConnectionType[]>([]);
+  const [selectedChannels, setSelectedChannels] = useState<ChannelConnectionType[]>(recommendedListingBlastChannels);
   const [loadingListings, setLoadingListings] = useState(false);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const connectedChannels = useMemo(() => channels.filter(c => c.status === 'connected'), [channels]);
+  const selectedListingRecord = useMemo(
+    () => listings.find((listing) => listing.id === selectedListing) || null,
+    [listings, selectedListing],
+  );
+
+  const channelOptions = useMemo(
+    () =>
+      ([...readyNowChannelTypes, ...copyReadyChannelTypes] as ChannelConnectionType[]).map((type) => {
+        const connection = channels.find((channel) => channel.type === type);
+        return {
+          type,
+          connected: connection?.status === 'connected',
+          displayName: connection?.displayName,
+          isReadyNow: readyNowChannelTypes.includes(type),
+        };
+      }),
+    [channels],
+  );
 
   const toggleChannel = (type: ChannelConnectionType) => {
     setSelectedChannels(prev => 
@@ -1764,6 +1838,8 @@ function NewBlastPanel({
         if (prefillListingId && res.data.some((l: ListingSummary) => l.id === prefillListingId)) {
           setSelectedListing(prefillListingId);
           setPlaybook('NEW_LISTING'); // Default to "Just listed" template
+        } else if (!prefillListingId && res.data.length === 1) {
+          setSelectedListing(res.data[0].id);
         }
       } finally {
         setLoadingListings(false);
@@ -1778,7 +1854,7 @@ function NewBlastPanel({
       return;
     }
     if (selectedChannels.length === 0) {
-      setError('Select at least one channel');
+      setError('Choose at least one campaign channel.');
       return;
     }
     setCreating(true);
@@ -1798,21 +1874,38 @@ function NewBlastPanel({
     }
   };
 
+  const handleStartEmail = () => {
+    if (!selectedListingRecord) {
+      setError('Choose a listing first.');
+      return;
+    }
+    setError(null);
+    onStartEmail(buildListingEmailPrefill(selectedListingRecord, playbook));
+  };
+
+  const handleStartDirectMail = () => {
+    setError(null);
+    onStartDirectMail();
+  };
+
   return (
     <div className="fixed inset-0 z-50" data-testid="new-blast-drawer">
       <div className="absolute inset-0 bg-slate-900/50 dark:bg-black/50" onClick={onClose} role="presentation" />
-      <div className="absolute right-0 top-0 h-full w-full max-w-md bg-white/95 dark:bg-slate-950/95 backdrop-blur-xl border-l border-slate-200/80 dark:border-white/10 p-8 overflow-y-auto">
-        <div className="flex items-center justify-between mb-6">
+      <div className="absolute right-0 top-0 h-full w-full max-w-xl bg-white/95 dark:bg-slate-950/95 backdrop-blur-xl border-l border-slate-200/80 dark:border-white/10 p-5 sm:p-7 overflow-y-auto">
+        <div className="flex items-start justify-between gap-4 mb-6">
           <div>
             <div className="text-xs uppercase tracking-[0.3em] text-slate-500">Listing blast</div>
-            <h3 className="text-xl font-semibold text-slate-900 dark:text-white">Launch a multi-channel listing push</h3>
+            <h3 className="text-xl font-semibold text-slate-900 dark:text-white">Launch listing marketing</h3>
+            <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
+              Send an email, build a mailing list, or create a copy-ready campaign workspace.
+            </p>
           </div>
-          <button className="text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white" onClick={onClose}>
-            ×
+          <button className="text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white" onClick={onClose} aria-label="Close">
+            x
           </button>
         </div>
 
-        <div className="space-y-6">
+        <div className="space-y-5">
           <section>
             <p className="text-xs uppercase tracking-[0.3em] text-slate-500 mb-2">Step 1</p>
             <h4 className="text-sm font-semibold text-slate-900 dark:text-white mb-3">Choose a listing</h4>
@@ -1838,7 +1931,7 @@ function NewBlastPanel({
                     onChange={() => setSelectedListing(listing.id)}
                   />
                   <div className="font-semibold">{listing.headline}</div>
-                  <div className="text-sm text-slate-500 dark:text-slate-400">{formatCurrency(listing.price)}</div>
+                  <div className="text-sm text-slate-600 dark:text-slate-300">{formatCurrency(listing.price) || 'Price not set'}</div>
                 </label>
               ))}
             </div>
@@ -1867,48 +1960,95 @@ function NewBlastPanel({
 
           <section>
             <p className="text-xs uppercase tracking-[0.3em] text-slate-500 mb-2">Step 3</p>
-            <h4 className="text-sm font-semibold text-slate-900 dark:text-white mb-3">Select channels</h4>
-            {connectedChannels.length === 0 ? (
-              <div className="text-slate-600 dark:text-slate-400 text-sm p-3 border border-slate-200 dark:border-white/10 rounded-lg">
-                No channels connected yet. Connect channels from the bar above to enable multi-channel blasts.
-              </div>
-            ) : (
-              <div className="flex flex-wrap gap-2">
-                {connectedChannels.map((channel) => {
-                  const isSelected = selectedChannels.includes(channel.type);
-                  return (
-                    <button
-                      key={channel.type}
-                      type="button"
-                      className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold uppercase tracking-wide border transition ${
-                        isSelected
-                          ? 'bg-green-600/80 border-green-400 text-white'
-                          : 'border-slate-200 text-slate-600 hover:border-slate-300 dark:border-white/15 dark:text-slate-300 dark:hover:border-white/30'
-                      }`}
-                      onClick={() => toggleChannel(channel.type)}
-                    >
-                      <span>{getChannelIcon(channel.type)}</span>
-                      <span>{getChannelLabel(channel.type)}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
+            <h4 className="text-sm font-semibold text-slate-900 dark:text-white mb-3">Use the fastest path</h4>
+            <div className="grid gap-2">
+              <button
+                type="button"
+                onClick={handleStartEmail}
+                disabled={!selectedListingRecord}
+                className="rounded-2xl border border-blue-300/60 bg-blue-50 p-3 text-left transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-blue-400/30 dark:bg-blue-500/10 dark:hover:bg-blue-500/15"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold text-slate-950 dark:text-white">Client email blast</div>
+                    <div className="mt-0.5 text-xs text-slate-700 dark:text-slate-300">Prefilled message, audience preview, send now or schedule.</div>
+                  </div>
+                  <span className="rounded-full bg-blue-600 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-white">Ready</span>
+                </div>
+              </button>
+              <button
+                type="button"
+                onClick={handleStartDirectMail}
+                className="rounded-2xl border border-fuchsia-300/60 bg-fuchsia-50 p-3 text-left transition hover:bg-fuchsia-100 dark:border-fuchsia-400/25 dark:bg-fuchsia-500/10 dark:hover:bg-fuchsia-500/15"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold text-slate-950 dark:text-white">Mailers and postcards</div>
+                    <div className="mt-0.5 text-xs text-slate-700 dark:text-slate-300">Filter clients, export a clean CSV, and create follow-up tasks.</div>
+                  </div>
+                  <span className="rounded-full bg-fuchsia-600 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-white">List</span>
+                </div>
+              </button>
+            </div>
           </section>
 
           <section>
             <p className="text-xs uppercase tracking-[0.3em] text-slate-500 mb-2">Step 4</p>
-            <h4 className="text-sm font-semibold text-slate-900 dark:text-white mb-3">Create blast</h4>
+            <h4 className="text-sm font-semibold text-slate-900 dark:text-white mb-2">Campaign workspace channels</h4>
             <p className="text-slate-600 dark:text-slate-400 text-sm mb-4">
-              We will set up all selected channels and auto-draft copy using the existing AI helper. You can tweak everything before sending.
+              AgentEase will draft the copy. Connected channels can publish; unconnected channels stay copy-ready for paste-and-post.
             </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-4">
+              {channelOptions.map((channel) => {
+                const isSelected = selectedChannels.includes(channel.type);
+                const stateLabel = channel.connected ? 'Connected' : channel.isReadyNow ? 'Ready' : 'Copy';
+                return (
+                  <button
+                    key={channel.type}
+                    type="button"
+                    onClick={() => toggleChannel(channel.type)}
+                    className={`rounded-2xl border p-3 text-left transition ${
+                      isSelected
+                        ? 'border-emerald-400/60 bg-emerald-500/10'
+                        : 'border-slate-200 bg-white hover:bg-slate-50 dark:border-white/10 dark:bg-slate-950/40 dark:hover:bg-white/10'
+                    }`}
+                  >
+                    <div className="flex items-start gap-2">
+                      <span className={`mt-0.5 inline-flex h-7 w-7 items-center justify-center rounded-full ${
+                        isSelected
+                          ? 'bg-emerald-500 text-white'
+                          : 'bg-slate-100 text-slate-600 dark:bg-white/10 dark:text-slate-300'
+                      }`}>
+                        {getChannelIcon(channel.type)}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-center justify-between gap-2">
+                          <span className="text-sm font-semibold text-slate-950 dark:text-white">{getChannelLabel(channel.type)}</span>
+                          <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                            channel.connected
+                              ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-200'
+                              : channel.isReadyNow
+                                ? 'bg-blue-500/15 text-blue-700 dark:text-blue-200'
+                                : 'bg-slate-500/15 text-slate-600 dark:text-slate-300'
+                          }`}>
+                            {stateLabel}
+                          </span>
+                        </span>
+                        <span className="mt-1 block text-xs text-slate-600 dark:text-slate-300">{channelDescriptions[channel.type]}</span>
+                        {channel.displayName && <span className="mt-1 block truncate text-[11px] text-slate-500">{channel.displayName}</span>}
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
             {error && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl p-3 dark:text-red-300 dark:bg-red-500/10 dark:border-red-500/30">{error}</div>}
             <Button
-              disabled={!selectedListing || creating}
+              disabled={!selectedListing || creating || selectedChannels.length === 0}
               onClick={handleSubmit}
               className="w-full bg-blue-600 hover:bg-blue-500"
             >
-              {creating ? 'Creating…' : 'Create listing blast'}
+              {creating ? 'Creating...' : 'Create AI campaign workspace'}
             </Button>
           </section>
         </div>

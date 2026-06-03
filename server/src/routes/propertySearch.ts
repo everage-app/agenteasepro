@@ -65,7 +65,16 @@ router.post('/properties', async (req: AuthenticatedRequest, res) => {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    const criteria = req.body;
+    const criteria = { ...(req.body || {}) };
+    const queryText = typeof criteria.query === 'string' ? criteria.query.trim() : '';
+    const mlsText = typeof criteria.mlsNumber === 'string' ? criteria.mlsNumber.trim() : '';
+
+    if (!criteria.zipCode && /^\d{5}$/.test(mlsText) && !/^mls/i.test(queryText)) {
+      criteria.zipCode = mlsText;
+      delete criteria.mlsNumber;
+    } else if (!criteria.zipCode && /^\d{5}$/.test(queryText)) {
+      criteria.zipCode = queryText;
+    }
     
     // Validate at least one search parameter
     if (!criteria.query && !criteria.city && !criteria.zipCode && !criteria.address && !criteria.mlsNumber) {

@@ -107,6 +107,10 @@ setup('authenticate', async ({ page, request }) => {
     const text = await response.text();
     lastBody = text;
 
+    if (response.status() >= 500) {
+      throw new Error(`auth bootstrap server error from dev-login (status=${response.status()}). Body: ${text.slice(0, 400)}`);
+    }
+
     try {
       const json = JSON.parse(text) as { token?: string };
       if (response.ok() && json?.token) {
@@ -123,6 +127,11 @@ setup('authenticate', async ({ page, request }) => {
       lastStatus = demoResponse.status();
       const demoText = await demoResponse.text();
       lastBody = demoText;
+
+      if (demoResponse.status() >= 500) {
+        throw new Error(`auth bootstrap server error from demo-login (status=${demoResponse.status()}). Body: ${demoText.slice(0, 400)}`);
+      }
+
       try {
         const demoJson = JSON.parse(demoText) as { token?: string };
         if (demoResponse.ok() && demoJson?.token) {

@@ -1,4 +1,5 @@
 import { test, expect, APIResponse, Locator } from '@playwright/test';
+import path from 'path';
 import { waitForLoadingToComplete } from './helpers/test-utils';
 
 const RETRYABLE_STATUSES = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
@@ -285,5 +286,75 @@ test.describe('Contracts • Form Templates', () => {
       await page.keyboard.press('Escape');
       await expect(dialog).toBeHidden({ timeout: 15000 });
     }
+  });
+});
+
+test.describe('Contracts • Document e-sign studio', () => {
+  test('renders uploaded PDF pages before field placement', async ({ page }) => {
+    test.setTimeout(90_000);
+    const pdfConsoleMessages: string[] = [];
+    page.on('console', (message) => {
+      const text = message.text();
+      if (/pdf|render|preview|document/i.test(text)) {
+        pdfConsoleMessages.push(`${message.type()}: ${text}`);
+      }
+    });
+
+    await page.goto('/contracts/pdf-editor?mode=document-esign', { waitUntil: 'domcontentloaded' });
+    await waitForLoadingToComplete(page);
+    await expect(page.getByRole('heading', { name: /PDF & Packet Builder/i })).toBeVisible({ timeout: 30000 });
+
+    const templatePath = path.resolve(__dirname, '..', '..', 'contracts', 'templates', 'Utah RE REPC.pdf');
+    await page.locator('input[type="file"]').setInputFiles(templatePath);
+
+    await expect(page.getByText(/Added 1 PDF/i)).toBeVisible({ timeout: 30000 });
+    await expect(page.getByText(/6\/6 pages selected/i)).toBeVisible({ timeout: 30000 });
+
+    await page.getByRole('button', { name: /Open E-sign Studio/i }).click();
+    await expect(page.getByRole('heading', { name: /Recipients & Message/i })).toBeVisible({ timeout: 30000 });
+
+    await page.getByPlaceholder('Full name').fill('Preview Test Buyer');
+    await page.getByRole('button', { name: /Review & Place Fields/i }).click();
+
+    const renderedPage = page.locator('img[alt="PDF page 1"]').first();
+    await expect(
+      renderedPage,
+      `PDF render console messages:\n${pdfConsoleMessages.join('\n') || 'none'}`,
+    ).toBeVisible({ timeout: 30000 });
+    await expect(page.getByText(/PDF preview unavailable/i)).toHaveCount(0);
+
+    const dimensions = await renderedPage.evaluate((image) => ({
+      width: (image as HTMLImageElement).naturalWidth,
+      height: (image as HTMLImageElement).naturalHeight,
+      src: (image as HTMLImageElement).src,
+    }));
+    expect(dimensions.width).toBeGreaterThan(100);
+    expect(dimensions.height).toBeGreaterThan(100);
+    expect(dimensions.src).toContain('data:image/');
+
+    const inkRatio = await renderedPage.evaluate((image) => {
+      const img = image as HTMLImageElement;
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const context = canvas.getContext('2d');
+      if (!context) return 0;
+      context.drawImage(img, 0, 0);
+      const data = context.getImageData(0, 0, canvas.width, canvas.height).data;
+      let sampled = 0;
+      let nonWhite = 0;
+      const step = Math.max(1, Math.ceil(Math.sqrt((canvas.width * canvas.height) / 120000)));
+      for (let y = 0; y < canvas.height; y += step) {
+        for (let x = 0; x < canvas.width; x += step) {
+          const index = (y * canvas.width + x) * 4;
+          sampled += 1;
+          if (data[index] < 247 || data[index + 1] < 247 || data[index + 2] < 247) {
+            nonWhite += 1;
+          }
+        }
+      }
+      return sampled > 0 ? nonWhite / sampled : 0;
+    });
+    expect(inkRatio).toBeGreaterThan(0.00035);
   });
 });

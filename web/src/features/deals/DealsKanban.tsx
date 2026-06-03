@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { AlertTriangle, CalendarClock, CheckCircle2, Clock3, FileSignature, MapPin, MoveRight } from 'lucide-react';
+import { AlertTriangle, BriefcaseBusiness, CalendarClock, CheckCircle2, Clock3, FileSignature, MapPin, MoveRight, PlusCircle, UserPlus } from 'lucide-react';
 import api from '../../lib/api';
 import { Badge } from '../../components/ui/Badge';
 import { DealHealthBadge } from '../../components/deals/DealHealthBadge';
@@ -531,6 +531,7 @@ export function DealsKanban() {
   const [isActivityLoading, setIsActivityLoading] = useState(false);
   const [pipelineLayout, setPipelineLayout] = useState<'compact' | 'board'>('compact');
   const [dealFocusFilter, setDealFocusFilter] = useState<DealFocusFilter>('ALL');
+  const [quickStartStatus, setQuickStartStatus] = useState<DealStatus | null>(null);
   const { fire: fireConfetti } = useConfetti();
 
   const [editForm, setEditForm] = useState({
@@ -749,6 +750,28 @@ export function DealsKanban() {
     } finally {
       setIsActivityLoading(false);
     }
+  };
+
+  const getColumnLabel = (status: DealStatus | null) => columns.find((col) => col.key === status)?.label || 'Pipeline';
+
+  const startDealFromLane = (status: DealStatus | null) => {
+    const stage = status === 'LEAD' ? 'LEAD' : 'ACTIVE';
+    navigate(`/deals/new?stage=${stage}`);
+  };
+
+  const startLeadFromLane = () => {
+    navigate('/leads?new=1');
+  };
+
+  const openDealCard = (deal: DealCard) => {
+    if (draggedDeal) return;
+    openManageDeal(deal);
+  };
+
+  const handleDealCardKeyDown = (event: React.KeyboardEvent, deal: DealCard) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    openManageDeal(deal);
   };
 
   const handleDragStart = (e: React.DragEvent, dealId: string) => {
@@ -1021,6 +1044,7 @@ export function DealsKanban() {
         const colDeals = visibleActiveDeals.filter((d) => d.status === col.key);
         const colVolume = colDeals.reduce((sum, deal) => sum + getDealPrice(deal), 0);
         const colCommission = colDeals.reduce((sum, deal) => sum + getDealCommission(deal), 0);
+        const canQuickStart = col.key !== 'CLOSED' && col.key !== 'FELL_THROUGH';
         return (
           <section
             key={col.key}
@@ -1042,16 +1066,46 @@ export function DealsKanban() {
                   <span className="text-amber-300">{formatCurrency(colCommission)} est. comm</span>
                 </div>
               </div>
-              <span className="rounded-full bg-white/10 px-2 py-0.5 text-[11px] font-medium text-slate-50">
-                {colDeals.length} Active
-              </span>
+              <div className="flex items-center gap-1.5">
+                {canQuickStart && (
+                  <button
+                    type="button"
+                    onClick={() => setQuickStartStatus(col.key)}
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-white/10 bg-white/5 text-slate-200 transition-colors hover:border-cyan-400/40 hover:bg-cyan-500/15 hover:text-cyan-100"
+                    aria-label={`Start ${col.label} workflow`}
+                  >
+                    <PlusCircle className="h-3.5 w-3.5" />
+                  </button>
+                )}
+                <span className="rounded-full bg-white/10 px-2 py-0.5 text-[11px] font-medium text-slate-50">
+                  {colDeals.length} Active
+                </span>
+              </div>
             </header>
             <div className="flex-1 space-y-3 px-3 pb-3 pt-1 overflow-y-auto relative z-10">
               {colDeals.length === 0 ? (
-                <div className="text-center py-8">
-                  <div className="text-slate-500 text-sm">{dealFocusFilter === 'ALL' ? 'No deals yet' : 'No deals match this focus'}</div>
-                  <div className="text-slate-600 text-xs mt-1">{dealFocusFilter === 'ALL' ? 'Drag deals here' : 'Switch focus to see more'}</div>
-                </div>
+                canQuickStart ? (
+                  <button
+                    type="button"
+                    onClick={() => setQuickStartStatus(col.key)}
+                    className="flex min-h-[150px] w-full flex-col items-center justify-center rounded-2xl border border-dashed border-white/12 bg-white/[0.03] px-4 py-6 text-center transition-all hover:border-cyan-400/35 hover:bg-cyan-500/10"
+                  >
+                    <span className="flex h-10 w-10 items-center justify-center rounded-2xl border border-cyan-400/25 bg-cyan-500/10 text-cyan-200">
+                      <PlusCircle className="h-5 w-5" />
+                    </span>
+                    <span className="mt-3 text-sm font-semibold text-slate-200">
+                      {dealFocusFilter === 'ALL' ? `Start ${col.label.toLowerCase()}` : 'Create in this lane'}
+                    </span>
+                    <span className="mt-1 max-w-[220px] text-xs leading-5 text-slate-500">
+                      Lead or deal quick start.
+                    </span>
+                  </button>
+                ) : (
+                  <div className="flex min-h-[150px] w-full flex-col items-center justify-center rounded-2xl border border-white/8 bg-white/[0.02] px-4 py-6 text-center">
+                    <span className="text-sm text-slate-500">{dealFocusFilter === 'ALL' ? 'No closed files here' : 'No deals match this focus'}</span>
+                    <span className="mt-1 text-xs text-slate-600">Completed files appear below when available.</span>
+                  </div>
+                )
               ) : (
                 colDeals.map((deal) => {
                   const nextDeadline = getNextDeadline(deal);
@@ -1068,10 +1122,14 @@ export function DealsKanban() {
                   return (
                   <article
                     key={deal.id}
+                    role="button"
+                    tabIndex={0}
                     draggable
+                    onClick={() => openDealCard(deal)}
+                    onKeyDown={(event) => handleDealCardKeyDown(event, deal)}
                     onDragStart={(e) => handleDragStart(e, deal.id)}
                     onDragEnd={handleDragEnd}
-                    className={`group rounded-2xl border ${urgencyStyle.border} bg-slate-950/80 px-3 py-3.5 ${urgencyStyle.glow} transition-transform duration-150 hover:-translate-y-0.5 hover:border-blue-400/60 cursor-move relative ${
+                    className={`group rounded-2xl border ${urgencyStyle.border} bg-slate-950/80 px-3 py-3.5 ${urgencyStyle.glow} transition-transform duration-150 hover:-translate-y-0.5 hover:border-blue-400/60 focus:outline-none focus:ring-2 focus:ring-cyan-400/45 cursor-pointer relative ${
                       draggedDeal === deal.id ? 'opacity-50' : 'opacity-100'
                     }`}
                   >
@@ -1114,11 +1172,11 @@ export function DealsKanban() {
                             onClick={(e) => {
                               e.stopPropagation();
                               setMenuOpen(null);
-                              navigate(`/deals/${deal.id}/repc`);
+                              navigate(`/contracts/${deal.id}`);
                             }}
                             className="w-full text-left px-4 py-2 text-sm text-slate-200 hover:bg-white/10 transition-colors"
                           >
-                            Open REPC
+                            Open Contracts
                           </button>
                           <div className="border-t border-white/10 my-1" />
                           {columns.filter(c => c.key !== deal.status && c.key !== 'CLOSED' && c.key !== 'FELL_THROUGH').map((targetCol) => (
@@ -1277,7 +1335,7 @@ export function DealsKanban() {
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            navigate(`/deals/${deal.id}/repc`);
+                            navigate(`/contracts/${deal.id}`);
                           }}
                           className="inline-flex items-center gap-1 rounded-full border border-white/15 bg-white/5 px-2.5 py-1 text-[11px] font-medium text-slate-100 hover:bg-white/10"
                         >
@@ -1346,7 +1404,11 @@ export function DealsKanban() {
                   return (
                 <article
                   key={deal.id}
-                  className="group rounded-2xl border border-white/10 bg-slate-950/60 px-3 py-3.5 shadow-[0_8px_18px_rgba(0,0,0,0.4)] transition-opacity duration-150 hover:opacity-80 cursor-pointer"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => openManageDeal(deal)}
+                  onKeyDown={(event) => handleDealCardKeyDown(event, deal)}
+                  className="group rounded-2xl border border-white/10 bg-slate-950/60 px-3 py-3.5 shadow-[0_8px_18px_rgba(0,0,0,0.4)] transition-opacity duration-150 hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-cyan-400/45 cursor-pointer"
                 >
                   <div className="mb-1 flex items-start justify-between gap-2">
                     <div>
@@ -1447,7 +1509,11 @@ export function DealsKanban() {
                   return (
                 <article
                   key={deal.id}
-                  className="rounded-2xl border border-amber-400/20 bg-slate-950/70 px-3 py-3.5 shadow-[0_8px_18px_rgba(0,0,0,0.4)]"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => openManageDeal(deal)}
+                  onKeyDown={(event) => handleDealCardKeyDown(event, deal)}
+                  className="rounded-2xl border border-amber-400/20 bg-slate-950/70 px-3 py-3.5 shadow-[0_8px_18px_rgba(0,0,0,0.4)] transition-colors hover:border-amber-300/40 focus:outline-none focus:ring-2 focus:ring-cyan-400/45 cursor-pointer"
                 >
                   <div className="mb-1 flex items-start justify-between gap-2">
                     <div>
@@ -1511,6 +1577,56 @@ export function DealsKanban() {
       )}
     </div>
 
+    {quickStartStatus && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4" onClick={() => setQuickStartStatus(null)}>
+        <div
+          className="w-full max-w-lg rounded-3xl border border-white/10 bg-slate-950/95 p-5 shadow-[0_25px_80px_rgba(0,0,0,0.8)]"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-300">Start {getColumnLabel(quickStartStatus)}</div>
+              <h3 className="mt-1 text-lg font-semibold text-white">Quick start</h3>
+            </div>
+            <button
+              type="button"
+              onClick={() => setQuickStartStatus(null)}
+              className="rounded-full px-2 py-1 text-slate-400 hover:bg-white/10 hover:text-white"
+              aria-label="Close"
+            >
+              ✕
+            </button>
+          </div>
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <button
+              type="button"
+              onClick={startLeadFromLane}
+              className={`rounded-2xl border p-4 text-left transition-all hover:-translate-y-0.5 ${quickStartStatus === 'LEAD' ? 'border-cyan-300/45 bg-cyan-500/15 shadow-[0_18px_45px_rgba(14,165,233,0.16)]' : 'border-white/10 bg-white/5 hover:border-cyan-400/35 hover:bg-cyan-500/10'}`}
+            >
+              <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-cyan-400/30 bg-cyan-500/10 text-cyan-200">
+                <UserPlus className="h-5 w-5" />
+              </span>
+              <span className="mt-3 block text-sm font-semibold text-white">New lead</span>
+              <span className="mt-1 block text-xs leading-5 text-slate-400">Contact record and follow-up.</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => startDealFromLane(quickStartStatus)}
+              className={`rounded-2xl border p-4 text-left transition-all hover:-translate-y-0.5 ${quickStartStatus !== 'LEAD' ? 'border-[#f2d894]/40 bg-[#d6b56d]/15 shadow-[0_18px_45px_rgba(214,181,109,0.14)]' : 'border-white/10 bg-white/5 hover:border-[#f2d894]/35 hover:bg-[#d6b56d]/10'}`}
+            >
+              <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-[#f2d894]/30 bg-[#d6b56d]/10 text-[#f7e7b0]">
+                <BriefcaseBusiness className="h-5 w-5" />
+              </span>
+              <span className="mt-3 block text-sm font-semibold text-white">New deal</span>
+              <span className="mt-1 block text-xs leading-5 text-slate-400">Transaction file and contract workspace.</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+
     {isManageOpen && editingDeal && (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4" onClick={() => !isSaving && closeManageDeal()}>
         <div
@@ -1536,10 +1652,10 @@ export function DealsKanban() {
             <div className="mt-2 flex flex-wrap gap-2">
               <button
                 type="button"
-                onClick={() => navigate(`/deals/${editingDeal.id}/repc`)}
+                onClick={() => navigate(`/contracts/${editingDeal.id}`)}
                 className="rounded-full border border-white/15 bg-white/5 px-3 py-1.5 text-[11px] font-semibold text-slate-100 hover:bg-white/10"
               >
-                Open REPC
+                Open Contracts
               </button>
               <button
                 type="button"

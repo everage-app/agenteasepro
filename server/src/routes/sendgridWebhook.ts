@@ -542,6 +542,11 @@ export async function sendgridEventsWebhookHandler(req: Request, res: Response) 
     const channelId = safeString(customArgs.channelId, 80) || undefined;
     const contactType = safeString(customArgs.contactType, 20);
     const contactId = safeString(customArgs.contactId, 120);
+    const envelopeId = safeString(customArgs.envelopeId, 80);
+    const signerId = safeString(customArgs.signerId, 80);
+    const signerRole = safeString(customArgs.signerRole, 40);
+    const deliveryType = safeString(customArgs.deliveryType, 40);
+    const documentName = safeString(customArgs.documentName, 220);
 
     const eventType = safeString(e?.event, 60)?.toUpperCase() || 'UNKNOWN';
     const email = safeString(e?.email, 200);
@@ -585,6 +590,30 @@ export async function sendgridEventsWebhookHandler(req: Request, res: Response) 
               contactEmail: email || null,
               eventType,
               messageId: messageId || null,
+            },
+          },
+        }),
+      );
+    }
+
+    if (agentId && envelopeId) {
+      inserts.push(
+        prisma.internalEvent.create({
+          data: {
+            agentId,
+            kind: 'esign_email_event',
+            path: '/api/integrations/sendgrid/events',
+            meta: {
+              envelopeId,
+              signerId: signerId || null,
+              signerRole: signerRole || null,
+              deliveryType: deliveryType || null,
+              documentName: documentName || null,
+              signerEmail: email || null,
+              eventType,
+              messageId: messageId || null,
+              url: url || null,
+              provider: 'sendgrid',
             },
           },
         }),

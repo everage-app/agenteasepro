@@ -109,7 +109,7 @@ export async function getTodayPriorityActions(agentId: string, forDate: Date = n
       type: task.category === 'CALL' || task.category === 'NOTE' || task.category === 'POPBY'
         ? PriorityActionType.REFERRAL_TOUCH
         : PriorityActionType.CLIENT_FOLLOWUP,
-      title: `⚠️ OVERDUE: ${task.title}`,
+      title: `OVERDUE: ${task.title}`,
       description: task.description || undefined,
       clientName,
       dealOrListing: task.deal?.title || task.listing?.addressLine1,
@@ -190,7 +190,7 @@ export async function getTodayPriorityActions(agentId: string, forDate: Date = n
       id: `client-followup-${client.id}`,
       type: PriorityActionType.REFERRAL_TOUCH,
       title: `Touch base with ${client.firstName} ${client.lastName}`,
-      description: `Last contact: ${daysSinceContact} days ago • ${client.referralRank} rank referral source`,
+      description: `Last contact: ${daysSinceContact} days ago - ${client.referralRank} rank referral source`,
       clientName: `${client.firstName} ${client.lastName}`,
       priority: daysSinceContact > 60 ? 'HIGH' : 'NORMAL',
       relatedId: client.id,
@@ -220,7 +220,7 @@ export async function getTodayPriorityActions(agentId: string, forDate: Date = n
     actions.push({
       id: `blast-${blast.id}`,
       type: PriorityActionType.MARKETING_BLAST,
-      title: `📢 ${blast.title}`,
+      title: `Marketing: ${blast.title}`,
       description: `${blast.playbook} blast scheduled to send`,
       dealOrListing: blast.listing?.addressLine1,
       dueDate: blast.scheduledAt || undefined,

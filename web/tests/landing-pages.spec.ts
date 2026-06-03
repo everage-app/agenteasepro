@@ -96,8 +96,10 @@ test.describe('Landing pages', () => {
       });
       if (uploadResponse.ok()) {
         const uploadPayload = await uploadResponse.json();
-        expect(uploadPayload.assetUrl).toMatch(/\/uploads\/landing-pages\//);
-        heroAssetUrl = uploadPayload.assetUrl;
+        const uploadUrl = String(uploadPayload.assetUrl || '');
+        expect(uploadUrl.length).toBeGreaterThan(0);
+        expect(/\/uploads\/landing-pages\//.test(uploadUrl) || /^data:image\//i.test(uploadUrl)).toBeTruthy();
+        heroAssetUrl = uploadUrl;
       }
 
       const contentTab = page.getByRole('button', { name: /content/i });

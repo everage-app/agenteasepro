@@ -11,7 +11,7 @@ import { isOwnerRequest, requireInternal } from '../middleware/requireOwner';
 import { prisma } from '../lib/prisma';
 import { getAgentLegalAcceptance, getLegalPolicies, updateLegalPolicies } from '../lib/legalPolicies';
 import { fetchHerokuPricingSnapshot } from '../lib/herokuPricing';
-import { sendMarketingEmail } from '../services/emailService';
+import { sendEmail, sendMarketingEmail } from '../services/emailService';
 import {
   buildAgentHealthProfiles,
   buildOwnerBriefing,
@@ -120,6 +120,16 @@ const staffUpsertSchema = z.object({
   active: z.boolean().default(true),
   title: z.string().trim().max(120).nullable().optional(),
   notes: z.string().trim().max(1000).nullable().optional(),
+  reason: z.string().trim().max(500).optional(),
+});
+
+const staffInviteSchema = z.object({
+  email: z.string().trim().email(),
+  name: z.string().trim().min(1).max(120).optional(),
+  role: staffRoleSchema.default('READ_ONLY'),
+  title: z.string().trim().max(120).nullable().optional(),
+  notes: z.string().trim().max(1000).nullable().optional(),
+  sendEmail: z.boolean().default(true),
   reason: z.string().trim().max(500).optional(),
 });
 
@@ -251,6 +261,75 @@ function buildCampaignSignature(params: {
   hash.update('\n');
   hash.update(params.htmlTemplate);
   return hash.digest('hex');
+}
+
+function hashToken(token: string) {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
+function normalizeEmailAddress(email: string) {
+  return email.trim().toLowerCase();
+}
+
+function resolveAppBaseUrl() {
+  const base = process.env.PUBLIC_APP_URL || process.env.FRONTEND_URL || 'https://app.agenteasepro.com';
+  return base.replace(/\/+$/, '');
+}
+
+function resolveInternalPortalUrl() {
+  const internalUrl = (process.env.PUBLIC_INTERNAL_URL || '').trim();
+  if (internalUrl) return internalUrl;
+  return `${resolveAppBaseUrl()}/internal/login`;
+}
+
+function buildInternalInviteResetUrl(token: string) {
+  return `${resolveAppBaseUrl()}/reset-password?token=${token}`;
+}
+
+async function sendInternalStaffInviteEmail(params: {
+  email: string;
+  inviterName: string;
+  role: InternalRole;
+  title?: string | null;
+  resetUrl: string;
+  internalPortalUrl: string;
+}) {
+  const html = `
+    <div style="font-family:'Segoe UI',Arial,sans-serif;max-width:640px;margin:0 auto;padding:24px;background:#0b1220;color:#e5e7eb;">
+      <div style="border:1px solid rgba(56,189,248,0.25);border-radius:14px;padding:24px;background:linear-gradient(180deg,rgba(30,41,59,0.94),rgba(15,23,42,0.94));">
+        <h1 style="margin:0 0 12px;font-size:22px;color:#f8fafc;">You are invited to AgentEasePro Internal</h1>
+        <p style="margin:0 0 14px;line-height:1.55;color:#cbd5e1;">${params.inviterName} invited you to internal access with role <strong>${params.role}</strong>${params.title ? ` (${params.title})` : ''}.</p>
+        <p style="margin:0 0 22px;line-height:1.55;color:#cbd5e1;">Use the secure link below to set your password and activate access.</p>
+        <div style="text-align:center;margin:28px 0;">
+          <a href="${params.resetUrl}" style="display:inline-block;background:linear-gradient(135deg,#0ea5e9,#22d3ee);color:#ffffff;text-decoration:none;padding:13px 28px;border-radius:10px;font-weight:700;">Set Password & Join</a>
+        </div>
+        <p style="margin:0 0 6px;font-size:13px;color:#94a3b8;">Internal portal:</p>
+        <p style="margin:0 0 18px;font-size:13px;"><a href="${params.internalPortalUrl}" style="color:#67e8f9;word-break:break-all;">${params.internalPortalUrl}</a></p>
+        <p style="margin:0;font-size:12px;color:#64748b;">This setup link expires in 7 days. If the button does not work, copy and paste this URL:</p>
+        <p style="margin:8px 0 0;font-size:12px;color:#93c5fd;word-break:break-all;">${params.resetUrl}</p>
+      </div>
+    </div>
+  `;
+
+  const text = [
+    'You are invited to AgentEasePro Internal.',
+    '',
+    `${params.inviterName} invited you with role ${params.role}${params.title ? ` (${params.title})` : ''}.`,
+    'Use this secure link to set your password and activate access:',
+    params.resetUrl,
+    '',
+    `Internal portal: ${params.internalPortalUrl}`,
+    '',
+    'This setup link expires in 7 days.',
+  ].join('\n');
+
+  return sendEmail({
+    to: params.email,
+    subject: 'You are invited to AgentEasePro Internal',
+    html,
+    text,
+    fromName: 'AgentEasePro Internal',
+  });
 }
 
 async function runInternalCampaignJob(params: {
@@ -413,6 +492,34 @@ function bucketFeature(path: string) {
   return 'Other';
 }
 
+function readMetaString(meta: Prisma.JsonValue | null | undefined, keys: string[]) {
+  if (!meta || typeof meta !== 'object' || Array.isArray(meta)) return undefined;
+  const obj = meta as Record<string, unknown>;
+  for (const key of keys) {
+    const value = obj[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      const nested = value as Record<string, unknown>;
+      for (const nestedKey of keys) {
+        const nestedValue = nested[nestedKey];
+        if (typeof nestedValue === 'string' && nestedValue.trim()) return nestedValue.trim();
+      }
+    }
+  }
+  return undefined;
+}
+
+function topBuckets(map: Map<string, number>, limit = 8) {
+  return Array.from(map.entries())
+    .map(([label, count]) => ({ label, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, limit);
+}
+
+function rate(numerator: number, denominator: number) {
+  return denominator > 0 ? Number(((numerator / denominator) * 100).toFixed(2)) : 0;
+}
+
 function parsePagination(req: { query: unknown }, res: { status: (code: number) => any; json: (body: any) => any }) {
   const parsed = paginationSchema.safeParse(req.query);
   if (!parsed.success) {
@@ -528,6 +635,139 @@ router.put('/ops/staff', async (req: AuthenticatedRequest, res) => {
   });
 
   return res.json({ staff });
+});
+
+router.post('/ops/staff/invite', async (req: AuthenticatedRequest, res) => {
+  const access = await getInternalAccessForRequest(req);
+  if (!roleCanManage(access.role as InternalRole | null, 'staff')) {
+    return res.status(403).json({ error: 'Only owner/admin can invite internal staff' });
+  }
+
+  const parsed = staffInviteSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({ error: 'Invalid invite payload', details: parsed.error.flatten() });
+  }
+
+  if (parsed.data.role === 'OWNER' && !access.isMasterOwner) {
+    return res.status(403).json({ error: 'Only the master owner can assign the OWNER role' });
+  }
+
+  const normalizedEmail = normalizeEmailAddress(parsed.data.email);
+  const displayName = parsed.data.name?.trim() || normalizedEmail.split('@')[0] || 'Internal User';
+
+  const existingAgent = await prisma.agent.findUnique({
+    where: { email: normalizedEmail },
+    select: {
+      id: true,
+      email: true,
+      name: true,
+      status: true,
+      passwordHash: true,
+      billingMode: true,
+      billingAccessOverride: true,
+      subscriptionStatus: true,
+    },
+  });
+
+  const agent = existingAgent
+    ? await prisma.agent.update({
+        where: { id: existingAgent.id },
+        data: {
+          name: existingAgent.name?.trim() ? existingAgent.name : displayName,
+          status: 'ACTIVE',
+          ...(existingAgent.billingMode === 'FREE' || existingAgent.billingAccessOverride
+            ? {}
+            : {
+                billingMode: 'FREE',
+                billingAccessOverride: true,
+                subscriptionStatus: 'ACTIVE',
+              }),
+        },
+      })
+    : await prisma.agent.create({
+        data: {
+          email: normalizedEmail,
+          name: displayName,
+          status: 'ACTIVE',
+          billingMode: 'FREE',
+          billingAccessOverride: true,
+          subscriptionStatus: 'ACTIVE',
+          emailVerified: false,
+        },
+      });
+
+  const before = await prisma.internalStaff.findUnique({
+    where: { agentId: agent.id },
+    include: { agent: { select: { id: true, name: true, email: true } } },
+  });
+
+  const staff = await upsertInternalStaff({
+    agentId: agent.id,
+    role: parsed.data.role,
+    active: true,
+    title: parsed.data.title,
+    notes: parsed.data.notes,
+  });
+
+  const plainInviteToken = crypto.randomBytes(32).toString('hex');
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  await prisma.agent.update({
+    where: { id: agent.id },
+    data: {
+      resetToken: hashToken(plainInviteToken),
+      resetTokenExpiry: expiresAt,
+    },
+  });
+
+  const resetUrl = buildInternalInviteResetUrl(plainInviteToken);
+  const internalPortalUrl = resolveInternalPortalUrl();
+
+  let emailSent = false;
+  let emailError: string | null = null;
+
+  if (parsed.data.sendEmail) {
+    const inviteEmail = await sendInternalStaffInviteEmail({
+      email: normalizedEmail,
+      inviterName: req.user?.email || 'AgentEasePro Internal',
+      role: parsed.data.role as InternalRole,
+      title: parsed.data.title,
+      resetUrl,
+      internalPortalUrl,
+    });
+    emailSent = Boolean(inviteEmail.success);
+    emailError = inviteEmail.success ? null : inviteEmail.error || 'Invite email failed to send';
+  }
+
+  await writeInternalAudit({
+    req,
+    action: 'staff.invite',
+    targetType: 'internalStaff',
+    targetId: staff.agentId,
+    summary: `${normalizedEmail} invited to internal as ${staff.role}${emailSent ? ' (email sent)' : ''}`,
+    before,
+    after: {
+      staff,
+      invitation: {
+        emailSent,
+        emailError,
+        expiresAt,
+      },
+    },
+    reason: parsed.data.reason,
+  });
+
+  return res.status(201).json({
+    staff,
+    invitation: {
+      email: normalizedEmail,
+      createdAgent: !existingAgent,
+      resetUrl,
+      internalPortalUrl,
+      expiresAt,
+      emailSent,
+      emailError,
+    },
+  });
 });
 
 router.post('/campaigns/preview', async (req: AuthenticatedRequest, res) => {
@@ -2019,6 +2259,331 @@ router.get('/usage', async (req, res) => {
     take: hours > 720 ? 20000 : 5000,
   });
 
+  const pageViewStream = await prisma.internalEvent.findMany({
+    where: {
+      createdAt: { gte: since },
+      kind: 'page_view',
+      agentId: { not: null },
+      path: { not: null },
+      ...(agentId ? { agentId } : { agent: { status: { not: 'REVOKED' } } }),
+    },
+    select: {
+      agentId: true,
+      path: true,
+      createdAt: true,
+    },
+    orderBy: [{ agentId: 'asc' }, { createdAt: 'asc' }],
+    take: hours > 720 ? 80000 : 30000,
+  });
+
+  const transitionMap = new Map<string, number>();
+  const dropOffMap = new Map<string, number>();
+  const lastByAgent = new Map<string, { feature: string; at: number }>();
+  const sessionGapMs = 30 * 60 * 1000;
+
+  for (const row of pageViewStream) {
+    const id = row.agentId;
+    const feature = bucketFeature(row.path || '/');
+    const at = row.createdAt.getTime();
+    const prev = lastByAgent.get(id || '');
+
+    if (prev) {
+      const gap = at - prev.at;
+      if (gap <= sessionGapMs) {
+        const key = `${prev.feature}|||${feature}`;
+        transitionMap.set(key, (transitionMap.get(key) || 0) + 1);
+      } else {
+        dropOffMap.set(prev.feature, (dropOffMap.get(prev.feature) || 0) + 1);
+      }
+    }
+
+    if (id) {
+      lastByAgent.set(id, { feature, at });
+    }
+  }
+
+  for (const [, last] of lastByAgent.entries()) {
+    dropOffMap.set(last.feature, (dropOffMap.get(last.feature) || 0) + 1);
+  }
+
+  const funnelTransitions = Array.from(transitionMap.entries())
+    .map(([key, count]) => {
+      const [from, to] = key.split('|||');
+      return { from, to, count };
+    })
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 10);
+
+  const dropOffFeatures = Array.from(dropOffMap.entries())
+    .map(([feature, exits]) => ({ feature, exits }))
+    .sort((a, b) => b.exits - a.exits)
+    .slice(0, 10);
+
+  const cohortSince = new Date(Date.now() - 180 * 24 * 60 * 60 * 1000);
+  const cohortRows = await prisma.$queryRaw<Array<{ agentId: string; cohortWeek: Date; activeWeek: Date }>>(Prisma.sql`
+    WITH filtered AS (
+      SELECT ie."agentId", ie."createdAt"
+      FROM "InternalEvent" ie
+      WHERE ie."kind" = 'page_view'
+        AND ie."agentId" IS NOT NULL
+        AND ie."createdAt" >= ${cohortSince}
+        ${agentId ? Prisma.sql`AND ie."agentId" = ${agentId}` : Prisma.empty}
+        ${agentId ? Prisma.empty : Prisma.sql`AND EXISTS (SELECT 1 FROM "Agent" a WHERE a."id" = ie."agentId" AND a."status" <> 'REVOKED')`}
+    ),
+    first_seen AS (
+      SELECT f."agentId", DATE_TRUNC('week', MIN(f."createdAt"))::date AS cohort_week
+      FROM filtered f
+      GROUP BY f."agentId"
+    ),
+    active_weeks AS (
+      SELECT f."agentId", DATE_TRUNC('week', f."createdAt")::date AS active_week
+      FROM filtered f
+      GROUP BY f."agentId", DATE_TRUNC('week', f."createdAt")::date
+    )
+    SELECT fs."agentId" AS "agentId", fs.cohort_week AS "cohortWeek", aw.active_week AS "activeWeek"
+    FROM first_seen fs
+    INNER JOIN active_weeks aw ON aw."agentId" = fs."agentId"
+    ORDER BY fs.cohort_week DESC, aw.active_week ASC
+  `);
+
+  const cohortAgents = new Map<string, Set<string>>();
+  const cohortWeekActivity = new Map<string, Map<number, Set<string>>>();
+  const weekMs = 7 * 24 * 60 * 60 * 1000;
+
+  for (const row of cohortRows) {
+    const cohortKey = new Date(row.cohortWeek).toISOString().slice(0, 10);
+    const cohortTs = new Date(row.cohortWeek).getTime();
+    const activeTs = new Date(row.activeWeek).getTime();
+    const weekOffset = Math.floor((activeTs - cohortTs) / weekMs);
+    if (weekOffset < 0 || weekOffset > 6) continue;
+
+    if (!cohortAgents.has(cohortKey)) cohortAgents.set(cohortKey, new Set());
+    cohortAgents.get(cohortKey)?.add(row.agentId);
+
+    if (!cohortWeekActivity.has(cohortKey)) cohortWeekActivity.set(cohortKey, new Map());
+    const weekMap = cohortWeekActivity.get(cohortKey)!;
+    if (!weekMap.has(weekOffset)) weekMap.set(weekOffset, new Set());
+    weekMap.get(weekOffset)?.add(row.agentId);
+  }
+
+  const cohortRetention = Array.from(cohortAgents.keys())
+    .sort((a, b) => (a < b ? 1 : -1))
+    .slice(0, 8)
+    .map((cohort) => {
+      const size = cohortAgents.get(cohort)?.size || 0;
+      const weekMap = cohortWeekActivity.get(cohort) || new Map<number, Set<string>>();
+      const retention = Array.from({ length: 7 }, (_, week) => {
+        const active = weekMap.get(week)?.size || 0;
+        const pct = size > 0 ? Number(((active / size) * 100).toFixed(1)) : 0;
+        return { week, active, pct };
+      });
+      return { cohort, size, retention };
+    })
+    .reverse();
+
+  const billingSegmentRows = await prisma.$queryRaw<Array<{ segment: string; count: bigint | number }>>(Prisma.sql`
+    SELECT a."billingMode"::text AS segment, COUNT(*)::bigint AS count
+    FROM "InternalEvent" ie
+    INNER JOIN "Agent" a ON a."id" = ie."agentId"
+    WHERE ie."createdAt" >= ${since}
+      AND ie."kind" = 'page_view'
+      ${agentId ? Prisma.sql`AND ie."agentId" = ${agentId}` : Prisma.empty}
+      ${agentId ? Prisma.empty : Prisma.sql`AND a."status" <> 'REVOKED'`}
+    GROUP BY a."billingMode"
+  `);
+
+  const subscriptionSegmentRows = await prisma.$queryRaw<Array<{ segment: string; count: bigint | number }>>(Prisma.sql`
+    SELECT a."subscriptionStatus"::text AS segment, COUNT(*)::bigint AS count
+    FROM "InternalEvent" ie
+    INNER JOIN "Agent" a ON a."id" = ie."agentId"
+    WHERE ie."createdAt" >= ${since}
+      AND ie."kind" = 'page_view'
+      ${agentId ? Prisma.sql`AND ie."agentId" = ${agentId}` : Prisma.empty}
+      ${agentId ? Prisma.empty : Prisma.sql`AND a."status" <> 'REVOKED'`}
+    GROUP BY a."subscriptionStatus"
+  `);
+
+  const teamSegmentRows = await prisma.$queryRaw<Array<{ segment: string | null; count: bigint | number }>>(Prisma.sql`
+    SELECT COALESCE(t."name", 'Unassigned') AS segment, COUNT(*)::bigint AS count
+    FROM "InternalEvent" ie
+    INNER JOIN "Agent" a ON a."id" = ie."agentId"
+    LEFT JOIN "Team" t ON t."id" = a."teamId"
+    WHERE ie."createdAt" >= ${since}
+      AND ie."kind" = 'page_view'
+      ${agentId ? Prisma.sql`AND ie."agentId" = ${agentId}` : Prisma.empty}
+      ${agentId ? Prisma.empty : Prisma.sql`AND a."status" <> 'REVOKED'`}
+    GROUP BY COALESCE(t."name", 'Unassigned')
+    ORDER BY count DESC
+    LIMIT 8
+  `);
+
+  const segments = {
+    billingMode: billingSegmentRows.map((row) => ({ segment: row.segment, count: Number(row.count || 0) })),
+    subscriptionStatus: subscriptionSegmentRows.map((row) => ({ segment: row.segment, count: Number(row.count || 0) })),
+    teams: teamSegmentRows.map((row) => ({ segment: row.segment || 'Unassigned', count: Number(row.count || 0) })),
+  };
+
+  const agentSignupWhere: Prisma.AgentWhereInput = {
+    createdAt: { gte: since },
+    ...(agentId ? { id: agentId } : { status: { not: 'REVOKED' } }),
+  };
+  const landingViewWhere: Prisma.PageViewWhereInput = {
+    createdAt: { gte: since },
+    ...(agentId
+      ? { landingPage: { agentId } }
+      : { landingPage: { agent: { status: { not: 'REVOKED' } } } }),
+  };
+  const landingLeadWhere: Prisma.LeadWhereInput = {
+    createdAt: { gte: since },
+    deletedAt: null,
+    landingPageId: { not: null },
+    ...(agentId ? { agentId } : { agent: { status: { not: 'REVOKED' } } }),
+  };
+
+  const [
+    newAgentRows,
+    marketingWebsiteViews,
+    marketingSignupClicks,
+    marketingCtaClicks,
+    marketingEventRows,
+    agentLandingPageViews,
+    agentLandingPageLeads,
+    landingUtmSourceRows,
+    landingUtmCampaignRows,
+  ] = await Promise.all([
+    prisma.agent.findMany({
+      where: agentSignupWhere,
+      select: {
+        id: true,
+        createdAt: true,
+        emailVerified: true,
+        subscriptionStatus: true,
+        billingMode: true,
+      },
+      orderBy: { createdAt: 'asc' },
+      take: hours > 720 ? 50000 : 10000,
+    }),
+    prisma.internalEvent.count({
+      where: { createdAt: { gte: since }, kind: 'marketing_page_view' },
+    }),
+    prisma.internalEvent.count({
+      where: { createdAt: { gte: since }, kind: 'marketing_signup_click' },
+    }),
+    prisma.internalEvent.count({
+      where: { createdAt: { gte: since }, kind: 'marketing_cta_click' },
+    }),
+    prisma.internalEvent.findMany({
+      where: {
+        createdAt: { gte: since },
+        kind: { in: ['marketing_page_view', 'marketing_signup_click', 'marketing_cta_click'] },
+      },
+      select: { createdAt: true, kind: true, meta: true },
+      orderBy: { createdAt: 'desc' },
+      take: hours > 720 ? 50000 : 15000,
+    }),
+    prisma.pageView.count({ where: landingViewWhere }),
+    prisma.lead.count({ where: landingLeadWhere }),
+    prisma.pageView.groupBy({
+      by: ['utmSource'],
+      where: { ...landingViewWhere, utmSource: { not: null } },
+      _count: { utmSource: true },
+      orderBy: { _count: { utmSource: 'desc' } },
+      take: 8,
+    }),
+    prisma.pageView.groupBy({
+      by: ['utmCampaign'],
+      where: { ...landingViewWhere, utmCampaign: { not: null } },
+      _count: { utmCampaign: true },
+      orderBy: { _count: { utmCampaign: 'desc' } },
+      take: 8,
+    }),
+  ]);
+
+  const newAgentIds = newAgentRows.map((agent) => agent.id);
+  const activeNewRows = newAgentIds.length
+    ? await prisma.internalEvent.groupBy({
+        by: ['agentId'],
+        where: {
+          createdAt: { gte: since },
+          agentId: { in: newAgentIds },
+        },
+        _count: { agentId: true },
+      })
+    : [];
+
+  const marketingSourceMap = new Map<string, number>();
+  const marketingCampaignMap = new Map<string, number>();
+  const marketingTrendMap = new Map<string, { views: number; signupClicks: number; ctaClicks: number; signups: number }>();
+
+  for (const event of marketingEventRows) {
+    const source = readMetaString(event.meta, ['utmSource', 'utm_source']) || 'Direct / unknown';
+    const campaign = readMetaString(event.meta, ['utmCampaign', 'utm_campaign']) || 'Unattributed';
+    marketingSourceMap.set(source, (marketingSourceMap.get(source) || 0) + 1);
+    marketingCampaignMap.set(campaign, (marketingCampaignMap.get(campaign) || 0) + 1);
+    const key = event.createdAt.toISOString().slice(0, 10);
+    const bucket = marketingTrendMap.get(key) || { views: 0, signupClicks: 0, ctaClicks: 0, signups: 0 };
+    if (event.kind === 'marketing_page_view') bucket.views += 1;
+    if (event.kind === 'marketing_signup_click') bucket.signupClicks += 1;
+    if (event.kind === 'marketing_cta_click') bucket.ctaClicks += 1;
+    marketingTrendMap.set(key, bucket);
+  }
+
+  const accountTrendMap = new Map<string, number>();
+  for (const agent of newAgentRows) {
+    const key = agent.createdAt.toISOString().slice(0, 10);
+    accountTrendMap.set(key, (accountTrendMap.get(key) || 0) + 1);
+    const bucket = marketingTrendMap.get(key) || { views: 0, signupClicks: 0, ctaClicks: 0, signups: 0 };
+    bucket.signups += 1;
+    marketingTrendMap.set(key, bucket);
+  }
+
+  const verifiedNewAgents = newAgentRows.filter((agent) => agent.emailVerified).length;
+  const activeNewAgents = activeNewRows.filter((row) => row.agentId).length;
+
+  const heatmapRows = await prisma.$queryRaw<Array<{ dow: number; hour: number; count: bigint | number }>>(Prisma.sql`
+    SELECT
+      EXTRACT(DOW FROM ie."createdAt")::int AS dow,
+      EXTRACT(HOUR FROM ie."createdAt")::int AS hour,
+      COUNT(*)::bigint AS count
+    FROM "InternalEvent" ie
+    WHERE ie."createdAt" >= ${since}
+      AND ie."kind" = 'page_view'
+      ${agentId ? Prisma.sql`AND ie."agentId" = ${agentId}` : Prisma.empty}
+      ${agentId ? Prisma.empty : Prisma.sql`AND (ie."agentId" IS NULL OR EXISTS (SELECT 1 FROM "Agent" a WHERE a."id" = ie."agentId" AND a."status" <> 'REVOKED'))`}
+    GROUP BY 1, 2
+    ORDER BY 1 ASC, 2 ASC
+  `);
+
+  const heatmapMap = new Map<string, number>();
+  const hourlyTotals = Array.from({ length: 24 }, (_, hour) => ({ hour, count: 0 }));
+  const weekdayTotals = Array.from({ length: 7 }, (_, day) => ({ day, count: 0 }));
+
+  for (const row of heatmapRows) {
+    const day = Number(row.dow);
+    const hour = Number(row.hour);
+    const count = Number(row.count || 0);
+    const key = `${day}-${hour}`;
+    heatmapMap.set(key, count);
+    if (day >= 0 && day <= 6) {
+      weekdayTotals[day].count += count;
+    }
+    if (hour >= 0 && hour <= 23) {
+      hourlyTotals[hour].count += count;
+    }
+  }
+
+  const hourlyHeatmap = Array.from({ length: 7 }, (_, day) =>
+    Array.from({ length: 24 }, (_, hour) => ({
+      day,
+      hour,
+      count: heatmapMap.get(`${day}-${hour}`) || 0,
+    })),
+  ).flat();
+
+  const topWindows = [...hourlyHeatmap]
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 5);
+
   const trendMap = new Map<string, number>();
   for (const row of trendEvents) {
     const key = row.createdAt.toISOString().slice(0, 10);
@@ -2045,6 +2610,55 @@ router.get('/usage', async (req, res) => {
     trend.push({ date: key, count });
   }
 
+  const marketingTrend = trend.map((row) => ({
+    date: row.date,
+    views: marketingTrendMap.get(row.date)?.views || 0,
+    signupClicks: marketingTrendMap.get(row.date)?.signupClicks || 0,
+    ctaClicks: marketingTrendMap.get(row.date)?.ctaClicks || 0,
+    signups: accountTrendMap.get(row.date) || marketingTrendMap.get(row.date)?.signups || 0,
+  }));
+
+  const signupFunnel = {
+    newAccounts: newAgentRows.length,
+    verifiedAccounts: verifiedNewAgents,
+    activeNewAccounts: activeNewAgents,
+    marketingSiteViews: marketingWebsiteViews,
+    marketingSignupClicks,
+    marketingCtaClicks,
+    agentLandingPageViews,
+    agentLandingPageLeads,
+    rates: {
+      websiteViewToSignupClick: rate(marketingSignupClicks, marketingWebsiteViews),
+      signupClickToAccount: rate(newAgentRows.length, marketingSignupClicks),
+      websiteViewToAccount: rate(newAgentRows.length, marketingWebsiteViews),
+      emailVerification: rate(verifiedNewAgents, newAgentRows.length),
+      newAccountActivation: rate(activeNewAgents, newAgentRows.length),
+      agentLandingLeadConversion: rate(agentLandingPageLeads, agentLandingPageViews),
+    },
+    topMarketingSources: topBuckets(marketingSourceMap),
+    topMarketingCampaigns: topBuckets(marketingCampaignMap),
+    topAgentLandingSources: landingUtmSourceRows.map((row) => ({
+      label: row.utmSource || 'Direct / unknown',
+      count: row._count.utmSource,
+    })),
+    topAgentLandingCampaigns: landingUtmCampaignRows.map((row) => ({
+      label: row.utmCampaign || 'Unattributed',
+      count: row._count.utmCampaign,
+    })),
+    trend: marketingTrend,
+    coverageWarnings: [
+      marketingWebsiteViews === 0
+        ? 'No public marketing website page views are captured in this window. Confirm the landing site is deployed with first-party telemetry and that CORS includes agenteasepro.com.'
+        : null,
+      marketingSignupClicks > 0 && newAgentRows.length === 0
+        ? 'Signup CTAs are being clicked but no accounts were created in this window. Check the signup page, verification friction, and ad landing path.'
+        : null,
+      newAgentRows.length > 0 && marketingSignupClicks === 0
+        ? 'Accounts were created without recorded marketing signup clicks. They may be direct/referral signups or attribution may be missing from the entry link.'
+        : null,
+    ].filter(Boolean),
+  };
+
   res.json({
     hours,
     events: eventsCount,
@@ -2059,6 +2673,15 @@ router.get('/usage', async (req, res) => {
     topPages,
     featureUsage,
     trend,
+    hourlyHeatmap,
+    hourlyTotals,
+    weekdayTotals,
+    topWindows,
+    funnelTransitions,
+    dropOffFeatures,
+    cohortRetention,
+    segments,
+    signupFunnel,
     sampled: pageViewsCount > trendEvents.length,
   });
 });

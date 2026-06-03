@@ -65,6 +65,85 @@ interface ContractAIPanelProps {
   onAutoFill?: (field: string, value: any) => void;
 }
 
+const FIELD_OPTION_SETS: Record<string, Array<{ label: string; value: string | boolean }>> = {
+  earnestMoneyForm: [
+    { label: 'Wire Transfer', value: 'wire' },
+    { label: "Cashier's Check", value: 'check' },
+    { label: 'Personal Check', value: 'personal_check' },
+    { label: 'Other', value: 'other' },
+  ],
+  possessionTiming: [
+    { label: 'On Recording', value: 'ON_RECORDING' },
+    { label: 'Hours After Recording', value: 'HOURS_AFTER_RECORDING' },
+    { label: 'Days After Recording', value: 'DAYS_AFTER_RECORDING' },
+  ],
+  capitalImprovementsPayer: [
+    { label: 'Seller', value: 'SELLER' },
+    { label: 'Buyer', value: 'BUYER' },
+    { label: 'Split', value: 'SPLIT' },
+    { label: 'Other', value: 'OTHER' },
+  ],
+  changeOfOwnershipFeePayer: [
+    { label: 'Seller', value: 'SELLER' },
+    { label: 'Buyer', value: 'BUYER' },
+    { label: 'Split', value: 'SPLIT' },
+    { label: 'Other', value: 'OTHER' },
+  ],
+  homeWarrantyOrderedBy: [
+    { label: 'Buyer', value: 'BUYER' },
+    { label: 'Seller', value: 'SELLER' },
+    { label: 'Unknown', value: 'UNKNOWN' },
+  ],
+  hasDueDiligenceCondition: [
+    { label: 'Included', value: true },
+    { label: 'Not Included', value: false },
+  ],
+  hasAppraisalCondition: [
+    { label: 'Included', value: true },
+    { label: 'Not Included', value: false },
+  ],
+  hasFinancingCondition: [
+    { label: 'Included', value: true },
+    { label: 'Not Included', value: false },
+  ],
+  hasHomeWarranty: [
+    { label: 'Included', value: true },
+    { label: 'Not Included', value: false },
+  ],
+};
+
+function hasFieldValue(value: unknown) {
+  if (value === null || value === undefined) return false;
+  if (typeof value === 'number') return Number.isFinite(value) && value > 0;
+  if (typeof value === 'boolean') return true;
+  if (typeof value === 'string') return value.trim().length > 0;
+  if (Array.isArray(value)) return value.length > 0;
+  return true;
+}
+
+function getInlineFieldKind(fieldKey: string): 'date' | 'number' | 'select' | 'textarea' | 'text' {
+  if (FIELD_OPTION_SETS[fieldKey]) return 'select';
+  if (/date|deadline/i.test(fieldKey)) return 'date';
+  if (/amount|price|cost|offset/i.test(fieldKey)) return 'number';
+  if (/description|items|names|other/i.test(fieldKey)) return 'textarea';
+  return 'text';
+}
+
+function buildInitialInlineValue(fieldKey: string, currentValue: unknown, suggestion?: string) {
+  if (hasFieldValue(currentValue)) return String(currentValue);
+  if (FIELD_OPTION_SETS[fieldKey]?.length) return String(FIELD_OPTION_SETS[fieldKey][0].value);
+  if (/date|deadline/i.test(fieldKey)) return '';
+  if (/amount|price|cost|offset/i.test(fieldKey)) return '';
+  return suggestion && suggestion.length <= 80 ? suggestion : '';
+}
+
+function parseInlineValue(fieldKey: string, value: string) {
+  const option = FIELD_OPTION_SETS[fieldKey]?.find((item) => String(item.value) === value);
+  if (option) return option.value;
+  if (/amount|price|cost|offset/i.test(fieldKey)) return Number(value.replace(/[^0-9.]/g, '')) || 0;
+  return value.trim();
+}
+
 export function ContractAIPanel({ formValues, dealId, onFieldFocus, onAutoFill }: ContractAIPanelProps) {
   const [loading, setLoading] = useState(false);
   const [review, setReview] = useState<ContractReviewResult | null>(null);
@@ -73,10 +152,12 @@ export function ContractAIPanel({ formValues, dealId, onFieldFocus, onAutoFill }
   const [creatingTasks, setCreatingTasks] = useState(false);
   const [selectedTasks, setSelectedTasks] = useState<Set<number>>(new Set());
   const [tasksCreated, setTasksCreated] = useState(false);
+  const [inlineFilledFields, setInlineFilledFields] = useState<Set<string>>(new Set());
 
   const runReview = async (includeAI = false) => {
     setLoading(true);
     setError(null);
+    setInlineFilledFields(new Set());
     try {
       const res = await api.post('/ai/contract/review', {
         formValues,
@@ -147,23 +228,23 @@ export function ContractAIPanel({ formValues, dealId, onFieldFocus, onAutoFill }
   // Initial collapsed view
   if (!review && !loading) {
     return (
-      <div className="relative overflow-hidden rounded-2xl border border-purple-400/30 bg-gradient-to-br from-purple-600/15 via-indigo-500/10 to-slate-950/60 backdrop-blur-xl p-5 shadow-[0_18px_40px_rgba(3,12,40,0.6)]">
+      <div className="relative overflow-hidden rounded-xl border border-purple-400/30 bg-gradient-to-br from-purple-600/15 via-indigo-500/10 to-slate-950/60 p-3 shadow-[0_14px_32px_rgba(3,12,40,0.45)] backdrop-blur-xl md:p-4">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(139,92,246,0.18),transparent_60%)]" />
         
-        <div className="relative">
+        <div className="relative flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
           {/* Header */}
-          <div className="flex items-center gap-3 mb-4">
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-purple-500 to-indigo-500 text-white shadow-lg shadow-purple-500/30">
-              <ShieldCheck className="h-6 w-6" />
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-purple-500 to-indigo-500 text-white shadow-lg shadow-purple-500/30">
+              <ShieldCheck className="h-5 w-5" />
             </div>
-            <div>
-              <h3 className="text-lg font-bold text-white">Contract AI Review</h3>
+            <div className="min-w-0">
+              <h3 className="truncate text-sm font-bold text-white md:text-base">Contract AI Review</h3>
               <p className="text-xs text-purple-200/80">Comprehensive analysis & smart suggestions</p>
             </div>
           </div>
 
           {/* Features List */}
-          <div className="grid grid-cols-2 gap-2 mb-5">
+          <div className="grid grid-cols-2 gap-1.5 sm:flex sm:flex-wrap xl:justify-center">
             {[
               { icon: ClipboardList, label: 'Field Analysis' },
               { icon: CalendarDays, label: 'Date Validation' },
@@ -172,7 +253,7 @@ export function ContractAIPanel({ formValues, dealId, onFieldFocus, onAutoFill }
             ].map((feature, i) => {
               const FeatureIcon = feature.icon;
               return (
-              <div key={i} className="flex items-center gap-2 text-xs text-purple-100/70 bg-white/5 rounded-lg px-3 py-2">
+              <div key={i} className="flex items-center gap-1.5 rounded-lg bg-white/5 px-2.5 py-1.5 text-[11px] text-purple-100/75">
                 <FeatureIcon className="h-3.5 w-3.5" />
                 <span>{feature.label}</span>
               </div>
@@ -181,11 +262,12 @@ export function ContractAIPanel({ formValues, dealId, onFieldFocus, onAutoFill }
           </div>
 
           {/* Action Buttons */}
-          <div className="space-y-2">
+          <div className="flex flex-col gap-2 sm:flex-row xl:shrink-0">
             <Button
               onClick={() => runReview(false)}
               variant="primary"
-              className="w-full rounded-xl text-sm font-semibold bg-gradient-to-r from-purple-500 to-indigo-500 hover:from-purple-600 hover:to-indigo-600 shadow-lg shadow-purple-500/25"
+              size="sm"
+              className="rounded-xl bg-gradient-to-r from-purple-500 to-indigo-500 text-sm font-semibold shadow-lg shadow-purple-500/25 hover:from-purple-600 hover:to-indigo-600"
             >
               <Zap className="mr-2 h-4 w-4" />
               Quick Review
@@ -193,16 +275,13 @@ export function ContractAIPanel({ formValues, dealId, onFieldFocus, onAutoFill }
             <Button
               onClick={() => runReview(true)}
               variant="ghost"
-              className="w-full rounded-xl text-xs text-purple-200/80 hover:text-white hover:bg-white/10"
+              size="sm"
+              className="rounded-xl text-xs text-purple-200/80 hover:bg-white/10 hover:text-white"
             >
               <Lightbulb className="mr-2 h-4 w-4" />
-              Deep Analysis with AI Insights
+              Deep AI
             </Button>
           </div>
-
-          <p className="text-[10px] text-purple-200/50 text-center mt-4">
-            Analyzes fields, dates, calculations, risks & suggests tasks
-          </p>
         </div>
       </div>
     );
@@ -239,6 +318,13 @@ export function ContractAIPanel({ formValues, dealId, onFieldFocus, onAutoFill }
 
   const statusConfig = getStatusConfig(review.status);
   const StatusIcon = statusConfig.icon;
+  const unresolvedMissingFields = review.missingRequired.filter((field) => (
+    !inlineFilledFields.has(field.field) && !hasFieldValue(formValues[field.field])
+  ));
+  const missingCriticalCount = unresolvedMissingFields.filter(m => m.severity === 'critical').length;
+  const markFieldFilled = (fieldKey: string) => {
+    setInlineFilledFields((prev) => new Set([...prev, fieldKey]));
+  };
 
   return (
     <div className="rounded-2xl border border-purple-400/30 bg-gradient-to-br from-purple-600/10 via-slate-900/40 to-slate-950/60 backdrop-blur-xl overflow-hidden">
@@ -257,7 +343,7 @@ export function ContractAIPanel({ formValues, dealId, onFieldFocus, onAutoFill }
                 </span>
               </div>
               <p className="text-xs text-slate-400 mt-0.5">
-                {review.completedFields.length} fields complete • {review.missingRequired.length} missing
+                {review.completedFields.length} fields complete • {unresolvedMissingFields.length} missing
               </p>
             </div>
           </div>
@@ -277,7 +363,7 @@ export function ContractAIPanel({ formValues, dealId, onFieldFocus, onAutoFill }
       <div className="flex border-b border-white/5 bg-slate-900/30">
         {[
           { id: 'overview', label: 'Overview', icon: BarChart3 },
-          { id: 'fields', label: 'Fields', icon: ClipboardList, badge: review.missingRequired.filter(m => m.severity === 'critical').length },
+          { id: 'fields', label: 'Fields', icon: ClipboardList, badge: missingCriticalCount },
           { id: 'dates', label: 'Dates', icon: CalendarDays, badge: review.dateAnalysis.issues.length },
           { id: 'tasks', label: 'Tasks', icon: CheckCircle2, badge: review.suggestedTasks.length },
           ...(review.aiInsights ? [{ id: 'ai', label: 'AI', icon: Bot }] : []),
@@ -318,8 +404,8 @@ export function ContractAIPanel({ formValues, dealId, onFieldFocus, onAutoFill }
             {/* Quick Stats */}
             <div className="grid grid-cols-3 gap-3">
               <div className="rounded-xl bg-slate-800/50 p-3 text-center">
-                <div className={`text-xl font-bold ${review.missingRequired.filter(m => m.severity === 'critical').length > 0 ? 'text-red-400' : 'text-emerald-400'}`}>
-                  {review.missingRequired.filter(m => m.severity === 'critical').length}
+                <div className={`text-xl font-bold ${missingCriticalCount > 0 ? 'text-red-400' : 'text-emerald-400'}`}>
+                  {missingCriticalCount}
                 </div>
                 <div className="text-[10px] text-slate-400 mt-1">Critical Missing</div>
               </div>
@@ -403,7 +489,7 @@ export function ContractAIPanel({ formValues, dealId, onFieldFocus, onAutoFill }
         {/* Fields Tab */}
         {activeTab === 'fields' && (
           <div className="space-y-3">
-            {review.missingRequired.length === 0 ? (
+            {unresolvedMissingFields.length === 0 ? (
               <div className="text-center py-8">
                 <CheckCircle2 className="mx-auto h-9 w-9 text-emerald-400" />
                 <p className="text-sm text-emerald-400 font-semibold mt-2">All Required Fields Complete</p>
@@ -411,38 +497,41 @@ export function ContractAIPanel({ formValues, dealId, onFieldFocus, onAutoFill }
               </div>
             ) : (
               <>
+                <div className="rounded-xl border border-purple-500/20 bg-purple-500/10 px-3 py-2 text-[11px] text-purple-100">
+                  Fill missing items right here, or jump to the full contract field below.
+                </div>
                 {/* Critical */}
-                {review.missingRequired.filter(m => m.severity === 'critical').length > 0 && (
+                {unresolvedMissingFields.filter(m => m.severity === 'critical').length > 0 && (
                   <div>
                     <h4 className="text-[11px] font-bold text-red-400 uppercase tracking-wide mb-2 flex items-center gap-1">
                       <AlertTriangle className="h-3.5 w-3.5" /> Critical (Required)
                     </h4>
-                    {review.missingRequired.filter(m => m.severity === 'critical').map((field, i) => (
-                      <FieldItem key={i} field={field} onFocus={onFieldFocus} onAutoFill={onAutoFill} />
+                    {unresolvedMissingFields.filter(m => m.severity === 'critical').map((field) => (
+                      <FieldItem key={field.field} field={field} currentValue={formValues[field.field]} onFocus={onFieldFocus} onAutoFill={onAutoFill} onFilled={markFieldFilled} />
                     ))}
                   </div>
                 )}
 
                 {/* Important */}
-                {review.missingRequired.filter(m => m.severity === 'important').length > 0 && (
+                {unresolvedMissingFields.filter(m => m.severity === 'important').length > 0 && (
                   <div>
                     <h4 className="text-[11px] font-bold text-amber-400 uppercase tracking-wide mb-2 flex items-center gap-1">
                       <AlertTriangle className="h-3.5 w-3.5" /> Important
                     </h4>
-                    {review.missingRequired.filter(m => m.severity === 'important').map((field, i) => (
-                      <FieldItem key={i} field={field} onFocus={onFieldFocus} onAutoFill={onAutoFill} />
+                    {unresolvedMissingFields.filter(m => m.severity === 'important').map((field) => (
+                      <FieldItem key={field.field} field={field} currentValue={formValues[field.field]} onFocus={onFieldFocus} onAutoFill={onAutoFill} onFilled={markFieldFilled} />
                     ))}
                   </div>
                 )}
 
                 {/* Recommended */}
-                {review.missingRequired.filter(m => m.severity === 'recommended').length > 0 && (
+                {unresolvedMissingFields.filter(m => m.severity === 'recommended').length > 0 && (
                   <div>
                     <h4 className="flex items-center gap-1 text-[11px] font-bold text-slate-400 uppercase tracking-wide mb-2">
                       <FileText className="h-3.5 w-3.5" /> Recommended
                     </h4>
-                    {review.missingRequired.filter(m => m.severity === 'recommended').map((field, i) => (
-                      <FieldItem key={i} field={field} onFocus={onFieldFocus} onAutoFill={onAutoFill} />
+                    {unresolvedMissingFields.filter(m => m.severity === 'recommended').map((field) => (
+                      <FieldItem key={field.field} field={field} currentValue={formValues[field.field]} onFocus={onFieldFocus} onAutoFill={onAutoFill} onFilled={markFieldFilled} />
                     ))}
                   </div>
                 )}
@@ -694,23 +783,55 @@ export function ContractAIPanel({ formValues, dealId, onFieldFocus, onAutoFill }
 // Field Item Component
 function FieldItem({ 
   field, 
+  currentValue,
   onFocus, 
-  onAutoFill 
+  onAutoFill,
+  onFilled,
 }: { 
   field: ContractReviewResult['missingRequired'][0];
+  currentValue?: unknown;
   onFocus?: (field: string) => void;
   onAutoFill?: (field: string, value: any) => void;
+  onFilled?: (field: string) => void;
 }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(() => buildInitialInlineValue(field.field, currentValue, field.suggestion));
+  const kind = getInlineFieldKind(field.field);
+  const options = FIELD_OPTION_SETS[field.field];
+  const canFillInline = Boolean(onAutoFill);
+  const canApply = kind === 'select' || value.trim().length > 0;
+
+  useEffect(() => {
+    if (!editing) {
+      setValue(buildInitialInlineValue(field.field, currentValue, field.suggestion));
+    }
+  }, [currentValue, editing, field.field, field.suggestion]);
+
+  const applyInlineValue = () => {
+    if (!onAutoFill || !canApply) return;
+    onAutoFill(field.field, parseInlineValue(field.field, value));
+    onFilled?.(field.field);
+    setEditing(false);
+  };
+
   return (
     <div className="rounded-lg bg-slate-800/30 p-3 mb-2 hover:bg-slate-800/50 transition-colors">
-      <div className="flex items-start justify-between gap-2">
+      <div className="flex items-start justify-between gap-3">
         <div className="flex-1">
           <p className="text-xs font-semibold text-white">{field.label}</p>
           {field.suggestion && (
             <p className="text-[11px] text-slate-400 mt-0.5">{field.suggestion}</p>
           )}
         </div>
-        <div className="flex gap-1">
+        <div className="flex shrink-0 gap-1">
+          {canFillInline && (
+            <button
+              onClick={() => setEditing((current) => !current)}
+              className="text-[10px] text-emerald-200 px-2 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-400/20"
+            >
+              {editing ? 'Close' : 'Fill here'}
+            </button>
+          )}
           {onFocus && (
             <button
               onClick={() => onFocus(field.field)}
@@ -721,6 +842,59 @@ function FieldItem({
           )}
         </div>
       </div>
+
+      {editing && (
+        <div className="mt-3 rounded-xl border border-white/10 bg-slate-950/40 p-3">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
+            {kind === 'select' && options ? (
+              <select
+                value={value}
+                onChange={(event) => setValue(event.target.value)}
+                className="min-h-[38px] flex-1 rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-xs text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+              >
+                {options.map((option) => (
+                  <option key={String(option.value)} value={String(option.value)}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            ) : kind === 'textarea' ? (
+              <textarea
+                value={value}
+                onChange={(event) => setValue(event.target.value)}
+                rows={2}
+                placeholder={`Enter ${field.label.toLowerCase()}`}
+                className="min-h-[72px] flex-1 rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+              />
+            ) : (
+              <input
+                type={kind === 'date' ? 'date' : 'text'}
+                inputMode={kind === 'number' ? 'decimal' : undefined}
+                value={value}
+                onChange={(event) => setValue(event.target.value)}
+                placeholder={`Enter ${field.label.toLowerCase()}`}
+                className="min-h-[38px] flex-1 rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+              />
+            )}
+
+            <Button size="xs" variant="success" onClick={applyInlineValue} disabled={!canApply} className="self-stretch rounded-lg">
+              Apply
+            </Button>
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-slate-500">
+            <span>Updates the contract draft immediately.</span>
+            {onFocus && (
+              <button
+                type="button"
+                onClick={() => onFocus(field.field)}
+                className="text-purple-300 hover:text-purple-200"
+              >
+                Open full field
+              </button>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

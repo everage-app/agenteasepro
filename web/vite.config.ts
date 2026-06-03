@@ -13,6 +13,7 @@ export default defineConfig({
           if (id.includes('framer-motion')) return 'motion';
           if (id.includes('pdfjs-dist')) return 'pdfjs';
           if (id.includes('pdf-lib')) return 'pdf';
+          if (id.includes('html2canvas') || id.includes('jspdf')) return 'landing-pdf';
           if (id.includes('jszip')) return 'zip';
           return 'vendor';
         },

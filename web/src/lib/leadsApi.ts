@@ -72,7 +72,7 @@ export const leadsApi = {
 
   createLead: (data: {
     firstName: string;
-    lastName: string;
+    lastName?: string;
     email: string;
     phone?: string;
     mailingAddress?: string;
@@ -84,6 +84,8 @@ export const leadsApi = {
     source?: string;
     priority?: string;
     notes?: string;
+    nextTask?: string;
+    tags?: string[];
     visitorId?: string;
     utmData?: Record<string, any>;
   }) => api.post<Lead>('/leads', data),

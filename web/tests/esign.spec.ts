@@ -497,7 +497,14 @@ async function openInitialsAdoptModal(page: Page) {
       .getByRole('button', { name: /initials for every required tab|buyer initials|seller initials/i })
       .first();
     if (await initialsStepButton.isVisible({ timeout: 5000 }).catch(() => false)) {
-      await initialsStepButton.click();
+      try {
+        await initialsStepButton.click({ timeout: 4000 });
+      } catch (error) {
+        if (await isAdoptModalVisible(page)) {
+          return;
+        }
+        throw error;
+      }
       return;
     }
 
@@ -668,10 +675,6 @@ test.describe('E-sign signer experience', () => {
       await expect(smartFillButton).toBeVisible();
     }
 
-    await expect(
-      page.getByRole('button', { name: /Complete Signature|Complete Signature Now|Finish Packet/i }).first(),
-    ).toBeEnabled();
-
     await openSignatureAdoptModal(page);
     await expect(page.getByRole('heading', { name: /Adopt signature & initials|Adopt initials/i }).first()).toBeVisible({
       timeout: 10000,
@@ -682,6 +685,9 @@ test.describe('E-sign signer experience', () => {
     await applySignatureButton.click();
 
     await expect(page.getByRole('dialog').first()).toBeHidden({ timeout: 10000 });
+    await expect(
+      page.getByRole('button', { name: /Complete Signature|Complete Signature Now|Finish Packet/i }).first(),
+    ).toBeEnabled();
   });
 
   test('shows a client-safe completion receipt after public signing', async ({ page, request }, testInfo) => {
@@ -704,6 +710,22 @@ test.describe('E-sign signer experience', () => {
     }
 
     await acknowledgeSignerAgreementIfPresent(page);
+
+    await openInitialsAdoptModal(page);
+    const applyInitialsButton = page.getByRole('button', { name: /Apply Initials/i }).first();
+    if (await applyInitialsButton.isVisible({ timeout: 4000 }).catch(() => false)) {
+      await applyInitialsButton.click();
+    } else {
+      await closeAdoptModalIfVisible(page);
+    }
+
+    await openSignatureAdoptModal(page);
+    const applySignatureButton = page.getByRole('button', { name: /Apply Signature|Adopt and Sign/i }).first();
+    if (await applySignatureButton.isVisible({ timeout: 4000 }).catch(() => false)) {
+      await applySignatureButton.click();
+    }
+
+    await expect(page.getByRole('dialog').first()).toBeHidden({ timeout: 10000 });
 
     const completeSignatureButton = page
       .getByRole('button', { name: /Complete Signature|Complete Signature Now|Finish Packet/i })

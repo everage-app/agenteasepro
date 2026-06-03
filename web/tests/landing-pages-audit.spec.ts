@@ -5,6 +5,7 @@ type LandingPageSummary = {
   id: string;
   slug: string;
   title: string;
+  isActive?: boolean;
   templateId?: string;
   listing?: {
     addressLine1?: string;
@@ -71,7 +72,10 @@ test.describe('Landing page production audit', () => {
       }
 
       const pages = (await listResponse.json()) as LandingPageSummary[];
-      let target = pages.find((entry) => entry.listing?.addressLine1) || pages[0] || null;
+      let target =
+        pages.find((entry) => entry.isActive && entry.listing?.addressLine1)
+        || pages.find((entry) => entry.isActive)
+        || null;
       let createdTemporary = false;
 
       if (!target) {
@@ -109,6 +113,22 @@ test.describe('Landing page production audit', () => {
         }
 
         const created = (await createResponse.json()) as LandingPageSummary;
+
+        const publishResponse = await fetch(`${origin}/api/landing-pages/${created.id}`, {
+          method: 'PATCH',
+          headers,
+          body: JSON.stringify({ isActive: true }),
+        });
+        if (!publishResponse.ok) {
+          if (publishResponse.status === 429) {
+            return { hasPages: false, reason: 'Landing page publish is rate limited (429)' };
+          }
+          return {
+            hasPages: false,
+            reason: `Temporary landing page could not be published (${publishResponse.status})`,
+          };
+        }
+
         target = created;
         createdTemporary = true;
       }

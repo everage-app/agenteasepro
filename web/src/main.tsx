@@ -27,7 +27,8 @@ const showCrash = (message: unknown) => {
   crashEl.style.display = 'block';
 };
 
-const CHUNK_RELOAD_KEY = 'aep_chunk_reload_once';
+const CHUNK_RELOAD_KEY = 'aep_chunk_reload_attempts';
+const MAX_CHUNK_RELOAD_ATTEMPTS = 2;
 
 const isChunkLoadError = (value: unknown): boolean => {
   const text = String(value || '').toLowerCase();
@@ -37,17 +38,21 @@ const isChunkLoadError = (value: unknown): boolean => {
 };
 
 const reloadForChunkErrorOnce = (): boolean => {
+  let attempts = 0;
   try {
-    const alreadyReloaded = window.sessionStorage.getItem(CHUNK_RELOAD_KEY) === '1';
-    if (alreadyReloaded) {
+    attempts = Number(window.sessionStorage.getItem(CHUNK_RELOAD_KEY) || '0');
+    if (attempts >= MAX_CHUNK_RELOAD_ATTEMPTS) {
       window.sessionStorage.removeItem(CHUNK_RELOAD_KEY);
       return false;
     }
-    window.sessionStorage.setItem(CHUNK_RELOAD_KEY, '1');
+    window.sessionStorage.setItem(CHUNK_RELOAD_KEY, String(attempts + 1));
   } catch {
     // Continue even when storage is unavailable.
   }
-  window.location.reload();
+
+  const nextUrl = new URL(window.location.href);
+  nextUrl.searchParams.set('_aep_refresh', String(Date.now()));
+  window.location.replace(nextUrl.toString());
   return true;
 };
 
@@ -61,6 +66,9 @@ const isNonFatalRejection = (reason: any): boolean => {
   if (reason?.response && typeof reason.response.status === 'number') return true;
   if (name === 'aborterror' || message.includes('aborted')) return true;
   if (message.includes('network error')) return true;
+  if (message.includes('failed to fetch')) return true;
+  if (message.includes('load failed')) return true;
+  if (message.includes('networkerror when attempting to fetch resource')) return true;
 
   return false;
 };

@@ -260,10 +260,61 @@ function mlsRecordToResult(record: MlsListingRecord): PropertyResult {
   };
 }
 
+function safeIsoDate(value: unknown) {
+  if (!value) return undefined;
+  const date = new Date(String(value));
+  return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+}
+
+function normalizePropertyResult(value: any): PropertyResult | null {
+  if (!value || typeof value !== 'object') return null;
+  const address = value.address && typeof value.address === 'object' ? value.address : {};
+  const street = String(address.street || address.addressLine1 || value.addressLine1 || '').trim();
+  const city = String(address.city || value.city || '').trim();
+  const state = String(address.state || value.state || 'UT').trim();
+  const zip = String(address.zip || address.zipCode || value.zip || value.zipCode || '').trim();
+  const mlsId = value.mlsId || value.mlsNumber ? String(value.mlsId || value.mlsNumber).trim() : undefined;
+  const fullAddress = String(address.fullAddress || [street, city, state, zip].filter(isUsefulText).join(', ') || '').trim();
+  const fallbackAddress = fullAddress || (mlsId ? `MLS #${mlsId}` : 'Property record');
+  const photos = Array.isArray(value.photos) ? value.photos.filter(isUsefulText) : [];
+
+  return {
+    source: String(value.source || 'unknown'),
+    mlsId,
+    zpid: value.zpid ? String(value.zpid) : undefined,
+    propertyId: value.propertyId ? String(value.propertyId) : undefined,
+    taxId: value.taxId ? String(value.taxId) : undefined,
+    internalId: value.internalId ? String(value.internalId) : undefined,
+    address: {
+      street: street || fallbackAddress,
+      city,
+      state,
+      zip,
+      fullAddress: fallbackAddress,
+      latitude: Number(address.latitude) || undefined,
+      longitude: Number(address.longitude) || undefined,
+    },
+    price: parseNumber(value.price),
+    beds: parseNumber(value.beds) || undefined,
+    baths: parseNumber(value.baths) || undefined,
+    sqft: parseNumber(value.sqft) || undefined,
+    lotSize: parseNumber(value.lotSize) || undefined,
+    yearBuilt: parseNumber(value.yearBuilt) || undefined,
+    propertyType: value.propertyType ? String(value.propertyType) : undefined,
+    status: value.status ? String(value.status) : undefined,
+    daysOnMarket: parseNumber(value.daysOnMarket) || undefined,
+    description: value.description ? String(value.description) : undefined,
+    photos,
+    url: String(value.url || ''),
+    fetchedAt: safeIsoDate(value.fetchedAt) || new Date().toISOString(),
+    listingAgent: value.listingAgent && typeof value.listingAgent === 'object' ? value.listingAgent : undefined,
+  };
+}
+
 function draftFromResult(result: PropertyResult): WorkspaceDraft {
   const street = result.address?.street || result.address?.fullAddress || '';
   const headline = street || result.mlsId ? `${street || 'Property'}${result.mlsId ? ` | MLS #${result.mlsId}` : ''}` : 'Imported property';
-  const fetchedAt = result.fetchedAt ? new Date(result.fetchedAt).toISOString() : undefined;
+  const fetchedAt = safeIsoDate(result.fetchedAt);
 
   return {
     source: result.source || 'unknown',
@@ -435,6 +486,7 @@ export default function PropertyWorkspace() {
   const [showIntel, setShowIntel] = useState(true);
   const [savingAction, setSavingAction] = useState<'listing' | 'marketing' | null>(null);
   const [copied, setCopied] = useState(false);
+  const [lastLaunch, setLastLaunch] = useState<{ title: string; detail: string } | null>(null);
   const parsedQuery = useMemo(() => parseSearchText(query), [query]);
   const score = useMemo(() => evaluateDraft(draft), [draft]);
   const listingQuery = useMemo(() => queryFromDraft(draft), [draft]);
@@ -446,7 +498,10 @@ export default function PropertyWorkspace() {
     setHistoryLoading(true);
     try {
       const res = await api.get('/search/history?limit=8');
-      setRecent(Array.isArray(res.data?.results) ? res.data.results : []);
+      const normalized = Array.isArray(res.data?.results)
+        ? res.data.results.map(normalizePropertyResult).filter(Boolean) as PropertyResult[]
+        : [];
+      setRecent(normalized);
     } catch {
       setRecent([]);
     } finally {
@@ -462,6 +517,7 @@ export default function PropertyWorkspace() {
     setSelectedIndex(index);
     setDraft(draftFromResult(result));
     setShowIntel(true);
+    setLastLaunch(null);
   }, []);
 
   const runSearch = useCallback(async (rawQuery?: string) => {
@@ -475,6 +531,7 @@ export default function PropertyWorkspace() {
     setLoading(true);
     setError(null);
     setCopied(false);
+    setLastLaunch(null);
 
     try {
       const imported: PropertyResult[] = [];
@@ -488,7 +545,9 @@ export default function PropertyWorkspace() {
       }
 
       const searchRes = await api.post('/search/properties', buildSearchPayload(parsed.kind, parsed.value || searchText));
-      const searched = Array.isArray(searchRes.data?.results) ? searchRes.data.results : [];
+      const searched = Array.isArray(searchRes.data?.results)
+        ? searchRes.data.results.map(normalizePropertyResult).filter(Boolean) as PropertyResult[]
+        : [];
       const nextResults = dedupeResults([...imported, ...searched]);
 
       setResults(nextResults);
@@ -547,6 +606,58 @@ export default function PropertyWorkspace() {
   }, [draft]);
 
   const canCreateListing = Boolean(normalizedDraft?.street && normalizedDraft?.city && normalizedDraft?.zip);
+  const launchAddress = fullAddress(draft);
+  const launchMissing = score.missing.slice(0, 3);
+
+  const buildListingPayload = (status: 'DRAFT' | 'ACTIVE') => {
+    if (!normalizedDraft) return null;
+    return {
+      addressLine1: normalizedDraft.street,
+      city: normalizedDraft.city,
+      state: normalizedDraft.state || 'UT',
+      zipCode: normalizedDraft.zip,
+      mlsId: normalizedDraft.mlsId || undefined,
+      headline: normalizedDraft.headline,
+      description: normalizedDraft.description,
+      price: normalizedDraft.priceNumber || 0,
+      beds: normalizedDraft.bedsNumber || undefined,
+      baths: normalizedDraft.bathsNumber || undefined,
+      sqft: normalizedDraft.sqftNumber || undefined,
+      status,
+      primaryImageUrl: normalizedDraft.photoUrl || undefined,
+      heroImageUrl: normalizedDraft.photoUrl || undefined,
+      isFeatured: false,
+    };
+  };
+
+  const findExistingListing = async () => {
+    if (!normalizedDraft) return null;
+    const search = normalizedDraft.mlsId || normalizedDraft.street;
+    if (!search) return null;
+
+    const res = await api.get('/listings', { params: { search } });
+    const listings = Array.isArray(res.data) ? res.data : [];
+    const normalizedAddress = [
+      normalizedDraft.street,
+      normalizedDraft.city,
+      normalizedDraft.state || 'UT',
+      normalizedDraft.zip,
+    ].join('|').toLowerCase();
+
+    return listings.find((listing: any) => {
+      const listingMls = String(listing.mlsId || '').trim();
+      if (normalizedDraft.mlsId && listingMls && listingMls === normalizedDraft.mlsId) return true;
+
+      const listingAddress = [
+        listing.addressLine1,
+        listing.city,
+        listing.state || 'UT',
+        listing.zipCode,
+      ].filter(Boolean).join('|').toLowerCase();
+
+      return listingAddress === normalizedAddress;
+    }) || null;
+  };
 
   const createDraftListing = async (mode: 'stay' | 'marketing') => {
     if (!normalizedDraft) return null;
@@ -557,26 +668,19 @@ export default function PropertyWorkspace() {
 
     setSavingAction(mode === 'marketing' ? 'marketing' : 'listing');
     try {
-      const res = await api.post('/listings', {
-        addressLine1: normalizedDraft.street,
-        city: normalizedDraft.city,
-        state: normalizedDraft.state || 'UT',
-        zipCode: normalizedDraft.zip,
-        mlsId: normalizedDraft.mlsId || undefined,
-        headline: normalizedDraft.headline,
-        description: normalizedDraft.description,
-        price: normalizedDraft.priceNumber || 0,
-        beds: normalizedDraft.bedsNumber || undefined,
-        baths: normalizedDraft.bathsNumber || undefined,
-        sqft: normalizedDraft.sqftNumber || undefined,
-        status: 'DRAFT',
-        primaryImageUrl: normalizedDraft.photoUrl || undefined,
-        heroImageUrl: normalizedDraft.photoUrl || undefined,
-        isFeatured: false,
-      });
+      const existing = await findExistingListing();
+      const payload = buildListingPayload(mode === 'marketing' ? 'ACTIVE' : existing?.status || 'DRAFT');
+      if (!payload) return null;
 
-      const listingId = res.data?.id;
-      toast.success('Draft listing created', normalizedDraft.street);
+      const res = existing
+        ? await api.patch(`/listings/${existing.id}`, payload)
+        : await api.post('/listings', payload);
+
+      const listingId = res.data?.id || existing?.id;
+      const title = existing ? 'Listing updated' : mode === 'marketing' ? 'Listing ready for marketing' : 'Draft listing created';
+      const detail = existing ? 'Matched the existing Listings Hub record.' : normalizedDraft.street;
+      setLastLaunch({ title, detail });
+      toast.success(title, detail);
       if (mode === 'marketing' && listingId) {
         navigate(`/marketing?newBlastForListing=${listingId}`);
       } else {
@@ -597,6 +701,8 @@ export default function PropertyWorkspace() {
     sessionStorage.setItem('agentease_property_workspace_draft', JSON.stringify(normalizedDraft));
 
     const params = new URLSearchParams();
+    params.set('stage', 'ACTIVE');
+    params.set('source', 'property-workspace');
     if (withRepc) params.set('template', 'REPC');
     if (normalizedDraft.mlsId) params.set('mls', normalizedDraft.mlsId);
     params.set('property', normalizedDraft.mlsId || fullAddress(draft) || normalizedDraft.street);
@@ -607,6 +713,21 @@ export default function PropertyWorkspace() {
     if (normalizedDraft.taxId) params.set('taxId', normalizedDraft.taxId);
     if (normalizedDraft.priceNumber) params.set('price', String(normalizedDraft.priceNumber));
     navigate(`/deals/new?${params.toString()}`);
+  };
+
+  const openPdfPacket = () => {
+    if (!normalizedDraft) return;
+    const packetName = `${normalizedDraft.street || normalizedDraft.headline || 'Property'} packet`;
+    sessionStorage.setItem('agentease_property_workspace_pdf_context', JSON.stringify({
+      ...normalizedDraft,
+      address: launchAddress,
+      packetName,
+    }));
+
+    const params = new URLSearchParams({ mode: 'document-esign' });
+    if (normalizedDraft.street) params.set('property', normalizedDraft.street);
+    if (normalizedDraft.mlsId) params.set('mls', normalizedDraft.mlsId);
+    navigate(`/contracts/pdf-editor?${params.toString()}`);
   };
 
   const copySummary = async () => {
@@ -636,7 +757,7 @@ export default function PropertyWorkspace() {
     <PageLayout
       title="Property Workspace"
       subtitle="Import, verify, and launch deal-ready property records."
-      maxWidth="full"
+      maxWidth="workspace"
       actions={
         <Button type="button" variant="secondary" size="sm" onClick={loadHistory} loading={historyLoading}>
           <RefreshCw className="h-4 w-4" />
@@ -644,7 +765,7 @@ export default function PropertyWorkspace() {
         </Button>
       }
     >
-      <div className="mx-auto max-w-[1500px] space-y-5">
+      <div className="w-full space-y-5">
         <Card tone="elevated" accent="amber" className="overflow-hidden" noPadding>
           <div className="grid gap-0 xl:grid-cols-[minmax(0,1fr)_360px]">
             <div className="px-5 py-5 sm:px-6 sm:py-6">
@@ -827,10 +948,32 @@ export default function PropertyWorkspace() {
           <aside className="space-y-5 xl:sticky xl:top-5 xl:self-start">
             <Card tone="glass" accent="amber" title="Launch actions" description="Move the verified record into the next workflow.">
               <div className="space-y-3">
+                <div className="rounded-2xl border border-slate-300/80 bg-white/90 p-3 shadow-[0_14px_34px_-28px_rgba(15,23,42,0.55)] dark:border-[#f2d894]/15 dark:bg-white/10">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">Launch readiness</span>
+                    <QualityBadge score={score.score} label={`${score.score}%`} tone={score.tone} />
+                  </div>
+                  <div className="mt-2 truncate text-sm font-bold text-slate-950 dark:text-white">
+                    {launchAddress || normalizedDraft?.headline || 'Import a property first'}
+                  </div>
+                  <div className="mt-1 text-xs font-medium text-slate-600 dark:text-slate-300">
+                    {draft
+                      ? launchMissing.length
+                        ? `Review next: ${launchMissing.join(', ')}`
+                        : 'Ready for listings, deal prep, marketing, and e-sign packets.'
+                      : 'Actions unlock after a property is imported or selected.'}
+                  </div>
+                </div>
+                {lastLaunch && (
+                  <div className="rounded-2xl border border-emerald-300/70 bg-emerald-50 px-3 py-2.5 text-xs font-semibold text-emerald-800 dark:border-emerald-300/25 dark:bg-emerald-500/10 dark:text-emerald-100">
+                    <div>{lastLaunch.title}</div>
+                    <div className="mt-0.5 font-medium opacity-80">{lastLaunch.detail}</div>
+                  </div>
+                )}
                 <ActionButton
                   icon={<Building2 className="h-4 w-4" />}
-                  title="Create draft listing"
-                  detail="Save to Listings Hub"
+                  title="Save listing draft"
+                  detail="Create or update in Listings Hub"
                   disabled={!draft || savingAction !== null}
                   loading={savingAction === 'listing'}
                   onClick={() => createDraftListing('stay')}
@@ -838,30 +981,37 @@ export default function PropertyWorkspace() {
                 <ActionButton
                   icon={<ClipboardCheck className="h-4 w-4" />}
                   title="Start deal"
-                  detail="Prefill deal wizard"
-                  disabled={!draft}
+                  detail="Prefill address, MLS, price, and parcel"
+                  disabled={!draft || savingAction !== null}
                   onClick={() => startDeal(false)}
                 />
                 <ActionButton
                   icon={<FileSignature className="h-4 w-4" />}
                   title="Start deal + REPC"
                   detail="Carry property into contract prep"
-                  disabled={!draft}
+                  disabled={!draft || savingAction !== null}
                   onClick={() => startDeal(true)}
                 />
                 <ActionButton
                   icon={<Megaphone className="h-4 w-4" />}
                   title="Create listing + launch marketing"
-                  detail="Open blast composer"
+                  detail="Save as active and open blast composer"
                   disabled={!draft || savingAction !== null}
                   loading={savingAction === 'marketing'}
                   onClick={() => createDraftListing('marketing')}
                 />
                 <ActionButton
+                  icon={<FileText className="h-4 w-4" />}
+                  title="Prep PDF/e-sign packet"
+                  detail="Open document builder with this property"
+                  disabled={!draft || savingAction !== null}
+                  onClick={openPdfPacket}
+                />
+                <ActionButton
                   icon={<Copy className="h-4 w-4" />}
                   title={copied ? 'Summary copied' : 'Copy property summary'}
-                  detail="Use in notes or messages"
-                  disabled={!draft}
+                  detail="Address, price, MLS, parcel, and source"
+                  disabled={!draft || savingAction !== null}
                   onClick={copySummary}
                 />
               </div>

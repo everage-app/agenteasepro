@@ -186,14 +186,14 @@ export function ComboBox({ label, value, onChange, options, placeholder, classNa
 
   return (
     <div ref={containerRef} className={`relative ${className || ''}`}>
-      <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1.5">
+      <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-200">
         {label}
       </label>
       <div className="relative">
         <input
           ref={inputRef}
           type="text"
-          className="w-full rounded-xl bg-white border border-slate-200 px-4 py-2.5 pr-10 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500/40 transition-all placeholder:text-slate-400 dark:bg-white/5 dark:border-white/10 dark:text-white dark:placeholder:text-slate-600"
+          className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 pr-10 text-sm text-slate-950 transition-all placeholder:text-gray-500 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 dark:border-slate-600/80 dark:bg-slate-900 dark:text-white dark:placeholder:text-gray-400 dark:focus:border-blue-300 dark:focus:ring-blue-300/25"
           value={search}
           onChange={(e) => {
             setSearch(e.target.value);
@@ -206,7 +206,7 @@ export function ComboBox({ label, value, onChange, options, placeholder, classNa
         <button
           type="button"
           onClick={() => setIsOpen(!isOpen)}
-          className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-slate-500 hover:text-slate-900 transition dark:text-slate-400 dark:hover:text-white"
+          className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-slate-600 transition hover:text-slate-950 dark:text-slate-300 dark:hover:text-white"
         >
           <svg className={`w-4 h-4 transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -215,7 +215,7 @@ export function ComboBox({ label, value, onChange, options, placeholder, classNa
       </div>
       
       {isOpen && filteredOptions.length > 0 && (
-        <div className="absolute z-50 w-full mt-1 bg-white border border-slate-200 rounded-xl shadow-xl max-h-48 overflow-y-auto dark:bg-slate-900 dark:border-white/10">
+        <div className="absolute z-50 mt-1 max-h-48 w-full overflow-y-auto rounded-xl border border-slate-300 bg-white shadow-xl dark:border-slate-600/80 dark:bg-slate-900">
           {filteredOptions.map((opt, i) => (
             <button
               key={i}
@@ -223,8 +223,8 @@ export function ComboBox({ label, value, onChange, options, placeholder, classNa
               onClick={() => handleSelect(opt)}
               className={`w-full text-left px-4 py-2.5 text-sm transition-colors ${
                 opt === value
-                  ? 'bg-blue-500/20 text-blue-600 dark:text-blue-400'
-                  : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-white/5 dark:hover:text-white'
+                  ? 'bg-blue-500/20 text-blue-700 dark:text-blue-300'
+                  : 'text-slate-800 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-100 dark:hover:bg-slate-800 dark:hover:text-white'
               }`}
             >
               {opt}
@@ -370,13 +370,13 @@ export function AddressAutocomplete({ value, onChange, onAddressSelect, placehol
 
   return (
     <div ref={containerRef} className={`relative ${className || ''}`}>
-      <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1.5">
+      <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-200">
         Street Address
       </label>
       <div className="relative">
         <input
           type="text"
-          className="w-full rounded-xl bg-white border border-slate-200 px-4 py-2.5 pr-10 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500/40 transition-all placeholder:text-slate-400 dark:bg-white/5 dark:border-white/10 dark:text-white dark:placeholder:text-slate-600"
+          className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 pr-10 text-sm text-slate-950 transition-all placeholder:text-gray-500 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 dark:border-slate-600/80 dark:bg-slate-900 dark:text-white dark:placeholder:text-gray-400 dark:focus:border-blue-300 dark:focus:ring-blue-300/25"
           value={value}
           onChange={handleInputChange}
           onFocus={() => value.length >= 3 && setIsOpen(true)}
@@ -389,7 +389,7 @@ export function AddressAutocomplete({ value, onChange, onAddressSelect, placehol
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
             </svg>
           ) : (
-            <svg className="w-4 h-4 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <svg className="h-4 w-4 text-slate-600 dark:text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
             </svg>
@@ -398,16 +398,16 @@ export function AddressAutocomplete({ value, onChange, onAddressSelect, placehol
       </div>
 
       {isOpen && suggestions.length > 0 && (
-        <div className="absolute z-50 w-full mt-1 bg-white border border-slate-200 rounded-xl shadow-xl overflow-hidden dark:bg-slate-900 dark:border-white/10">
-          <div className="px-3 py-2 border-b border-slate-200 dark:border-white/10">
-            <span className="text-xs text-slate-500">Suggestions</span>
+        <div className="absolute z-50 mt-1 w-full overflow-hidden rounded-xl border border-slate-300 bg-white shadow-xl dark:border-slate-600/80 dark:bg-slate-900">
+          <div className="border-b border-slate-200 px-3 py-2 dark:border-slate-700">
+            <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">Suggestions</span>
           </div>
           {suggestions.map((suggestion, i) => (
             <button
               key={i}
               type="button"
               onClick={() => handleSelect(suggestion)}
-              className="w-full text-left px-4 py-3 hover:bg-slate-50 transition-colors border-b border-slate-200 last:border-0 dark:hover:bg-white/5 dark:border-white/5"
+              className="w-full border-b border-slate-200 px-4 py-3 text-left transition-colors last:border-0 hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
             >
               <div className="flex items-start gap-3">
                 <svg className="w-4 h-4 text-blue-500 dark:text-blue-400 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -416,7 +416,7 @@ export function AddressAutocomplete({ value, onChange, onAddressSelect, placehol
                 </svg>
                 <div>
                   <div className="text-sm text-slate-900 dark:text-white font-medium">{suggestion.street}</div>
-                  <div className="text-xs text-slate-600 dark:text-slate-400">
+                  <div className="text-xs text-slate-700 dark:text-slate-300">
                     {suggestion.city}{suggestion.county ? `, ${suggestion.county} County` : ''}, UT {suggestion.zip}
                   </div>
                 </div>

@@ -46,6 +46,8 @@ export interface ListingSummary {
   description?: string | null;
   price?: number | string | null;
   primaryImageUrl?: string | null;
+  heroImageUrl?: string | null;
+  photos?: string[] | null;
   status: string;
 }
 

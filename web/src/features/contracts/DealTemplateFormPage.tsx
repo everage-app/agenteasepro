@@ -121,8 +121,8 @@ export function DealTemplateFormPage() {
       subtitle="Complete your template details for this deal"
       actions={
         <div className="flex items-center gap-2">
-          <Button variant="secondary" onClick={() => navigate(`/deals/${dealId}/repc`)}>
-            Back to REPC
+          <Button variant="secondary" onClick={() => navigate(`/contracts/${dealId}`)}>
+            Back to Contracts
           </Button>
           {definition?.code && (
             <Button

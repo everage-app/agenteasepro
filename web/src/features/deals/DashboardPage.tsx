@@ -23,6 +23,7 @@ import {
   Settings2,
   Target,
   Users,
+  Zap,
   X,
   type LucideIcon,
 } from 'lucide-react';
@@ -91,7 +92,25 @@ type DashboardBlast = {
   createdAt?: string | null;
 };
 
+type DashboardPriorityAction = {
+  id: string;
+  type: 'CONTRACT_DEADLINE' | 'SIGNATURE_NEEDED' | 'CLIENT_FOLLOWUP' | 'REFERRAL_TOUCH' | 'MARKETING_BLAST' | 'DAILY_GOAL';
+  title: string;
+  description?: string;
+  clientName?: string;
+  dealOrListing?: string;
+  dueDate?: string;
+  priority: 'HIGH' | 'NORMAL';
+  status?: string;
+  relatedId?: string;
+  relatedType?: 'task' | 'deal' | 'client' | 'listing' | 'blast';
+  actionLabel?: string;
+  canComplete?: boolean;
+  completionValue?: unknown;
+};
+
 type DashboardWidgetId =
+  | 'todayCommand'
   | 'quickActions'
   | 'scorecard'
   | 'activeDeals'
@@ -139,8 +158,9 @@ const STATUS_LABELS: Record<string, string> = {
   SETTLEMENT_SCHEDULED: 'Settlement',
 };
 
-const DASHBOARD_LAYOUT_VERSION = 2;
+const DASHBOARD_LAYOUT_VERSION = 3;
 const DASHBOARD_WIDGET_IDS: DashboardWidgetId[] = [
+  'todayCommand',
   'quickActions',
   'scorecard',
   'activeDeals',
@@ -153,6 +173,7 @@ const DASHBOARD_WIDGET_IDS: DashboardWidgetId[] = [
 ];
 
 const DEFAULT_DASHBOARD_LAYOUT: DashboardLayoutItem[] = [
+  { id: 'todayCommand', visible: true, size: 'full' },
   { id: 'quickActions', visible: true, size: 'full' },
   { id: 'scorecard', visible: true, size: 'full' },
   { id: 'activeDeals', visible: true, size: 'wide' },
@@ -165,6 +186,7 @@ const DEFAULT_DASHBOARD_LAYOUT: DashboardLayoutItem[] = [
 ];
 
 const WIDGET_META: Record<DashboardWidgetId, DashboardWidgetMeta> = {
+  todayCommand: { id: 'todayCommand', title: 'Today command', shortTitle: 'Today', icon: Zap },
   quickActions: { id: 'quickActions', title: 'Quick actions', shortTitle: 'Actions', icon: LayoutDashboard },
   scorecard: { id: 'scorecard', title: 'Business scorecard', shortTitle: 'Scorecard', icon: BarChart3 },
   activeDeals: { id: 'activeDeals', title: 'Active deals', shortTitle: 'Deals', icon: BriefcaseBusiness },
@@ -216,6 +238,19 @@ function formatShortDate(value?: string | null) {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return 'No date';
   return parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function formatAgeFromNow(value?: string | null) {
+  if (!value) return 'No activity';
+  const parsed = new Date(value).getTime();
+  if (!Number.isFinite(parsed)) return 'No activity';
+  const minutes = Math.max(0, Math.floor((Date.now() - parsed) / 60000));
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
 }
 
 function getStatusLabel(status: string) {
@@ -348,6 +383,46 @@ function getNextWidgetSize(size: DashboardWidgetSize) {
 
 function getLeadName(lead: Lead) {
   return joinDisplayParts(lead.firstName, lead.lastName) || cleanDisplayText(lead.email) || 'New lead';
+}
+
+function getLeadResponseState(lead: Lead): { label: string; detail: string; tone: 'slate' | 'gold' | 'rose' | 'green'; score: number; contacted: boolean } {
+  const createdAt = lead.createdAt || lead.updatedAt || lead.lastVisit;
+  const createdTime = createdAt ? new Date(createdAt).getTime() : Number.NaN;
+  const lastContactTime = lead.lastContact ? new Date(lead.lastContact).getTime() : Number.NaN;
+  const contacted = Number.isFinite(lastContactTime) && (!Number.isFinite(createdTime) || lastContactTime >= createdTime);
+
+  if (contacted) {
+    return {
+      label: 'Touched',
+      detail: `Last touch ${formatAgeFromNow(lead.lastContact)}`,
+      tone: 'green',
+      score: 90,
+      contacted: true,
+    };
+  }
+
+  const minutes = Number.isFinite(createdTime) ? Math.max(0, Math.floor((Date.now() - createdTime) / 60000)) : 9999;
+  const priorityBoost = lead.priority === 'HOT' ? 0 : lead.priority === 'WARM' ? 10 : 20;
+
+  if (minutes <= 15) {
+    return { label: 'Fresh', detail: `${formatAgeFromNow(createdAt)} - answer now`, tone: 'green', score: priorityBoost, contacted: false };
+  }
+  if (minutes <= 60) {
+    return { label: 'Fast lane', detail: `${formatAgeFromNow(createdAt)} - still hot`, tone: 'gold', score: priorityBoost + 5, contacted: false };
+  }
+  if (minutes <= 240) {
+    return { label: 'Respond', detail: `${formatAgeFromNow(createdAt)} - needs follow-up`, tone: 'rose', score: priorityBoost + 2, contacted: false };
+  }
+  return { label: 'Late', detail: `${formatAgeFromNow(createdAt)} - rescue this lead`, tone: 'rose', score: priorityBoost + 1, contacted: false };
+}
+
+function getPriorityActionPath(action: DashboardPriorityAction) {
+  if (action.relatedType === 'deal') return action.relatedId ? `/deals/${action.relatedId}` : '/deals';
+  if (action.relatedType === 'client') return action.relatedId ? `/clients/${action.relatedId}` : '/clients';
+  if (action.relatedType === 'listing') return '/listings';
+  if (action.relatedType === 'blast') return action.relatedId ? `/marketing/blasts/${action.relatedId}` : '/marketing';
+  if (action.relatedType === 'task') return '/tasks';
+  return '/dashboard';
 }
 
 function DashboardCard({
@@ -714,6 +789,7 @@ export function DashboardPage() {
   const [leadAnalytics, setLeadAnalytics] = useState<LeadAnalytics | null>(null);
   const [landingPages, setLandingPages] = useState<LandingPage[]>([]);
   const [marketingBlasts, setMarketingBlasts] = useState<DashboardBlast[]>([]);
+  const [priorityActions, setPriorityActions] = useState<DashboardPriorityAction[]>([]);
   const [layout, setLayout] = useState<DashboardLayoutItem[]>(DEFAULT_DASHBOARD_LAYOUT);
   const [customizing, setCustomizing] = useState(false);
   const [draggedWidgetId, setDraggedWidgetId] = useState<DashboardWidgetId | null>(null);
@@ -740,7 +816,7 @@ export function DashboardPage() {
     const loadDashboard = async () => {
       setLoading(true);
       try {
-        const [overviewData, dealsData, tasksData, clientsData, clientStatsData, leadsData, leadAnalyticsData, pagesData, blastsData] =
+        const [overviewData, dealsData, tasksData, clientsData, clientStatsData, leadsData, leadAnalyticsData, pagesData, blastsData, priorityActionsData] =
           await Promise.all([
             api.get('/reporting/overview', { params: { timeRange: 'month' } }).then((response) => response.data).catch(() => null),
             api.get('/deals').then((response) => response.data).catch(() => []),
@@ -751,6 +827,7 @@ export function DashboardPage() {
             api.get('/leads/analytics/summary', { params: { archived: 'false' } }).then((response) => response.data).catch(() => null),
             api.get('/landing-pages').then((response) => response.data).catch(() => []),
             api.get('/marketing/blasts').then((response) => response.data).catch(() => []),
+            api.get('/priority-actions/today').then((response) => response.data).catch(() => ({ actions: [] })),
           ]);
 
         if (!mounted) return;
@@ -815,6 +892,7 @@ export function DashboardPage() {
         setLeadAnalytics((leadAnalyticsData || null) as LeadAnalytics | null);
         setLandingPages(Array.isArray(pagesData) ? (pagesData as LandingPage[]) : []);
         setMarketingBlasts(Array.isArray(blastsData) ? (blastsData as DashboardBlast[]) : []);
+        setPriorityActions(Array.isArray(priorityActionsData?.actions) ? (priorityActionsData.actions as DashboardPriorityAction[]) : []);
       } catch (error) {
         console.error('Failed to load dashboard stats:', error);
       } finally {
@@ -856,6 +934,18 @@ export function DashboardPage() {
       .slice(0, 4);
   }, [leads]);
 
+  const leadSpeedLeads = useMemo(() => {
+    return [...leads]
+      .filter((lead) => !lead.converted)
+      .map((lead) => ({ lead, speed: getLeadResponseState(lead) }))
+      .sort((left, right) => {
+        if (left.speed.contacted !== right.speed.contacted) return left.speed.contacted ? 1 : -1;
+        if (left.speed.score !== right.speed.score) return left.speed.score - right.speed.score;
+        return new Date(right.lead.createdAt || right.lead.updatedAt || 0).getTime() - new Date(left.lead.createdAt || left.lead.updatedAt || 0).getTime();
+      })
+      .slice(0, 4);
+  }, [leads]);
+
   const focusClients = useMemo(() => {
     return [...clients]
       .sort((left, right) => {
@@ -879,6 +969,38 @@ export function DashboardPage() {
     const leftDate = new Date(left.sentAt || left.scheduledAt || left.updatedAt || left.createdAt || 0).getTime();
     return rightDate - leftDate;
   })[0];
+  const urgentPriorityCount = priorityActions.filter((action) => action.priority === 'HIGH').length;
+  const leadSpeedAlertCount = leadSpeedLeads.filter(({ speed }) => !speed.contacted).length;
+  const todayCommandItems = useMemo(() => {
+    const priorityItems = priorityActions.slice(0, 4).map((action) => ({
+      id: action.id,
+      label: action.priority === 'HIGH' ? 'Must do' : formatEnumLabel(action.type),
+      title: action.title,
+      detail: [action.clientName, action.dealOrListing, action.dueDate ? formatShortDate(action.dueDate) : action.description].filter(Boolean).join(' - '),
+      tone: action.priority === 'HIGH' ? 'rose' as const : 'blue' as const,
+      sort: action.priority === 'HIGH' ? 0 : 10,
+      actionLabel: action.actionLabel || 'Open',
+      path: getPriorityActionPath(action),
+      completeAction: action,
+    }));
+
+    const leadItems = leadSpeedLeads
+      .filter(({ speed }) => !speed.contacted)
+      .slice(0, 3)
+      .map(({ lead, speed }) => ({
+        id: `lead-speed-${lead.id}`,
+        label: 'Lead speed',
+        title: getLeadName(lead),
+        detail: `${speed.detail} - ${formatEnumLabel(lead.source)}`,
+        tone: speed.tone,
+        sort: speed.score,
+        actionLabel: 'Open lead',
+        path: `/leads/${lead.id}`,
+        completeAction: null,
+      }));
+
+    return [...priorityItems, ...leadItems].sort((left, right) => left.sort - right.sort).slice(0, 5);
+  }, [leadSpeedLeads, priorityActions]);
 
   const quickActions = [
     { label: 'New Deal', path: '/deals/new', icon: BriefcaseBusiness },
@@ -892,6 +1014,7 @@ export function DashboardPage() {
   ];
 
   const scorecards = [
+    { label: 'Must-do', value: priorityActions.length + leadSpeedAlertCount, detail: `${urgentPriorityCount} urgent`, icon: Zap },
     { label: 'Tasks today', value: todayTasks.length, detail: `${todayTasks.filter((task) => task.priority === 'HIGH').length} high`, icon: CheckCircle2 },
     { label: 'Hot leads', value: hotLeads, detail: `${warmLeads} warm`, icon: Target },
     { label: 'Under contract', value: underContractCount, detail: `${activeDealCount} active`, icon: BriefcaseBusiness },
@@ -911,6 +1034,29 @@ export function DashboardPage() {
     } catch (error) {
       console.error('Failed to mark dashboard task done:', error);
       setTodayTasks(previousTasks);
+    }
+  };
+
+  const completePriorityAction = async (action: DashboardPriorityAction) => {
+    if (!action.canComplete) {
+      navigate(getPriorityActionPath(action));
+      return;
+    }
+
+    const previousActions = priorityActions;
+    setPriorityActions((current) => current.filter((item) => item.id !== action.id));
+
+    try {
+      await api.post(`/priority-actions/${action.id}/complete`, {
+        actionType: action.type,
+        completionValue: action.completionValue,
+      });
+      if (action.relatedType === 'task') {
+        setTodayTasks((current) => current.filter((task) => `task-${task.id}` !== action.id));
+      }
+    } catch (error) {
+      console.error('Failed to complete priority action:', error);
+      setPriorityActions(previousActions);
     }
   };
 
@@ -991,6 +1137,101 @@ export function DashboardPage() {
     </button>
   );
 
+  const renderTodayCommand = () => (
+    <DashboardCard title="Today command" icon={Zap} action={linkButton('Open tasks', '/tasks')}>
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(260px,0.65fr)]">
+        <div className="space-y-3">
+          <div className="flex flex-col gap-3 rounded-xl border border-slate-300 bg-white px-4 py-3 shadow-[0_8px_22px_-18px_rgba(15,23,42,0.4)] dark:border-white/10 dark:bg-white/5 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <div className="text-[11px] font-bold uppercase text-slate-500 dark:text-slate-400">Win today</div>
+              <div className="mt-1 text-lg font-bold text-slate-950 dark:text-white">
+                {todayCommandItems.length > 0 ? `${todayCommandItems.length} high-value move${todayCommandItems.length === 1 ? '' : 's'}` : 'You are clear for the moment'}
+              </div>
+              <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">
+                Lead speed, client follow-up, deadlines, marketing, and daily goals in one simple queue.
+              </p>
+            </div>
+            <div className="flex shrink-0 flex-wrap gap-2">
+              <StatusPill tone={urgentPriorityCount > 0 ? 'rose' : 'green'}>{urgentPriorityCount} urgent</StatusPill>
+              <StatusPill tone={leadSpeedAlertCount > 0 ? 'gold' : 'slate'}>{leadSpeedAlertCount} lead speed</StatusPill>
+            </div>
+          </div>
+
+          {todayCommandItems.length === 0 ? (
+            <EmptyWidgetState label="No urgent work is waiting. Capture a lead, send a packet, or launch a listing page." />
+          ) : (
+            <div className="space-y-2">
+              {todayCommandItems.map((item) => (
+                <div key={item.id} className="flex flex-col gap-2 rounded-xl border border-slate-300 bg-white px-3 py-3 dark:border-white/10 dark:bg-white/5 sm:flex-row sm:items-center sm:justify-between">
+                  <button
+                    type="button"
+                    onClick={() => navigate(item.path)}
+                    className="min-w-0 flex-1 text-left"
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <StatusPill tone={item.tone}>{item.label}</StatusPill>
+                      <span className="truncate text-sm font-semibold text-slate-900 dark:text-white">{item.title}</span>
+                    </div>
+                    <div className="mt-1 truncate text-xs text-slate-500 dark:text-slate-400">{item.detail || 'Open this item'}</div>
+                  </button>
+                  <div className="flex shrink-0 gap-2">
+                    {item.completeAction?.canComplete && (
+                      <button
+                        type="button"
+                        onClick={() => void completePriorityAction(item.completeAction)}
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-400/20 dark:bg-emerald-500/10 dark:text-emerald-300"
+                        title="Mark done"
+                        aria-label={`Mark ${item.title} done`}
+                      >
+                        <Check className="h-4 w-4" aria-hidden="true" />
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => navigate(item.path)}
+                      className="inline-flex h-9 items-center justify-center rounded-lg border border-slate-300 px-3 text-xs font-semibold text-slate-700 hover:border-[#d6b56d] hover:text-slate-950 dark:border-white/10 dark:text-slate-300 dark:hover:bg-white/10"
+                    >
+                      {item.actionLabel}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-2">
+          {[
+            { label: 'Capture lead', detail: 'Listing page or open house form', path: '/landing-pages', icon: PanelTop },
+            { label: 'Send e-sign', detail: 'Upload PDF, place fields, send', path: '/contracts/pdf-editor?mode=document-esign', icon: FileText },
+            { label: 'Launch marketing', detail: 'Blast, page, and follow-up tasks', path: '/marketing', icon: Megaphone },
+          ].map((shortcut) => {
+            const Icon = shortcut.icon;
+            return (
+              <button
+                key={shortcut.path}
+                type="button"
+                onClick={() => navigate(shortcut.path)}
+                className="group flex w-full items-center justify-between gap-3 rounded-xl border border-slate-300 bg-slate-50 px-3 py-3 text-left hover:border-[#d6b56d] hover:bg-[#fff8e8] dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
+              >
+                <span className="flex min-w-0 items-center gap-3">
+                  <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white text-slate-700 group-hover:text-[#7a5a24] dark:bg-white/10 dark:text-slate-300">
+                    <Icon className="h-4 w-4" aria-hidden="true" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-semibold text-slate-900 dark:text-white">{shortcut.label}</span>
+                    <span className="block truncate text-xs text-slate-500 dark:text-slate-400">{shortcut.detail}</span>
+                  </span>
+                </span>
+                <ChevronRight className="h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </DashboardCard>
+  );
+
   const renderQuickActions = () => (
     <DashboardCard title="Quick actions" icon={LayoutDashboard}>
       <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
@@ -1016,7 +1257,7 @@ export function DashboardPage() {
 
   const renderScorecard = () => (
     <DashboardCard title="Business scorecard" icon={BarChart3}>
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-6">
         {scorecards.map((card) => {
           const Icon = card.icon;
           return (
@@ -1147,20 +1388,26 @@ export function DashboardPage() {
           <EmptyWidgetState label="No active leads yet." />
         ) : (
           <div className="space-y-2">
-            {recentLeads.map((lead) => (
-              <button
-                key={lead.id}
-                type="button"
-                onClick={() => navigate(`/leads/${lead.id}`)}
-                className="flex w-full items-center justify-between gap-3 rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-left hover:border-[#d6b56d] hover:bg-[#fff8e8] dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
-              >
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-semibold text-slate-900 dark:text-white">{getLeadName(lead)}</div>
-                  <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{formatEnumLabel(lead.source)}</div>
-                </div>
-                <StatusPill tone={lead.priority === 'HOT' ? 'rose' : lead.priority === 'WARM' ? 'gold' : 'slate'}>{lead.priority}</StatusPill>
-              </button>
-            ))}
+            {recentLeads.map((lead) => {
+              const speed = getLeadResponseState(lead);
+              return (
+                <button
+                  key={lead.id}
+                  type="button"
+                  onClick={() => navigate(`/leads/${lead.id}`)}
+                  className="flex w-full items-center justify-between gap-3 rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-left hover:border-[#d6b56d] hover:bg-[#fff8e8] dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
+                >
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold text-slate-900 dark:text-white">{getLeadName(lead)}</div>
+                    <div className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">{formatEnumLabel(lead.source)} - {speed.detail}</div>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <StatusPill tone={lead.priority === 'HOT' ? 'rose' : lead.priority === 'WARM' ? 'gold' : 'slate'}>{lead.priority}</StatusPill>
+                    <div className="mt-1"><StatusPill tone={speed.tone}>{speed.label}</StatusPill></div>
+                  </div>
+                </button>
+              );
+            })}
           </div>
         )}
       </div>
@@ -1245,6 +1492,8 @@ export function DashboardPage() {
 
   const renderWidget = (id: DashboardWidgetId) => {
     switch (id) {
+      case 'todayCommand':
+        return renderTodayCommand();
       case 'quickActions':
         return renderQuickActions();
       case 'scorecard':
@@ -1271,7 +1520,7 @@ export function DashboardPage() {
   return (
     <PageLayout
       title={`${greeting}, ${firstName}`}
-      subtitle="Your saved command center for deals, leads, clients, tasks, marketing, and daily momentum."
+      subtitle="Your saved command center for what to do next across deals, leads, clients, tasks, marketing, and daily momentum."
       maxWidth="full"
       actions={(
         <div className="flex items-center gap-2">

@@ -56,6 +56,40 @@ function isEmailAddress(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
+function escapeHtml(value: unknown): string {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function plainTextToHtml(value: unknown): string {
+  return escapeHtml(value).replace(/\n/g, '<br>');
+}
+
+function safeHttpUrl(value: unknown): string | undefined {
+  const raw = String(value || '').trim();
+  if (!raw) return undefined;
+  try {
+    const baseUrl = process.env.APP_BASE_URL || process.env.PUBLIC_APP_URL || process.env.WEB_BASE_URL;
+    const parsed = raw.startsWith('/') && baseUrl ? new URL(raw, baseUrl) : new URL(raw);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return undefined;
+    return parsed.toString().slice(0, 1000);
+  } catch {
+    return undefined;
+  }
+}
+
+function compactStringRecord(input: Record<string, string | undefined | null>) {
+  return Object.fromEntries(
+    Object.entries(input)
+      .map(([key, value]) => [key, String(value || '').trim()] as const)
+      .filter(([, value]) => Boolean(value)),
+  );
+}
+
 function getDefaultSenderEmail(): string {
   return normalizeEmail(process.env.SENDGRID_FROM_EMAIL || process.env.SENDER_EMAIL || '');
 }
@@ -264,6 +298,8 @@ export async function sendSigningRequestEmail(params: {
     brokerageName?: string;
     emailSignature?: string;
   };
+  categories?: string[];
+  customArgs?: Record<string, string>;
 }): Promise<SendResult> {
   const normalizeHex = (value: string | undefined, fallback: string) => {
     if (!value) return fallback;
@@ -273,73 +309,95 @@ export async function sendSigningRequestEmail(params: {
 
   const primaryColor = normalizeHex(params.branding?.primaryColor, '#3091f6');
   const secondaryColor = normalizeHex(params.branding?.secondaryColor, '#ba1cbe');
-  const logoUrl = params.branding?.logoUrl;
-  const brokerageName = params.branding?.brokerageName;
-  const emailSignature = params.branding?.emailSignature;
+  const logoUrl = safeHttpUrl(params.branding?.logoUrl);
+  const signingLink = safeHttpUrl(params.signingLink) || params.signingLink;
+  const escapedSigningLink = escapeHtml(signingLink);
+  const brokerageNameRaw = String(params.branding?.brokerageName || '').trim();
+  const brokerageName = escapeHtml(brokerageNameRaw);
+  const emailSignature = String(params.branding?.emailSignature || '').trim();
+  const signerNameHtml = escapeHtml(params.signerName || 'there');
+  const messageHtml = plainTextToHtml(params.message);
+  const propertyLabelHtml = escapeHtml(params.property || 'Document packet');
+  const agentName = String(params.agentName || '').trim();
+  const agentNameHtml = escapeHtml(agentName);
+  const brokerageNameHtml = brokerageName;
+  const signatureHtml = emailSignature ? plainTextToHtml(emailSignature) : '';
+  const fromName = agentName
+    ? `${agentName}${brokerageNameRaw ? ` | ${brokerageNameRaw}` : ' | AgentEase Pro'}`
+    : brokerageNameRaw || 'AgentEase Pro';
+  const sendgridCategories = Array.from(new Set(['esign', 'signature_request', ...(params.categories || [])])).slice(0, 10);
+  const customArgs = compactStringRecord({
+    feature: 'esign',
+    ...(params.customArgs || {}),
+  });
 
   const html = `
     <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
       <div style="background: linear-gradient(135deg, ${primaryColor} 0%, ${secondaryColor} 100%); padding: 24px; border-radius: 12px 12px 0 0; text-align: center;">
-        ${logoUrl ? `<img src="${logoUrl}" alt="Agent logo" style="max-height: 44px; max-width: 180px; margin-bottom: 12px; object-fit: contain;" />` : ''}
+        ${logoUrl ? `<img src="${escapeHtml(logoUrl)}" alt="Agent logo" style="max-height: 44px; max-width: 180px; margin-bottom: 12px; object-fit: contain;" />` : ''}
         <h1 style="color: white; margin: 0; font-size: 24px;">Document Ready for Signature</h1>
-        ${brokerageName ? `<p style="color: rgba(255,255,255,0.92); margin: 8px 0 0; font-size: 13px;">${brokerageName}</p>` : ''}
+        ${brokerageName ? `<p style="color: rgba(255,255,255,0.92); margin: 8px 0 0; font-size: 13px;">${brokerageNameHtml}</p>` : ''}
       </div>
       
       <div style="background: #ffffff; padding: 32px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 12px 12px;">
         <p style="color: #374151; font-size: 16px; line-height: 1.6; margin: 0 0 16px;">
-          Hi ${params.signerName},
+          Hi ${signerNameHtml},
         </p>
         
         <p style="color: #374151; font-size: 16px; line-height: 1.6; margin: 0 0 16px;">
-          ${params.message}
+          ${messageHtml}
         </p>
         
         <div style="background: #f9fafb; padding: 16px; border-radius: 8px; margin: 24px 0;">
-          <p style="color: #6b7280; font-size: 14px; margin: 0 0 4px;">Property:</p>
-          <p style="color: #0f0a2e; font-size: 16px; font-weight: 600; margin: 0;">${params.property}</p>
+          <p style="color: #6b7280; font-size: 14px; margin: 0 0 4px;">Document / property</p>
+          <p style="color: #0f0a2e; font-size: 16px; font-weight: 600; margin: 0;">${propertyLabelHtml}</p>
         </div>
 
-        ${params.agentName ? `
+        ${agentName ? `
           <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; margin: 20px 0; padding: 14px 16px;">
             <p style="margin: 0; color: #0f172a; font-size: 14px; font-weight: 600;">Your agent</p>
-            <p style="margin: 4px 0 0; color: #334155; font-size: 14px;">${params.agentName}${brokerageName ? ` • ${brokerageName}` : ''}</p>
+            <p style="margin: 4px 0 0; color: #334155; font-size: 14px;">${agentNameHtml}${brokerageName ? ` | ${brokerageName}` : ''}</p>
             ${params.agentEmail ? `<p style="margin: 4px 0 0; color: #64748b; font-size: 12px;">Reply directly to this email to contact your agent.</p>` : ''}
           </div>
         ` : ''}
         
         <div style="text-align: center; margin: 32px 0;">
-          <a href="${params.signingLink}" style="display: inline-block; background: linear-gradient(135deg, ${primaryColor} 0%, #0ea5e9 100%); color: white; padding: 14px 32px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 16px;">
+          <a href="${escapedSigningLink}" style="display: inline-block; background: linear-gradient(135deg, ${primaryColor} 0%, #0ea5e9 100%); color: white; padding: 14px 32px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 16px;">
             Review & Sign Document
           </a>
         </div>
-        
+
+        <p style="color: #64748b; font-size: 13px; line-height: 1.5; margin: 0;">
+          This secure signing link is intended for ${signerNameHtml}. No AgentEase Pro account is required.
+        </p>
+
         <p style="color: #9ca3af; font-size: 12px; line-height: 1.5; margin: 24px 0 0; border-top: 1px solid #e5e7eb; padding-top: 16px;">
           If the button doesn't work, copy and paste this link into your browser:<br>
-          <a href="${params.signingLink}" style="color: ${primaryColor}; word-break: break-all;">${params.signingLink}</a>
+          <a href="${escapedSigningLink}" style="color: ${primaryColor}; word-break: break-all;">${escapedSigningLink}</a>
         </p>
-        ${emailSignature ? `<p style="color: #475569; font-size: 12px; line-height: 1.5; margin-top: 14px; white-space: pre-line;">${emailSignature}</p>` : ''}
+        ${signatureHtml ? `<p style="color: #475569; font-size: 12px; line-height: 1.5; margin-top: 14px;">${signatureHtml}</p>` : ''}
       </div>
-      
+
       <p style="color: #9ca3af; font-size: 11px; text-align: center; margin-top: 16px;">
-        Sent via AgentEase Pro${params.agentName ? ` on behalf of ${params.agentName}` : ''}
+        Sent via AgentEase Pro${agentName ? ` on behalf of ${agentNameHtml}` : ''}
       </p>
     </div>
   `;
 
   const text = `
-Hi ${params.signerName},
+Hi ${params.signerName || 'there'},
 
 ${params.message}
 
 Property: ${params.property}
 
-${params.agentName ? `Agent: ${params.agentName}` : ''}${brokerageName ? `\nBrokerage: ${brokerageName}` : ''}
+${agentName ? `Agent: ${agentName}` : ''}${brokerageNameRaw ? `\nBrokerage: ${brokerageNameRaw}` : ''}
 
-Click here to review and sign: ${params.signingLink}
+Click here to review and sign: ${signingLink}
 
 If the link doesn't work, copy and paste it into your browser.
 
-Sent via AgentEase Pro${params.agentName ? ` on behalf of ${params.agentName}` : ''}
+Sent via AgentEase Pro${agentName ? ` on behalf of ${agentName}` : ''}
   `.trim();
 
   const trackingEmail = getESignTrackingEmail();
@@ -354,7 +412,10 @@ Sent via AgentEase Pro${params.agentName ? ` on behalf of ${params.agentName}` :
     html,
     text,
     replyTo: params.agentEmail,
-    fromName: params.agentName ? `${params.agentName} via AgentEase Pro` : 'AgentEase Pro',
+    fromEmail: params.agentEmail,
+    fromName,
+    categories: sendgridCategories,
+    customArgs,
   });
 }
 
@@ -506,22 +567,26 @@ export async function sendNotificationEmail(params: {
   message: string;
   actionUrl?: string;
   actionText?: string;
+  replyTo?: string;
 }): Promise<SendResult> {
+  const safeTitle = escapeHtml(params.title);
+  const messageHtml = plainTextToHtml(params.message);
+  const safeActionText = escapeHtml(params.actionText || 'Open');
   const html = `
     <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
       <div style="background: linear-gradient(135deg, #3091f6 0%, #ba1cbe 100%); padding: 24px; border-radius: 12px 12px 0 0; text-align: center;">
-        <h1 style="color: white; margin: 0; font-size: 24px;">${params.title}</h1>
+        <h1 style="color: white; margin: 0; font-size: 24px;">${safeTitle}</h1>
       </div>
       
       <div style="background: #ffffff; padding: 32px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 12px 12px;">
         <p style="color: #374151; font-size: 16px; line-height: 1.6; margin: 0 0 24px;">
-          ${params.message}
+          ${messageHtml}
         </p>
         
         ${params.actionUrl && params.actionText ? `
           <div style="text-align: center; margin: 32px 0;">
             <a href="${params.actionUrl}" style="display: inline-block; background: linear-gradient(135deg, #3091f6 0%, #0ea5e9 100%); color: white; padding: 14px 32px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 16px;">
-              ${params.actionText}
+              ${safeActionText}
             </a>
           </div>
         ` : ''}
@@ -537,6 +602,8 @@ export async function sendNotificationEmail(params: {
     to: params.to,
     subject: params.subject,
     html,
+    text: params.message,
+    replyTo: params.replyTo,
   });
 }
 

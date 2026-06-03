@@ -111,6 +111,45 @@ function firstNonEmptyString(...values: unknown[]): string | undefined {
   return undefined;
 }
 
+function listFromApiPayload(payload: unknown, keys: string[] = []): any[] {
+  if (Array.isArray(payload)) return payload;
+  if (!payload || typeof payload !== 'object') return [];
+
+  const record = payload as Record<string, unknown>;
+  for (const key of keys) {
+    if (Array.isArray(record[key])) return record[key] as any[];
+  }
+
+  if (Array.isArray(record.data)) return record.data as any[];
+  if (Array.isArray(record.results)) return record.results as any[];
+  return [];
+}
+
+function splitDisplayName(value?: string) {
+  const cleaned = value?.trim() || '';
+  if (!cleaned) return { firstName: '', lastName: '' };
+  const parts = cleaned.split(/\s+/);
+  return {
+    firstName: parts[0] || '',
+    lastName: parts.slice(1).join(' '),
+  };
+}
+
+function getContactName(record: Record<string, any>, fallbackLabel: string) {
+  const directFirst = firstNonEmptyString(record.firstName, record.first_name, record.givenName) || '';
+  const directLast = firstNonEmptyString(record.lastName, record.last_name, record.familyName) || '';
+  const displayName = firstNonEmptyString(record.name, record.fullName, record.full_name, record.displayName, record.label);
+
+  if (directFirst || directLast) {
+    const labelName = `${directFirst} ${directLast}`.trim() || displayName || fallbackLabel;
+    return { firstName: directFirst, lastName: directLast, labelName };
+  }
+
+  const parsed = splitDisplayName(displayName);
+  const labelName = displayName || `${parsed.firstName} ${parsed.lastName}`.trim() || fallbackLabel;
+  return { ...parsed, labelName };
+}
+
 function sanitizeZip(value?: string): string | undefined {
   if (!value) return undefined;
   const zipMatch = value.match(/\d{5}/);
@@ -419,6 +458,7 @@ export function DealCreateWizard() {
   const [contractSummary, setContractSummary] = useState<string | null>(null);
   const [crmContacts, setCrmContacts] = useState<CrmContactOption[]>([]);
   const [crmLoading, setCrmLoading] = useState(false);
+  const [crmLoadWarning, setCrmLoadWarning] = useState<string | null>(null);
   const [selectedBuyerPrimary, setSelectedBuyerPrimary] = useState('');
   const [selectedBuyerCo, setSelectedBuyerCo] = useState('');
   const [selectedSellerPrimary, setSelectedSellerPrimary] = useState('');
@@ -441,53 +481,87 @@ export function DealCreateWizard() {
     let cancelled = false;
     const loadCrmContacts = async () => {
       setCrmLoading(true);
+      setCrmLoadWarning(null);
       try {
-        const [clientsRes, leadsRes] = await Promise.all([
-          api.get('/clients'),
-          api.get('/leads', { params: { archived: 'false' } }),
+        const [clientsResult, leadsResult] = await Promise.allSettled([
+          api.get('/clients', { params: { limit: 200 } }),
+          api.get('/leads', { params: { archived: 'false', limit: 200 } }),
         ]);
 
         if (cancelled) return;
 
-        const clients = Array.isArray(clientsRes.data) ? clientsRes.data : [];
-        const leads = Array.isArray(leadsRes.data) ? leadsRes.data : [];
+        const clients = clientsResult.status === 'fulfilled'
+          ? listFromApiPayload(clientsResult.value.data, ['clients'])
+          : [];
+        const leads = leadsResult.status === 'fulfilled'
+          ? listFromApiPayload(leadsResult.value.data, ['leads'])
+          : [];
 
-        const clientOptions: CrmContactOption[] = clients.map((client: any) => {
-          const firstName = (client.name || '').split(' ')[0] || '';
-          const lastName = (client.name || '').split(' ').slice(1).join(' ') || '';
-          const labelName = client.name || `${firstName} ${lastName}`.trim() || 'Unnamed Client';
+        const failedSources: string[] = [];
+        if (clientsResult.status === 'rejected') {
+          failedSources.push('clients');
+          console.warn('Failed to load clients for deal wizard:', clientsResult.reason);
+        }
+        if (leadsResult.status === 'rejected') {
+          failedSources.push('leads');
+          console.warn('Failed to load leads for deal wizard:', leadsResult.reason);
+        }
+
+        const clientOptions: CrmContactOption[] = clients.flatMap((client: any) => {
+          const id = firstNonEmptyString(client.id, client.clientId);
+          if (!id) return [];
+
+          const { firstName, lastName, labelName } = getContactName(client, 'Unnamed Client');
+          const email = firstNonEmptyString(client.email, client.primaryEmail) || '';
+          const phone = firstNonEmptyString(client.phone, client.mobilePhone, client.mobile) || '';
+          const detail = email || phone;
           return {
-            value: `CLIENT:${client.id}`,
+            value: `CLIENT:${id}`,
             kind: 'CLIENT',
-            id: client.id,
+            id,
             firstName,
             lastName,
-            email: client.email || '',
-            label: `${labelName}${client.email ? ` • ${client.email}` : ''}`,
+            email,
+            label: `${labelName}${detail ? ` - ${detail}` : ''}`,
           };
         });
 
-        const leadOptions: CrmContactOption[] = leads.map((lead: any) => {
-          const firstName = lead.firstName || '';
-          const lastName = lead.lastName || '';
-          const labelName = `${firstName} ${lastName}`.trim() || 'Unnamed Lead';
+        const leadOptions: CrmContactOption[] = leads.flatMap((lead: any) => {
+          const id = firstNonEmptyString(lead.id, lead.leadId);
+          if (!id) return [];
+
+          const { firstName, lastName, labelName } = getContactName(lead, 'Unnamed Lead');
+          const email = firstNonEmptyString(lead.email, lead.primaryEmail) || '';
+          const phone = firstNonEmptyString(lead.phone, lead.mobilePhone, lead.mobile) || '';
+          const detail = email || phone;
           return {
-            value: `LEAD:${lead.id}`,
+            value: `LEAD:${id}`,
             kind: 'LEAD',
-            id: lead.id,
-            clientId: lead.client?.id,
+            id,
+            clientId: firstNonEmptyString(lead.clientId, lead.client?.id),
             firstName,
             lastName,
-            email: lead.email || '',
-            label: `${labelName}${lead.email ? ` • ${lead.email}` : ''}`,
+            email,
+            label: `${labelName}${detail ? ` - ${detail}` : ''}`,
           };
         });
 
-        setCrmContacts([...clientOptions, ...leadOptions]);
+        const sortedContacts = [...clientOptions, ...leadOptions].sort((a, b) => {
+          if (a.kind !== b.kind) return a.kind === 'CLIENT' ? -1 : 1;
+          return a.label.localeCompare(b.label);
+        });
+
+        setCrmContacts(sortedContacts);
+        setCrmLoadWarning(
+          failedSources.length
+            ? `Could not load ${failedSources.join(' and ')}. Showing available CRM contacts.`
+            : null,
+        );
       } catch (err) {
         console.error('Failed to load CRM contacts:', err);
         if (!cancelled) {
           setCrmContacts([]);
+          setCrmLoadWarning('Could not load clients or leads right now.');
         }
       } finally {
         if (!cancelled) {
@@ -688,8 +762,16 @@ export function DealCreateWizard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    const stage = String(searchParams.get('stage') || '').toUpperCase();
+    if (stage === 'LEAD' || stage === 'ACTIVE') {
+      setDealStage(stage);
+    }
+  }, [searchParams]);
+
   const doClose = () => {
     setIsVisible(false);
+
     const clientId = searchParams.get('clientId');
     setTimeout(() => {
       if (clientId) {
@@ -714,10 +796,16 @@ export function DealCreateWizard() {
   // Validation
   const clientFirstName = representation === 'BUYER' ? parties.buyerFirstName : parties.sellerFirstName;
   const clientLastName = representation === 'BUYER' ? parties.buyerLastName : parties.sellerLastName;
-  const isStep1Valid = representation && clientFirstName && clientLastName && parties.street && parties.city && parties.county && parties.zip;
+  const hasClientIdentity = Boolean(clientFirstName.trim() || clientLastName.trim());
+  const isStep1Valid = Boolean(representation && hasClientIdentity && parties.street && parties.city && parties.county && parties.zip);
   const isStep2Valid = parseCurrency(price.purchasePrice) > 0;
   const isStep3Valid = true; // All optional
   const canSubmit = isStep1Valid && isStep2Valid;
+  const crmContactPlaceholder = crmLoading
+    ? 'Loading clients and leads...'
+    : crmContacts.length > 0
+      ? 'Select client or lead'
+      : 'No clients or leads found';
 
   const getContactByValue = (value: string) => crmContacts.find((contact) => contact.value === value);
 
@@ -1060,7 +1148,7 @@ export function DealCreateWizard() {
       dealUnsaved.clearDraft();
       setTimeout(
         () =>
-          navigate(`/deals/${deal.id}/repc`, {
+          navigate(`/contracts/${deal.id}`, {
             state: {
               repcPrefill,
               templateStartCode: templateCode && templateCode !== 'REPC' ? templateCode : undefined,
@@ -1121,7 +1209,7 @@ export function DealCreateWizard() {
                   </div>
                   <div>
                     <h3 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">New Deal</h3>
-                    <p className="text-xs text-slate-700 dark:text-slate-300 mt-0.5">Quick setup → straight to REPC</p>
+                    <p className="text-xs text-slate-700 dark:text-slate-300 mt-0.5">Quick setup to Contracts</p>
                     {templateCode && (
                       <div className="mt-2 inline-flex items-center gap-2 rounded-full bg-blue-500/10 border border-blue-500/20 px-3 py-1 text-[10px] font-semibold text-blue-700 dark:text-blue-200">
                         Template selected: {templateCode}
@@ -1291,13 +1379,16 @@ export function DealCreateWizard() {
                         }}
                         className="w-full rounded-lg bg-white border border-slate-200 px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/40 transition-all dark:bg-slate-800/60 dark:border-white/15 dark:text-slate-100"
                       >
-                        <option value="">{crmLoading ? 'Loading CRM contacts…' : 'Select client or lead'}</option>
+                        <option value="">{crmContactPlaceholder}</option>
                         {crmContacts.map((contact) => (
                           <option key={contact.value} value={contact.value}>
-                            {contact.kind === 'CLIENT' ? 'Client' : 'Lead'} • {contact.label}
+                            {contact.kind === 'CLIENT' ? 'Client' : 'Lead'} - {contact.label}
                           </option>
                         ))}
                       </select>
+                      {crmLoadWarning && (
+                        <div className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">{crmLoadWarning}</div>
+                      )}
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Co-client / spouse (optional)</label>
@@ -1318,7 +1409,7 @@ export function DealCreateWizard() {
                         <option value="">None</option>
                         {crmContacts.map((contact) => (
                           <option key={`${contact.value}-co`} value={contact.value}>
-                            {contact.kind === 'CLIENT' ? 'Client' : 'Lead'} • {contact.label}
+                            {contact.kind === 'CLIENT' ? 'Client' : 'Lead'} - {contact.label}
                           </option>
                         ))}
                       </select>
@@ -1338,7 +1429,7 @@ export function DealCreateWizard() {
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-slate-700 dark:text-slate-200 mb-1">Last Name *</label>
+                      <label className="block text-xs font-medium text-slate-700 dark:text-slate-200 mb-1">Last Name</label>
                       <input
                         className="w-full rounded-lg bg-white border border-slate-300 px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/40 transition-all placeholder:text-slate-500 dark:bg-slate-900/70 dark:border-white/20 dark:text-slate-100 dark:placeholder:text-slate-400"
                         value={representation === 'BUYER' ? parties.buyerLastName : parties.sellerLastName}
@@ -1416,10 +1507,10 @@ export function DealCreateWizard() {
                       }}
                       className="w-full rounded-lg bg-white border border-slate-200 px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/40 transition-all dark:bg-slate-800/60 dark:border-white/15 dark:text-slate-100"
                     >
-                      <option value="">Select client or lead</option>
+                      <option value="">{crmContactPlaceholder}</option>
                       {crmContacts.map((contact) => (
                         <option key={`${contact.value}-other`} value={contact.value}>
-                          {contact.kind === 'CLIENT' ? 'Client' : 'Lead'} • {contact.label}
+                          {contact.kind === 'CLIENT' ? 'Client' : 'Lead'} - {contact.label}
                         </option>
                       ))}
                     </select>
@@ -1990,7 +2081,7 @@ export function DealCreateWizard() {
                   <div>
                     <div className="text-sm font-semibold text-slate-900 dark:text-white">What happens next?</div>
                     <div className="text-xs text-slate-600 dark:text-slate-400 mt-1">
-                      After creating this deal, you'll be taken directly to the REPC form builder with your dates pre-filled.
+                      After creating this deal, you'll be taken directly to this deal's Contracts workspace with your dates pre-filled.
                     </div>
                   </div>
                 </div>

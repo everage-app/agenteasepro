@@ -573,7 +573,7 @@ export function ProfileSettingsPage() {
           <div>
             <input
               type="file"
-              accept="image/*"
+              accept="image/jpeg,image/png,image/gif,image/svg+xml,image/webp"
               onChange={handleProfilePhotoUpload}
               className="hidden"
               id="profile-photo-upload"
@@ -596,7 +596,7 @@ export function ProfileSettingsPage() {
               )}
             </div>
             <p className="mt-1 text-xs text-slate-500">
-              PNG, JPG, or SVG up to 5MB. Best with a square crop.
+              JPG, PNG, GIF, SVG, or WebP up to 5MB. Best with a square crop.
             </p>
           </div>
         </div>

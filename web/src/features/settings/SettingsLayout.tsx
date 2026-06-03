@@ -165,7 +165,7 @@ export function SettingsLayout() {
 
         {/* Main content area */}
         <div className="flex-1 min-w-0">
-          <div className="ae-theme-card rounded-3xl border border-slate-200/80 bg-white/92 p-4 shadow-[0_20px_50px_-30px_rgba(15,23,42,0.42)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/70 dark:shadow-none lg:p-6">
+          <div className="ae-settings-content ae-theme-card rounded-3xl border border-slate-200/80 bg-white/92 p-4 shadow-[0_20px_50px_-30px_rgba(15,23,42,0.42)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/70 dark:shadow-none lg:p-6">
             <ErrorBoundary
               fallback={
                 <div className="flex flex-col items-center justify-center min-h-[300px] gap-4 text-center">

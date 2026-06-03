@@ -11,7 +11,6 @@ import { FirstLoginWelcomeModal } from '../onboarding/FirstLoginWelcomeModal';
 import { BetaNoticeFlag } from './BetaNoticeFlag';
 import { ToastProvider } from '../ui/ToastProvider';
 import { KeyboardShortcuts } from './KeyboardShortcuts';
-import { GlobalSearchModal } from '../search/GlobalSearchModal';
 import { SkeletonPage } from '../ui/Skeleton';
 import { NotificationCenter } from '../notifications/NotificationCenter';
 import { AnimatedAppBackground } from './AnimatedAppBackground';
@@ -318,7 +317,6 @@ export function AppShell({ children }: AppShellProps) {
       <SupportModal isOpen={supportOpen} onClose={() => setSupportOpen(false)} />
       <FirstLoginWelcomeModal />
       <KeyboardShortcuts />
-      <GlobalSearchModal />
       <NotificationCenter
         isOpen={notificationCenterOpen}
         onClose={() => setNotificationCenterOpen(false)}

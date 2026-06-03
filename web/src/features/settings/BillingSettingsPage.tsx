@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { CreditCard } from 'lucide-react';
+import { Check, CreditCard, Download, FileText, HelpCircle, LockKeyhole, Plus, Settings, Zap } from 'lucide-react';
 import api from '../../lib/api';
 
 interface Subscription {
@@ -214,16 +214,32 @@ export function BillingSettingsPage() {
     );
   }
 
-  return (
-    <div className="space-y-6">
-      {/* Your Plan */}
-      <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-white dark:bg-gradient-to-br dark:from-[#030b1a]/70 dark:via-[#041128]/60 dark:to-[#010712]/70 dark:backdrop-blur-xl p-6 shadow-sm dark:shadow-[0_25px_80px_rgba(1,8,20,0.65)]">
-        <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-50 mb-1">Your plan</h2>
-        <p className="text-xs text-slate-500 dark:text-slate-300 mb-6">
-          Manage your subscription and payment methods
-        </p>
+  const billingCardClass = 'ae-theme-card rounded-3xl border border-slate-200/80 bg-white p-5 shadow-[0_20px_50px_-32px_rgba(15,23,42,0.42)] dark:border-[#f2d894]/[0.14] dark:bg-[#060b14]/95 dark:shadow-[0_24px_80px_rgba(0,0,0,0.48)] sm:p-6';
+  const billingPanelClass = 'rounded-2xl border border-slate-200/80 bg-slate-50/90 p-4 dark:border-white/[0.08] dark:bg-[#0b1220]/90';
+  const primaryActionClass = 'inline-flex items-center justify-center gap-2 rounded-xl bg-[#1f9bd8] px-4 py-2.5 text-sm font-semibold text-white shadow-[0_14px_34px_rgba(31,155,216,0.22)] transition-colors hover:bg-[#1689c4] disabled:cursor-not-allowed disabled:opacity-50';
+  const goldActionClass = 'inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#f2d894] via-[#d6b56d] to-[#b48a3a] px-4 py-2.5 text-sm font-semibold text-[#171106] shadow-[0_16px_36px_rgba(214,181,109,0.22)] transition-transform hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60';
 
-        <div className="rounded-xl border border-slate-200 dark:border-white/10 bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-cyan-500/5 dark:to-blue-500/5 p-6">
+  return (
+    <div className="space-y-5">
+      {/* Your Plan */}
+      <div className={billingCardClass}>
+        <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-950 dark:text-white">Your plan</h2>
+            <p className="mt-1 text-xs font-medium text-slate-600 dark:text-slate-300">
+              Manage your subscription and payment methods
+            </p>
+          </div>
+          <div className="inline-flex w-fit items-center gap-2 rounded-full border border-[#d6b56d]/35 bg-[#fff7df] px-3 py-1.5 text-xs font-bold text-[#7a5a24] dark:bg-[#d6b56d]/10 dark:text-[#f2d894]">
+            <Zap className="h-3.5 w-3.5" strokeWidth={2.3} />
+            Full platform access
+          </div>
+        </div>
+
+        <div className="relative overflow-hidden rounded-2xl border border-[#d6b56d]/35 bg-gradient-to-br from-[#fff9e8] via-white to-[#eef7ff] p-5 dark:border-[#f2d894]/20 dark:from-[#111827] dark:via-[#0b1220] dark:to-[#07111d] sm:p-6">
+          <div className="pointer-events-none absolute -right-20 -top-24 h-56 w-56 rounded-full bg-[#d6b56d]/20 blur-3xl" />
+          <div className="pointer-events-none absolute -bottom-24 left-1/3 h-56 w-56 rounded-full bg-cyan-400/10 blur-3xl" />
+          <div className="relative">
           <div className="flex items-start justify-between mb-6">
             <div>
               <div className="flex items-center gap-3 mb-2">
@@ -256,10 +272,8 @@ export function BillingSettingsPage() {
               )}
             </div>
             <div className="hidden sm:block">
-              <div className="h-16 w-16 rounded-2xl bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/20">
-                <svg className="w-8 h-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                </svg>
+              <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-[#f2d894] via-[#d6b56d] to-[#9f7933] shadow-lg shadow-[#d6b56d]/20">
+                <Zap className="h-8 w-8 text-[#171106]" strokeWidth={2.4} />
               </div>
             </div>
           </div>
@@ -280,10 +294,8 @@ export function BillingSettingsPage() {
               'Email & SMS notifications',
               'Data export & backup',
             ]).map((feature, i) => (
-              <div key={i} className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
-                <svg className="w-4 h-4 text-cyan-500 dark:text-cyan-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                </svg>
+              <div key={i} className="flex items-center gap-2 rounded-xl border border-slate-200/70 bg-white/65 px-3 py-2 text-sm font-medium text-slate-700 dark:border-white/[0.07] dark:bg-white/[0.035] dark:text-slate-200">
+                <Check className="h-4 w-4 flex-shrink-0 text-emerald-500 dark:text-emerald-300" strokeWidth={2.4} />
                 <span>{feature}</span>
               </div>
             ))}
@@ -295,14 +307,12 @@ export function BillingSettingsPage() {
               <button
                 onClick={handleStartSubscription}
                 disabled={actionLoading === 'checkout'}
-                className="rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed px-5 py-2.5 text-sm font-medium text-white transition-colors flex items-center gap-2"
+                className={primaryActionClass}
               >
                 {actionLoading === 'checkout' ? (
                   <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
                 ) : (
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v12m6-6H6" />
-                  </svg>
+                  <Plus className="h-4 w-4" strokeWidth={2.4} />
                 )}
                 Start 7-day trial
               </button>
@@ -310,15 +320,12 @@ export function BillingSettingsPage() {
             <button
               onClick={handleManageBilling}
               disabled={actionLoading === 'portal' || isFreePlan}
-              className="rounded-lg bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed px-5 py-2.5 text-sm font-medium text-white transition-colors flex items-center gap-2"
+              className={goldActionClass}
             >
               {actionLoading === 'portal' ? (
                 <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
               ) : (
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                </svg>
+                <Settings className="h-4 w-4" strokeWidth={2.4} />
               )}
               Manage billing
             </button>
@@ -326,26 +333,34 @@ export function BillingSettingsPage() {
               <button
                 onClick={handleReactivate}
                 disabled={actionLoading === 'reactivate'}
-                className="rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 px-5 py-2.5 text-sm font-medium text-white transition-colors"
+                className={primaryActionClass}
               >
                 {actionLoading === 'reactivate' ? 'Reactivating...' : 'Reactivate subscription'}
               </button>
             )}
           </div>
+          </div>
         </div>
       </div>
 
       {/* Payment Method */}
-      <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-white dark:bg-gradient-to-br dark:from-[#030b1a]/70 dark:via-[#041128]/60 dark:to-[#010712]/70 dark:backdrop-blur-xl p-6 shadow-sm dark:shadow-[0_25px_80px_rgba(1,8,20,0.65)]">
-        <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-50 mb-1">Payment method</h2>
-        <p className="text-xs text-slate-500 dark:text-slate-300 mb-6">
-          Your card on file for automatic payments
-        </p>
+      <div className={billingCardClass}>
+        <div className="mb-5 flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-950 dark:text-white">Payment method</h2>
+            <p className="mt-1 text-xs font-medium text-slate-600 dark:text-slate-300">
+              Your card on file for automatic payments
+            </p>
+          </div>
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-cyan-400/25 bg-cyan-500/10 text-cyan-500 dark:text-cyan-200">
+            <CreditCard className="h-5 w-5" strokeWidth={2.2} />
+          </div>
+        </div>
 
         {paymentMethod ? (
-          <div className="rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-4 flex items-center justify-between">
+          <div className={`${billingPanelClass} flex items-center justify-between`}>
             <div className="flex items-center gap-4">
-              <div className="h-12 w-16 rounded-lg bg-gradient-to-br from-slate-200 to-slate-300 dark:from-slate-700 dark:to-slate-800 flex items-center justify-center border border-slate-300 dark:border-white/10">
+              <div className="flex h-12 w-16 items-center justify-center rounded-xl border border-slate-300 bg-gradient-to-br from-slate-200 to-slate-300 dark:border-white/10 dark:from-slate-700 dark:to-slate-900">
                 <CreditCard className="h-5 w-5 text-slate-600 dark:text-slate-200" />
               </div>
               <div>
@@ -367,22 +382,18 @@ export function BillingSettingsPage() {
             </button>
           </div>
         ) : (
-          <div className="rounded-xl border border-dashed border-slate-300 dark:border-white/20 bg-slate-50 dark:bg-white/5 p-6 text-center">
-            <svg className="w-10 h-10 mx-auto text-slate-400 dark:text-slate-400 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
-            </svg>
-            <p className="text-sm text-slate-500 dark:text-slate-300 mb-3">No payment method on file</p>
+          <div className={`${billingPanelClass} border-dashed p-6 text-center`}>
+            <CreditCard className="mx-auto mb-3 h-10 w-10 text-slate-400 dark:text-slate-300" strokeWidth={1.7} />
+            <p className="mb-3 text-sm font-semibold text-slate-600 dark:text-slate-200">No payment method on file</p>
             <button
               onClick={handleAddPaymentMethod}
               disabled={actionLoading === 'setup'}
-              className="inline-flex items-center gap-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2 text-sm font-medium text-white transition-colors"
+              className={primaryActionClass}
             >
               {actionLoading === 'setup' ? (
                 <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
               ) : (
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                </svg>
+                <Plus className="h-4 w-4" strokeWidth={2.4} />
               )}
               Add payment method
             </button>
@@ -390,30 +401,33 @@ export function BillingSettingsPage() {
         )}
 
         {/* Secure payment note */}
-        <div className="mt-4 flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-          </svg>
+        <div className="mt-4 flex items-center gap-2 text-xs font-medium text-slate-500 dark:text-slate-400">
+          <LockKeyhole className="h-4 w-4" strokeWidth={2.2} />
           <span>Payments are securely processed by Stripe. We never store your card details.</span>
         </div>
       </div>
 
       {/* Billing History */}
-      <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-white dark:bg-gradient-to-br dark:from-[#030b1a]/70 dark:via-[#041128]/60 dark:to-[#010712]/70 dark:backdrop-blur-xl p-6 shadow-sm dark:shadow-[0_25px_80px_rgba(1,8,20,0.65)]">
-        <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-50 mb-1">Billing history</h2>
-        <p className="text-xs text-slate-500 dark:text-slate-300 mb-6">
-          Download past invoices and receipts
-        </p>
+      <div className={billingCardClass}>
+        <div className="mb-5 flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-950 dark:text-white">Billing history</h2>
+            <p className="mt-1 text-xs font-medium text-slate-600 dark:text-slate-300">
+              Download past invoices and receipts
+            </p>
+          </div>
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-[#d6b56d]/30 bg-[#d6b56d]/10 text-[#9f7933] dark:text-[#f2d894]">
+            <FileText className="h-5 w-5" strokeWidth={2.2} />
+          </div>
+        </div>
 
         {invoices.length > 0 ? (
           <div className="space-y-2">
             {invoices.map((invoice) => (
-              <div key={invoice.id} className="flex items-center justify-between p-4 rounded-lg border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 hover:bg-slate-100 dark:hover:bg-white/[0.07] transition-colors">
+              <div key={invoice.id} className={`${billingPanelClass} flex items-center justify-between transition-colors hover:bg-white dark:hover:bg-white/[0.06]`}>
                 <div className="flex items-center gap-4">
-                  <div className="h-10 w-10 rounded-lg bg-slate-200 dark:bg-slate-800 flex items-center justify-center">
-                    <svg className="w-5 h-5 text-slate-500 dark:text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                    </svg>
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-200 dark:bg-slate-900">
+                    <FileText className="h-5 w-5 text-slate-500 dark:text-slate-300" strokeWidth={2.2} />
                   </div>
                   <div>
                     <p className="text-sm font-medium text-slate-900 dark:text-slate-50">{formatDate(invoice.date)}</p>
@@ -433,30 +447,26 @@ export function BillingSettingsPage() {
                       alert('Invoice download will be available once Stripe is configured.');
                     }
                   }}
-                  className="text-sm text-cyan-600 dark:text-cyan-400 hover:text-cyan-500 dark:hover:text-cyan-300 font-medium flex items-center gap-1.5 transition-colors"
+                  className="flex items-center gap-1.5 text-sm font-semibold text-cyan-600 transition-colors hover:text-cyan-500 dark:text-cyan-300 dark:hover:text-cyan-200"
                 >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                  </svg>
+                  <Download className="h-4 w-4" strokeWidth={2.3} />
                   Download
                 </button>
               </div>
             ))}
           </div>
         ) : (
-          <div className="rounded-xl border border-dashed border-slate-300 dark:border-white/20 bg-slate-50 dark:bg-white/5 p-6 text-center">
-            <svg className="w-10 h-10 mx-auto text-slate-400 dark:text-slate-400 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-            </svg>
-            <p className="text-sm text-slate-500 dark:text-slate-300">No invoices yet</p>
+          <div className={`${billingPanelClass} border-dashed p-6 text-center`}>
+            <FileText className="mx-auto mb-3 h-10 w-10 text-slate-400 dark:text-slate-300" strokeWidth={1.7} />
+            <p className="text-sm font-semibold text-slate-600 dark:text-slate-200">No invoices yet</p>
           </div>
         )}
       </div>
 
       {/* Usage Stats */}
-      <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-white dark:bg-gradient-to-br dark:from-[#030b1a]/70 dark:via-[#041128]/60 dark:to-[#010712]/70 dark:backdrop-blur-xl p-6 shadow-sm dark:shadow-[0_25px_80px_rgba(1,8,20,0.65)]">
-        <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-50 mb-1">Your usage</h2>
-        <p className="text-xs text-slate-500 dark:text-slate-300 mb-6">
+      <div className={billingCardClass}>
+        <h2 className="text-lg font-semibold text-slate-950 dark:text-white">Your usage</h2>
+        <p className="mt-1 mb-5 text-xs font-medium text-slate-600 dark:text-slate-300">
           See how much value you're getting from AgentEasePro
         </p>
 
@@ -467,7 +477,7 @@ export function BillingSettingsPage() {
             { label: 'Marketing Blasts', value: '∞', sublabel: 'Unlimited' },
             { label: 'AI Suggestions', value: '∞', sublabel: 'Unlimited' },
           ].map((stat, i) => (
-            <div key={i} className="rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-4 text-center">
+            <div key={i} className={`${billingPanelClass} text-center`}>
               <p className="text-2xl font-bold text-cyan-600 dark:text-cyan-400">{stat.value}</p>
               <p className="text-sm font-medium text-slate-700 dark:text-slate-300">{stat.label}</p>
               <p className="text-xs text-slate-500 dark:text-slate-400">{stat.sublabel}</p>
@@ -478,7 +488,7 @@ export function BillingSettingsPage() {
 
       {/* Cancel Subscription */}
       {subscription?.status === 'active' && !subscription.cancelAtPeriodEnd && (
-        <div className="rounded-2xl border border-red-200 dark:border-red-400/20 bg-red-50 dark:bg-gradient-to-br dark:from-[#030b1a]/70 dark:via-[#041128]/60 dark:to-[#010712]/70 dark:backdrop-blur-xl p-6 shadow-sm dark:shadow-[0_25px_80px_rgba(1,8,20,0.65)]">
+        <div className="ae-theme-card rounded-3xl border border-red-200 bg-red-50 p-5 shadow-sm dark:border-red-400/20 dark:bg-red-500/[0.06] sm:p-6">
           <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-50 mb-1">Cancel subscription</h3>
           <p className="text-xs text-slate-500 dark:text-slate-300 mb-4">
             Your access will continue until {formatDate(subscription.currentPeriodEnd)}. You can reactivate anytime.
@@ -494,12 +504,10 @@ export function BillingSettingsPage() {
       )}
 
       {/* Help */}
-      <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-gradient-to-br from-slate-50 to-slate-100 dark:from-[#030b1a]/70 dark:via-[#041128]/60 dark:to-[#010712]/70 dark:backdrop-blur-xl p-6 shadow-sm dark:shadow-[0_25px_80px_rgba(1,8,20,0.65)]">
+      <div className={billingCardClass}>
         <div className="flex items-start gap-4">
-          <div className="h-10 w-10 rounded-full bg-cyan-100 dark:bg-cyan-500/20 flex items-center justify-center flex-shrink-0">
-            <svg className="w-5 h-5 text-cyan-600 dark:text-cyan-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
+          <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-2xl bg-cyan-100 text-cyan-600 dark:bg-cyan-500/20 dark:text-cyan-300">
+            <HelpCircle className="h-5 w-5" strokeWidth={2.2} />
           </div>
           <div>
             <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-50 mb-1">Need help with billing?</h3>

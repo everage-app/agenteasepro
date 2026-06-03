@@ -2,10 +2,9 @@
  * Distributed lock using PostgreSQL (Prisma DistributedLock model).
  * Prevents duplicate processing across multiple Heroku dynos.
  */
-import { PrismaClient } from '@prisma/client';
 import crypto from 'crypto';
+import { prisma } from '../lib/prisma';
 
-const prisma = new PrismaClient();
 const INSTANCE_ID = `${process.env.DYNO || 'local'}-${crypto.randomBytes(4).toString('hex')}`;
 
 /**

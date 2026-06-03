@@ -17,7 +17,6 @@ const routePrefetchMap: Record<string, () => Promise<unknown>> = {
   '/tasks': () => import('../features/tasks/TasksPage'),
   '/automations': () => import('../features/automations/AutomationsPage'),
   '/reporting': () => import('../features/reporting/ReportingPage'),
-  '/search': () => import('../features/properties/PropertyWorkspace'),
   '/settings': () => import('../features/settings/SettingsLayout'),
 };
 

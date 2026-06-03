@@ -671,8 +671,8 @@ export function ContractsHub() {
     if (quickSendingDealId === deal.id) return;
 
     if (!deal.repc) {
-      showToast('warning', 'Complete the REPC first. Opening your contract wizard now.');
-      navigate(`/deals/${deal.id}/repc`);
+      showToast('warning', 'Complete the contract details first. Opening your Contracts workspace now.');
+      navigate(`/contracts/${deal.id}`);
       return;
     }
 
@@ -990,7 +990,7 @@ export function ContractsHub() {
                   >
                     <DealCard
                       deal={deal}
-                      onViewContract={() => navigate(`/deals/${deal.id}/repc`)}
+                      onViewContract={() => navigate(`/contracts/${deal.id}`)}
                       onQuickSend={() => quickSendForSignature(deal)}
                       quickSendReady={canQuickSendFromDeal(deal)}
                       quickSendBusy={quickSendingDealId === deal.id}
@@ -1038,7 +1038,7 @@ export function ContractsHub() {
                         deal={deal}
                         envelope={pendingEnvelopeByDealId[deal.id]}
                         onResend={() => remindPendingSigners(deal.id)}
-                        onView={() => navigate(`/deals/${deal.id}/repc`)}
+                        onView={() => navigate(`/contracts/${deal.id}`)}
                         onDownload={() => {
                           const env = pendingEnvelopeByDealId[deal.id];
                           if (env?.id) downloadSignedPdf(env.id, deal.property?.street);
@@ -1127,7 +1127,7 @@ export function ContractsHub() {
                     >
                       <DealCard
                         deal={deal}
-                        onViewContract={() => navigate(`/deals/${deal.id}/repc`)}
+                        onViewContract={() => navigate(`/contracts/${deal.id}`)}
                         formatPrice={formatPrice}
                         formatDate={formatDate}
                         getStatusColor={getStatusColor}
@@ -1149,7 +1149,7 @@ export function ContractsHub() {
           onClose={() => setSelectedDeal(null)}
           onNavigateToRepc={() => {
             setSelectedDeal(null);
-            navigate(`/deals/${selectedDeal.id}/repc`);
+            navigate(`/contracts/${selectedDeal.id}`);
           }}
           onSend={async (payload) => {
             try {
@@ -1407,7 +1407,7 @@ function WorkflowCard({
 }) {
   if (secondaryActionLabel && onSecondaryClick) {
     return (
-      <div className="ae-theme-card group rounded-2xl border p-4 text-left transition-all hover:border-blue-300 hover:shadow-md dark:hover:border-blue-500/30 dark:hover:shadow-[0_20px_40px_rgba(14,116,144,0.2)]">
+      <div className="ae-theme-card contract-workflow-card group rounded-2xl border p-4 text-left transition-all hover:border-cyan-300 hover:shadow-md dark:hover:border-cyan-500/30 dark:hover:shadow-[0_20px_40px_rgba(14,116,144,0.2)]">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
             <div className="text-sm font-semibold text-slate-950 dark:text-white">{title}</div>
@@ -1417,14 +1417,14 @@ function WorkflowCard({
             <button
               type="button"
               onClick={onClick}
-              className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 transition-colors hover:border-emerald-300 hover:bg-emerald-100 dark:border-emerald-400/25 dark:bg-emerald-500/12 dark:text-emerald-200 dark:hover:border-emerald-300/45 dark:hover:bg-emerald-500/20"
+              className="contract-workflow-action contract-workflow-action-primary inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors"
             >
               {actionLabel}
             </button>
             <button
               type="button"
               onClick={onSecondaryClick}
-              className="inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 transition-colors hover:border-blue-300 hover:bg-blue-100 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300 dark:hover:border-blue-400/40 dark:hover:bg-blue-500/20"
+              className="contract-workflow-action contract-workflow-action-secondary inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors"
             >
               {secondaryActionLabel}
             </button>
@@ -1438,14 +1438,14 @@ function WorkflowCard({
     <button
       type="button"
       onClick={onClick}
-      className="ae-theme-card group rounded-2xl border p-4 text-left transition-all hover:border-blue-300 hover:shadow-md dark:hover:border-blue-500/30 dark:hover:shadow-[0_20px_40px_rgba(14,116,144,0.2)]"
+      className="ae-theme-card contract-workflow-card group rounded-2xl border p-4 text-left transition-all hover:border-cyan-300 hover:shadow-md dark:hover:border-cyan-500/30 dark:hover:shadow-[0_20px_40px_rgba(14,116,144,0.2)]"
     >
       <div className="flex items-start justify-between gap-4">
         <div>
           <div className="text-sm font-semibold text-slate-950 dark:text-white">{title}</div>
           <div className="mt-1 text-xs text-slate-600 dark:text-slate-400">{description}</div>
         </div>
-        <div className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300">
+        <div className="contract-workflow-action contract-workflow-action-secondary rounded-full border px-3 py-1 text-xs font-semibold">
           {actionLabel}
         </div>
       </div>
@@ -1458,10 +1458,10 @@ function PdfToolCard({ onClick }: { onClick: () => void }) {
     <button
       type="button"
       onClick={onClick}
-      className="ae-theme-card group rounded-[28px] border p-4 text-left transition-all hover:border-emerald-300 hover:shadow-md dark:hover:border-emerald-500/30"
+      className="ae-theme-card contract-pdf-tool-card group rounded-xl border p-4 text-left transition-all hover:-translate-y-0.5 hover:border-emerald-300 hover:shadow-md dark:hover:border-emerald-400/35"
     >
       <div className="flex items-start gap-3">
-        <div className="p-2 rounded-xl bg-emerald-50 text-emerald-700 transition-colors dark:bg-emerald-500/10 dark:text-emerald-300">
+        <div className="rounded-lg border border-emerald-200/70 bg-emerald-50 p-2 text-emerald-700 transition-colors dark:border-emerald-300/15 dark:bg-emerald-400/10 dark:text-emerald-200">
           <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
           </svg>
@@ -1469,7 +1469,7 @@ function PdfToolCard({ onClick }: { onClick: () => void }) {
         <div className="flex-1 min-w-0">
           <div className="text-sm font-semibold text-slate-950 dark:text-white">PDF Editor</div>
           <div className="mt-1 text-xs text-slate-600 dark:text-slate-400">Merge, reorder, and export contract packets.</div>
-          <div className="mt-3 inline-flex items-center gap-1 text-xs text-emerald-700 dark:text-emerald-300">
+          <div className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 dark:text-emerald-200">
             Open editor
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
@@ -1606,7 +1606,7 @@ function DealCard({
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
             </svg>
-            Open REPC
+            Open Contracts
           </button>
           
           {!completed && onQuickSend && (
@@ -1846,27 +1846,27 @@ function FormTemplateCard({
 
   return (
     <div 
-      className="group rounded-[28px] border border-slate-200 bg-white p-4 shadow-sm transition-all hover:border-blue-300 hover:shadow-md dark:border-white/10 dark:bg-gradient-to-br dark:from-[#030b1a]/70 dark:via-[#041128]/60 dark:to-[#010712]/70 dark:shadow-[0_25px_80px_rgba(1,8,20,0.65)] dark:hover:border-blue-500/30"
+      className="ae-theme-card contract-template-card group flex min-h-[148px] flex-col rounded-xl border p-4 transition-all hover:-translate-y-0.5 hover:border-cyan-300 hover:shadow-md dark:hover:border-cyan-300/35"
     >
       <div className="flex items-start gap-3">
-        <div className="p-2 rounded-xl bg-slate-100 text-slate-600 group-hover:text-blue-600 transition-colors dark:bg-white/5 dark:text-slate-400 dark:group-hover:text-blue-400">
-          <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <div className="rounded-lg border border-slate-200 bg-slate-100 p-2 text-slate-600 transition-colors group-hover:border-cyan-200 group-hover:text-cyan-700 dark:border-white/10 dark:bg-white/[0.055] dark:text-slate-300 dark:group-hover:border-cyan-300/25 dark:group-hover:text-cyan-200">
+          <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
           </svg>
         </div>
         <div className="flex-1 min-w-0">
-          <h3 className="text-sm font-semibold text-slate-950 mb-1 transition-colors group-hover:text-blue-700 dark:text-white dark:group-hover:text-blue-300">
+          <h3 className="mb-1 truncate text-sm font-semibold text-slate-950 transition-colors group-hover:text-cyan-800 dark:text-white dark:group-hover:text-cyan-100">
             {form.displayName}
           </h3>
           <div className="flex items-center gap-2 flex-wrap">
-            <span className={`inline-block px-2 py-0.5 rounded-full text-xs ${categoryColors[form.category] || categoryColors.Other}`}>
+            <span className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-medium ${categoryColors[form.category] || categoryColors.Other}`}>
               {form.category}
             </span>
-            <span className="inline-block px-2 py-0.5 rounded-full text-xs bg-cyan-50 text-cyan-700 border border-cyan-200 dark:bg-cyan-500/15 dark:text-cyan-200 dark:border-cyan-400/30">
+            <span className="inline-block rounded-full border border-cyan-200 bg-cyan-50 px-2 py-0.5 text-[11px] font-medium text-cyan-700 dark:border-cyan-300/25 dark:bg-cyan-400/10 dark:text-cyan-100">
               {usageScope === 'BOTH' ? 'Deal + Client' : usageScope === 'CLIENT' ? 'Client' : 'Deal'}
             </span>
             {isCustom && (
-              <span className="inline-block px-2 py-0.5 rounded-full text-xs bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-200 dark:border-emerald-400/30">
+              <span className="inline-block rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:border-emerald-300/25 dark:bg-emerald-400/10 dark:text-emerald-100">
                 Custom
               </span>
             )}
@@ -1879,7 +1879,7 @@ function FormTemplateCard({
         </div>
       </div>
 
-      <div className="mt-4 grid grid-cols-1 gap-2">
+      <div className="mt-auto grid grid-cols-1 gap-2 pt-4">
         {supportsDeal && (
           <button
             type="button"
@@ -1888,7 +1888,7 @@ function FormTemplateCard({
               e.stopPropagation();
               onStartDeal();
             }}
-            className="w-full px-3 py-2 rounded-xl bg-emerald-50 border border-emerald-200 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 transition-all dark:bg-emerald-500/15 dark:border-emerald-500/25 dark:text-emerald-200 dark:hover:bg-emerald-500/25"
+            className="w-full rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 transition-all hover:bg-emerald-100 dark:border-emerald-300/20 dark:bg-emerald-400/10 dark:text-emerald-100 dark:hover:bg-emerald-400/16"
           >
             Start Deal With Template
           </button>
@@ -1901,7 +1901,7 @@ function FormTemplateCard({
               e.stopPropagation();
               onUseClient();
             }}
-            className="w-full px-3 py-2 rounded-xl bg-blue-50 border border-blue-200 text-xs font-semibold text-blue-700 hover:bg-blue-100 transition-all dark:bg-blue-500/15 dark:border-blue-500/25 dark:text-blue-200 dark:hover:bg-blue-500/25"
+            className="w-full rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 transition-all hover:bg-blue-100 dark:border-blue-300/20 dark:bg-blue-400/10 dark:text-blue-100 dark:hover:bg-blue-400/16"
           >
             Use With Client
           </button>
@@ -1914,7 +1914,7 @@ function FormTemplateCard({
               e.stopPropagation();
               onViewPdf();
             }}
-            className="px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-all dark:bg-white/5 dark:border-white/10 dark:text-slate-200 dark:hover:bg-white/10"
+            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition-all hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.045] dark:text-slate-200 dark:hover:bg-white/[0.075]"
           >
             Preview
           </button>
@@ -1925,7 +1925,7 @@ function FormTemplateCard({
               e.stopPropagation();
               onDownloadPdf();
             }}
-            className="px-3 py-2 rounded-xl bg-blue-50 border border-blue-200 text-xs font-semibold text-blue-700 hover:bg-blue-100 transition-all dark:bg-blue-500/10 dark:border-blue-500/20 dark:text-blue-300 dark:hover:bg-blue-500/20"
+            className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 transition-all hover:bg-blue-100 dark:border-blue-300/20 dark:bg-blue-400/10 dark:text-blue-100 dark:hover:bg-blue-400/16"
           >
             Download
           </button>

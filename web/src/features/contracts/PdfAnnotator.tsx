@@ -12,8 +12,15 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
+import * as pdfjsLib from 'pdfjs-dist';
+import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min?url';
 import type { LucideIcon } from 'lucide-react';
 import { AlertTriangle, BadgeDollarSign, CalendarDays, Check, CheckSquare, FileText, Hash, Home, Mail, PenLine, RectangleHorizontal, Ruler, Sparkles, Type, UserRound, X, Square } from 'lucide-react';
+import { installPdfJsCompat } from '../../lib/pdfJsCompat';
+import { clonePdfBytes, PDF_DOCUMENT_LOAD_OPTIONS, renderPdfPageToImage } from '../../lib/pdfRendering';
+
+installPdfJsCompat();
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
 // Annotation types
 export type AnnotationType = 'text' | 'signature' | 'initials' | 'date' | 'address' | 'checkbox' | 'name' | 'email' | 'price' | 'mls';
@@ -69,7 +76,8 @@ interface DealData {
 }
 
 interface PdfAnnotatorProps {
-  pdfUrl: string;
+  pdfUrl: string | null;
+  pdfData?: ArrayBuffer | Uint8Array | null;
   signers: Signer[];
   onSave?: (annotations: Annotation[]) => void;
   onCancel?: () => void;
@@ -116,7 +124,7 @@ const SIGNER_COLORS: Record<string, { bg: string; border: string; text: string }
   OTHER: { bg: 'bg-amber-500/20', border: 'border-amber-500', text: 'text-amber-400' },
 };
 
-export function PdfAnnotator({ pdfUrl, signers, onSave, onCancel, onSend, dealData, dealInfo, sending, requiredFields }: PdfAnnotatorProps) {
+export function PdfAnnotator({ pdfUrl, pdfData, signers, onSave, onCancel, onSend, dealData, dealInfo, sending, requiredFields }: PdfAnnotatorProps) {
   const PAGE_WIDTH = 612;
   const PAGE_HEIGHT = 792;
   const GRID_SIZE = 8;
@@ -237,18 +245,120 @@ export function PdfAnnotator({ pdfUrl, signers, onSave, onCancel, onSend, dealDa
     }
   }, [activeInteraction]);
   
-  // PDF.js rendering
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [pdfDoc, setPdfDoc] = useState<any>(null);
+  const [pdfDoc, setPdfDoc] = useState<pdfjsLib.PDFDocumentProxy | null>(null);
+  const [pdfPageImage, setPdfPageImage] = useState<string | null>(null);
+  const [pdfRenderError, setPdfRenderError] = useState<string | null>(null);
+  const [pdfRendering, setPdfRendering] = useState(false);
 
-  // Load PDF using iframe for simplicity (canvas rendering would need pdf.js)
   useEffect(() => {
-    if (pdfUrl) {
-      setPdfLoaded(true);
-      // Estimate pages from URL or set default
-      setTotalPages(10); // Will be updated when we integrate pdf.js
+    let cancelled = false;
+    let loadingTask: pdfjsLib.PDFDocumentLoadingTask | null = null;
+    let loadedDocument: pdfjsLib.PDFDocumentProxy | null = null;
+
+    const loadPdf = async () => {
+      setPdfLoaded(false);
+      setPdfDoc(null);
+      setPdfPageImage(null);
+      setPdfRenderError(null);
+      setTotalPages(1);
+      setCurrentPage(1);
+
+      if (!pdfUrl && !pdfData) {
+        return;
+      }
+
+      try {
+        if (pdfData) {
+          loadingTask = pdfjsLib.getDocument({ data: clonePdfBytes(pdfData), ...PDF_DOCUMENT_LOAD_OPTIONS });
+        } else if (/^(blob|data):/i.test(pdfUrl)) {
+          const pdfBytes = await fetch(pdfUrl).then((response) => response.arrayBuffer());
+          loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(pdfBytes), ...PDF_DOCUMENT_LOAD_OPTIONS });
+        } else {
+          const absolutePdfUrl = new URL(pdfUrl, window.location.origin).toString();
+          loadingTask = pdfjsLib.getDocument({ url: absolutePdfUrl, ...PDF_DOCUMENT_LOAD_OPTIONS });
+        }
+        const loadedPdf = await loadingTask.promise;
+        loadedDocument = loadedPdf;
+
+        if (cancelled) {
+          await loadedPdf.destroy();
+          return;
+        }
+
+        setPdfDoc(loadedPdf);
+        setTotalPages(Math.max(1, loadedPdf.numPages));
+        setPdfLoaded(true);
+      } catch (error) {
+        console.error('Failed to load PDF for e-sign field placement:', error);
+        if (!cancelled) {
+          setPdfRenderError('This PDF could not be rendered in the field studio. Try re-uploading the PDF or use a freshly downloaded copy.');
+        }
+      }
+    };
+
+    loadPdf();
+
+    return () => {
+      cancelled = true;
+      loadingTask?.destroy();
+      loadedDocument?.destroy();
+    };
+  }, [pdfUrl, pdfData]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const renderPage = async () => {
+      if (!pdfDoc) {
+        setPdfPageImage(null);
+        return;
+      }
+
+      setPdfRendering(true);
+      setPdfRenderError(null);
+
+      try {
+        const page = await pdfDoc.getPage(currentPage);
+        const rendered = await renderPdfPageToImage(page, {
+          maxWidth: PAGE_WIDTH,
+          maxHeight: PAGE_HEIGHT,
+          outputScale: Math.max(1, Math.min(2, window.devicePixelRatio || 1)),
+          imageType: 'image/png',
+        });
+
+        if (!cancelled) {
+          setPdfPageImage(rendered.imageSrc);
+        }
+      } catch (error) {
+        console.error('Failed to render PDF page for e-sign field placement:', error);
+        if (!cancelled) {
+          setPdfPageImage(null);
+          const errorMessage = error instanceof Error ? error.message : '';
+          setPdfRenderError(
+            /blank/i.test(errorMessage)
+              ? 'The fast preview rendered this page blank, so the studio switched to the browser PDF fallback. If field alignment looks off, re-upload a freshly downloaded or flattened copy before sending.'
+              : 'This page could not be displayed in the fast preview. The studio will use the browser PDF fallback when available.',
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setPdfRendering(false);
+        }
+      }
+    };
+
+    renderPage();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [pdfDoc, currentPage, PAGE_WIDTH, PAGE_HEIGHT]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
     }
-  }, [pdfUrl]);
+  }, [currentPage, totalPages]);
 
   const generateId = () => `ann-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
@@ -628,6 +738,9 @@ export function PdfAnnotator({ pdfUrl, signers, onSave, onCancel, onSend, dealDa
   };
 
   const currentPageAnnotations = annotations.filter(ann => ann.page === currentPage);
+  const nativePreviewUrl = pdfUrl
+    ? `${pdfUrl}${pdfUrl.includes('#') ? '&' : '#'}page=${currentPage}&toolbar=0&navpanes=0&view=FitH`
+    : null;
 
   // Helper to add a smart field with auto-populated value
   const addSmartField = (field: typeof SMART_FIELDS[0], x: number, y: number) => {
@@ -850,6 +963,35 @@ export function PdfAnnotator({ pdfUrl, signers, onSave, onCancel, onSend, dealDa
     }
   };
 
+  const autoPlaceInitialsOnAllPages = () => {
+    const next: Annotation[] = [];
+    const signersToUse = signers.length > 0 ? signers : [{ role: assignTo, name: '', email: '' }];
+
+    for (let page = 1; page <= totalPages; page += 1) {
+      signersToUse.forEach((signer, idx) => {
+        const position = clampPosition(PAGE_WIDTH - 112, PAGE_HEIGHT - 58 - idx * 38, 76, 28);
+        next.push({
+          id: generateId(),
+          type: 'initials',
+          x: position.x,
+          y: position.y,
+          width: 76,
+          height: 28,
+          page,
+          value: '',
+          placeholder: `${signer.role} Initials`,
+          assignedTo: signer.role,
+          fontSize: 14,
+          required: true,
+        });
+      });
+    }
+
+    if (next.length) {
+      setAnnotations((prev) => [...prev, ...next]);
+    }
+  };
+
   return (
     <div className="flex flex-col h-full bg-slate-950">
       {/* Top Toolbar */}
@@ -915,13 +1057,19 @@ export function PdfAnnotator({ pdfUrl, signers, onSave, onCancel, onSend, dealDa
               onClick={autoPlaceSignatureFields}
               className="hidden lg:inline-flex px-3 py-2 rounded-lg text-sm font-medium bg-blue-500/10 text-blue-300 border border-blue-500/30 hover:bg-blue-500/20"
             >
-              Auto-place Sign + Initial
+              Auto-place signature fields
+            </button>
+            <button
+              onClick={autoPlaceInitialsOnAllPages}
+              className="hidden lg:inline-flex px-3 py-2 rounded-lg text-sm font-medium bg-cyan-500/10 text-cyan-200 border border-cyan-500/30 hover:bg-cyan-500/20"
+            >
+              Initial all pages
             </button>
             <button
               onClick={autoPlaceKnownSmartFields}
               className="hidden lg:inline-flex px-3 py-2 rounded-lg text-sm font-medium bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/20"
             >
-              Auto-place Known Fields
+              Auto-fill known fields
             </button>
             <span className="text-xs text-slate-500 hidden sm:inline">Assign to:</span>
             <select
@@ -942,7 +1090,7 @@ export function PdfAnnotator({ pdfUrl, signers, onSave, onCancel, onSend, dealDa
             <div className="flex items-center justify-between mb-3">
               <div>
                 <h3 className="text-sm font-bold text-emerald-300 flex items-center gap-2">
-                  <Sparkles className="h-4 w-4" /> Smart Auto-Populate Fields
+                  <Sparkles className="h-4 w-4" /> Smart fields
                 </h3>
                 <p className="text-xs text-emerald-400/70 mt-0.5">Click to add pre-filled fields from deal data</p>
               </div>
@@ -1269,14 +1417,44 @@ export function PdfAnnotator({ pdfUrl, signers, onSave, onCancel, onSend, dealDa
               borderRadius: '4px',
             }}
           >
-            {/* PDF iframe or canvas */}
-            {pdfUrl && (
-              <iframe
-                src={`${pdfUrl}#page=${currentPage}&toolbar=0&navpanes=0`}
-                className="w-full h-full absolute inset-0 rounded"
-                style={{ minHeight: `${792 * zoom}px`, pointerEvents: 'none' }}
-                title="PDF Preview"
+            {pdfPageImage && (
+              <img
+                src={pdfPageImage}
+                alt={`PDF page ${currentPage}`}
+                className="absolute inset-0 h-full w-full rounded object-contain"
+                draggable={false}
               />
+            )}
+
+            {pdfRenderError && nativePreviewUrl && !pdfPageImage && (
+              <iframe
+                src={nativePreviewUrl}
+                title={`PDF page ${currentPage} fallback preview`}
+                className="absolute inset-0 h-full w-full rounded bg-white"
+                style={{ pointerEvents: 'none' }}
+              />
+            )}
+
+            {(pdfRendering || (!pdfPageImage && !pdfRenderError)) && (
+              <div className="absolute inset-0 z-10 flex items-center justify-center rounded bg-white text-sm font-semibold text-slate-500">
+                Rendering PDF page...
+              </div>
+            )}
+
+            {pdfRenderError && !pdfPageImage && !nativePreviewUrl && (
+              <div className="absolute inset-0 z-10 flex items-center justify-center rounded bg-white px-8 text-center">
+                <div>
+                  <AlertTriangle className="mx-auto mb-3 h-8 w-8 text-amber-500" aria-hidden="true" />
+                  <p className="text-sm font-semibold text-slate-800">PDF preview unavailable</p>
+                  <p className="mt-2 text-xs leading-5 text-slate-500">{pdfRenderError}</p>
+                </div>
+              </div>
+            )}
+
+            {pdfRenderError && nativePreviewUrl && !pdfPageImage && (
+              <div className="absolute left-4 right-4 top-4 z-20 rounded-xl border border-amber-300/40 bg-amber-50/95 px-3 py-2 text-xs font-medium leading-5 text-amber-950 shadow-lg">
+                {pdfRenderError}
+              </div>
             )}
 
             {/* Annotation Overlays */}

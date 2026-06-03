@@ -1,5 +1,6 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { ArrowLeft, CheckCircle2, ClipboardCheck, Clock3, ExternalLink, FileCheck2, FileText, PenLine, RefreshCw, Send } from 'lucide-react';
 import api from '../../lib/api';
 import {
   EnvelopeLink,
@@ -250,6 +251,18 @@ function toOptionalNumber(value: unknown): number | null {
 function toRequiredNumber(value: unknown): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function formatMoney(value?: number | null): string {
+  if (!value) return 'Not set';
+  return value.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+}
+
+function formatShortDate(value?: string | null): string {
+  if (!value) return 'Not set';
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
 function extractErrorMessage(errorLike: unknown, fallback: string): string {
@@ -907,6 +920,27 @@ export function RepcWizard() {
     }
   };
 
+  const openPdfWorkspace = async () => {
+    setLoadingPdfPreview(true);
+    try {
+      const url = await fetchRepcPdfUrl();
+      if (!url) {
+        showToast('error', 'Could not load contract PDF. Please check your connection.');
+        return;
+      }
+      setPdfPreviewUrl(url);
+      setShowPdfPreview(true);
+      if (!dealId || !draft) {
+        showToast('success', 'Showing blank REPC template. Fill in form details to personalize.');
+      }
+    } catch (err) {
+      console.error('PDF preview error:', err);
+      showToast('error', 'Failed to load PDF workspace.');
+    } finally {
+      setLoadingPdfPreview(false);
+    }
+  };
+
   const undoSmartFill = () => {
     if (!draft || !smartFillUndo) return;
     setDraft({ ...draft, ...smartFillUndo.previous });
@@ -934,7 +968,7 @@ export function RepcWizard() {
   if (loading || !draft) {
     return (
       <div className="flex items-center justify-center py-12">
-        <div className="text-sm text-slate-400">Loading REPC wizard…</div>
+        <div className="text-sm text-slate-400">Loading contract workspace...</div>
       </div>
     );
   }
@@ -965,12 +999,6 @@ export function RepcWizard() {
     }
   };
 
-  const missingRequiredFields = REPC_REQUIRED_FIELDS.filter((field) => {
-    const value = draft[field.key];
-    if (typeof value === 'number') return value <= 0;
-    return !value;
-  }).map((field) => ({ id: field.id, label: field.label }));
-
   const timelineItems = [
     { key: 'offerExpirationDate', label: 'Offer Expiration', date: draft.offerExpirationDate },
     { key: 'sellerDisclosureDeadline', label: 'Seller Disclosure', date: draft.sellerDisclosureDeadline },
@@ -988,6 +1016,38 @@ export function RepcWizard() {
       return { ...item, days, status };
     })
     .sort((a, b) => (a.date as string).localeCompare(b.date as string));
+  const nextDeadline = timelineItems.find((item) => item.status !== 'past');
+  const propertyLabel = dealSummary?.property?.street
+    ? `${dealSummary.property.street}${dealSummary.property.city ? `, ${dealSummary.property.city}` : ''}`
+    : dealSummary?.title || 'Deal paperwork';
+  const partyLabel = [draft.buyerLegalNames, draft.sellerLegalNames].filter(Boolean).join(' vs ') || 'Parties not set';
+  const readinessLabel = missingRequired.length === 0 && errorIssues.length === 0
+    ? 'Ready for review'
+    : [
+        missingRequired.length ? `${missingRequired.length} required missing` : null,
+        errorIssues.length ? `${errorIssues.length} error${errorIssues.length === 1 ? '' : 's'}` : null,
+        warningIssues.length ? `${warningIssues.length} warning${warningIssues.length === 1 ? '' : 's'}` : null,
+      ].filter(Boolean).join(', ');
+  const primaryPaperworkActions = [
+    {
+      label: existing ? 'Draft saved' : 'Draft not saved',
+      detail: syncLabel,
+      tone: existing ? 'emerald' : 'amber',
+      icon: existing ? CheckCircle2 : Clock3,
+    },
+    {
+      label: `${readinessScore}% complete`,
+      detail: readinessLabel,
+      tone: readinessScore >= 85 ? 'emerald' : readinessScore >= 60 ? 'blue' : 'amber',
+      icon: ClipboardCheck,
+    },
+    {
+      label: nextDeadline ? nextDeadline.label : 'Deadlines',
+      detail: nextDeadline ? `${formatShortDate(nextDeadline.date)} (${nextDeadline.days} days)` : 'Not set yet',
+      tone: nextDeadline?.status === 'soon' ? 'amber' : 'blue',
+      icon: Clock3,
+    },
+  ];
 
   return (
     <>
@@ -1024,65 +1084,147 @@ export function RepcWizard() {
 
     <div className="mx-auto w-full max-w-[96rem] space-y-6 px-4 pb-8 pt-1 sm:px-6 lg:px-8 xl:px-10 2xl:px-12">
       <PageHeader
-        title="Utah REPC"
-        subtitle="Draft and guide Utah REPC terms. Always compare to the official form and consult broker/legal advice."
+        eyebrow="Deal contracts"
+        title="Contracts"
+        icon={<FileText className="h-5 w-5" strokeWidth={2.2} />}
+        subtitle={`${propertyLabel} - ${partyLabel}`}
         actions={
           <>
             <Button
               variant="ghost"
               size="sm"
-              className="text-slate-300 hover:text-white hover:bg-white/10"
+              className="text-slate-700 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white"
               onClick={() => navigate('/contracts', { state: { dealId } })}
             >
-              View deal
+              <ArrowLeft className="h-4 w-4" />
+              Contracts hub
             </Button>
             <Button
-              variant="ghost"
+              variant="secondary"
               size="sm"
-              className="text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 border border-emerald-500/30"
-              onClick={async () => {
-                setLoadingPdfPreview(true);
-                try {
-                  const url = await fetchRepcPdfUrl();
-                  if (!url) {
-                    showToast('error', 'Could not load REPC template. Please check your connection.');
-                    return;
-                  }
-                  setPdfPreviewUrl(url);
-                  setShowPdfPreview(true);
-                  if (!dealId || !draft) {
-                    showToast('success', 'Showing blank REPC template. Fill in form details to personalize.');
-                  }
-                } catch (err) {
-                  console.error('PDF preview error:', err);
-                  showToast('error', 'Failed to load PDF preview');
-                } finally {
-                  setLoadingPdfPreview(false);
-                }
-              }}
-              disabled={loadingPdfPreview}
+              onClick={openPdfWorkspace}
+              loading={loadingPdfPreview}
             >
-              {loadingPdfPreview ? (
-                <>
-                  <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-emerald-400 mr-2"></div>
-                  Loading...
-                </>
-              ) : (
-                <>
-                  <svg className="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                  </svg>
-                  Preview PDF
-                </>
-              )}
+              <ExternalLink className="h-4 w-4" />
+              PDF workspace
             </Button>
             <Button variant="primary" size="sm" onClick={() => setShowSendModal(true)}>
-              Send for e-sign
+              <Send className="h-4 w-4" />
+              E-sign
             </Button>
           </>
         }
       />
+
+      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_18px_50px_-34px_rgba(15,23,42,0.45)] dark:border-[#f2d894]/[0.12] dark:bg-[#0a0f18]/90">
+        <div className="grid items-stretch xl:grid-cols-[minmax(0,1fr)_18rem] 2xl:grid-cols-[minmax(0,1fr)_19rem]">
+          <div className="flex min-w-0 flex-col border-b border-slate-200/80 p-3 dark:border-white/10 sm:p-4 xl:min-h-[calc(100vh-12rem)] xl:border-b-0 xl:border-r">
+            <div className="mb-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="inline-flex items-center gap-1 rounded-full border border-blue-300 bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-700 dark:border-blue-400/30 dark:bg-blue-500/10 dark:text-blue-200">
+                    <FileCheck2 className="h-3.5 w-3.5" />
+                    Primary contract
+                  </span>
+                  <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400">Utah Real Estate Purchase Contract</span>
+                </div>
+                <h2 className="mt-2 truncate text-lg font-semibold text-slate-950 dark:text-white">{propertyLabel}</h2>
+                <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">{partyLabel}</p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button size="sm" variant="secondary" onClick={loadInlinePreview} disabled={pdfInlineLoading}>
+                  <RefreshCw className={`h-4 w-4 ${pdfInlineLoading ? 'animate-spin' : ''}`} />
+                  Refresh
+                </Button>
+                <Button size="sm" variant="primary" onClick={openPdfWorkspace} loading={loadingPdfPreview}>
+                  <PenLine className="h-4 w-4" />
+                  Open PDF
+                </Button>
+                <Button size="sm" variant="primary" onClick={() => setShowSendModal(true)}>
+                  <Send className="h-4 w-4" />
+                  E-sign
+                </Button>
+              </div>
+            </div>
+
+            <div className="flex min-h-[520px] flex-1 overflow-hidden rounded-xl border border-slate-200 bg-slate-100 dark:border-white/10 dark:bg-black/45 md:min-h-[640px] xl:min-h-0">
+              {pdfInlineLoading ? (
+                <div className="flex flex-1 items-center justify-center text-xs text-slate-500 dark:text-slate-400">
+                  Loading contract preview...
+                </div>
+              ) : pdfInlineError ? (
+                <div className="flex flex-1 flex-col items-center justify-center gap-3 text-xs text-slate-500 dark:text-slate-400">
+                  <div>{pdfInlineError}</div>
+                  <Button size="sm" variant="secondary" onClick={loadInlinePreview}>
+                    Try again
+                  </Button>
+                </div>
+              ) : pdfInlineUrl ? (
+                <iframe
+                  title="Contract preview"
+                  src={pdfInlineUrl}
+                  className="min-h-[520px] w-full flex-1 bg-white md:min-h-[640px] xl:min-h-0"
+                />
+              ) : (
+                <div className="flex flex-1 items-center justify-center text-xs text-slate-500 dark:text-slate-400">
+                  Contract preview will appear here after loading.
+                </div>
+              )}
+            </div>
+          </div>
+
+          <aside className="space-y-3 p-3">
+            <div className="grid gap-2 sm:grid-cols-3 xl:grid-cols-1">
+              {primaryPaperworkActions.map((item) => {
+                const Icon = item.icon;
+                const toneClass = item.tone === 'emerald'
+                  ? 'border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-400/25 dark:bg-emerald-500/10 dark:text-emerald-200'
+                  : item.tone === 'amber'
+                    ? 'border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-400/25 dark:bg-amber-500/10 dark:text-amber-100'
+                    : 'border-blue-300 bg-blue-50 text-blue-800 dark:border-blue-400/25 dark:bg-blue-500/10 dark:text-blue-100';
+                return (
+                  <div key={item.label} className={`rounded-lg border px-2.5 py-2 ${toneClass}`}>
+                    <div className="flex min-w-0 items-center gap-1.5 text-[11px] font-semibold">
+                      <Icon className="h-3.5 w-3.5 shrink-0" />
+                      <span className="truncate">{item.label}</span>
+                    </div>
+                    <div className="mt-1 text-[11px] opacity-80">{item.detail}</div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {firstMissing && (
+              <button
+                type="button"
+                onClick={() => focusField(firstMissing.key)}
+                className="flex w-full items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-2 text-left text-[11px] font-semibold text-amber-800 transition hover:bg-amber-100 dark:border-amber-400/30 dark:bg-amber-500/10 dark:text-amber-100 dark:hover:bg-amber-500/20"
+              >
+                <span className="truncate">Next missing: {firstMissing.label}</span>
+                <span className="shrink-0">Jump</span>
+              </button>
+            )}
+
+            {dealId && (
+              <DocumentChecklist
+                dealId={dealId}
+                hasRepc={existing}
+                repcStatus={existing ? 'draft' : undefined}
+                defaultExpanded
+                onStartRepc={() => {
+                  setViewMode('form');
+                  setStep(1);
+                }}
+                onEditRepc={() => {
+                  setViewMode('form');
+                  setStep(1);
+                }}
+                onSendRepc={() => setShowSendModal(true)}
+              />
+            )}
+          </aside>
+        </div>
+      </section>
 
       {templateStartCode && templateStartCode !== 'REPC' && dealId && (
         <Card className="p-4 border border-blue-500/20 bg-blue-500/10">
@@ -1091,45 +1233,12 @@ export function RepcWizard() {
               <div className="text-sm font-semibold text-slate-900 dark:text-white">Template ready to review</div>
               <div className="text-xs text-blue-700 dark:text-blue-200/80">Open {templateStartCode} to finish the template details for this deal.</div>
             </div>
-            <Button size="sm" variant="secondary" onClick={() => navigate(`/deals/${dealId}/forms/${templateStartCode}`)}>
+            <Button size="sm" variant="secondary" onClick={() => navigate(`/contracts/${dealId}/forms/${templateStartCode}`)}>
               Open {templateStartCode}
             </Button>
           </div>
         </Card>
       )}
-
-      <Card className="p-4 border border-emerald-500/20 bg-emerald-500/10">
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-          <div>
-            <div className="text-xs font-bold uppercase tracking-wide text-emerald-200">REPC Readiness</div>
-            <div className="text-sm text-slate-200 mt-1">
-              {missingRequired.length === 0 && errorIssues.length === 0
-                ? 'All required fields complete. Ready for review and send.'
-                : `${missingRequired.length} required field${missingRequired.length === 1 ? '' : 's'} missing`}
-            </div>
-            <div className="text-[11px] text-slate-300 mt-1">
-              {errorIssues.length} errors, {warningIssues.length} warnings
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="text-sm font-semibold text-white">{readinessScore}%</div>
-            <div className="w-32 h-2 rounded-full bg-white/10 overflow-hidden">
-              <div
-                className="h-full bg-gradient-to-r from-emerald-400 to-blue-500"
-                style={{ width: `${Math.min(100, readinessScore)}%` }}
-              />
-            </div>
-            <Button
-              size="sm"
-              variant="secondary"
-              onClick={() => firstMissing && focusField(firstMissing.key)}
-              disabled={!firstMissing}
-            >
-              Jump to next missing
-            </Button>
-          </div>
-        </div>
-      </Card>
 
       {/* Contract AI Review Panel */}
       {draft && dealId && (
@@ -1154,18 +1263,6 @@ export function RepcWizard() {
         </div>
       )}
 
-      {/* Document Checklist */}
-      {dealId && (
-        <DocumentChecklist
-          dealId={dealId}
-          hasRepc={existing}
-          repcStatus={existing ? 'draft' : undefined}
-          onStartRepc={() => {}}
-          onEditRepc={() => {}}
-          onSendRepc={() => setShowSendModal(true)}
-        />
-      )}
-
       {/* View toggle */}
       <div className="inline-flex rounded-full bg-slate-100 border border-slate-200 p-1 text-xs dark:bg-white/5 dark:border-white/10">
         <button
@@ -1175,7 +1272,7 @@ export function RepcWizard() {
             (viewMode === 'form' ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200 dark:text-slate-400 dark:hover:text-white dark:hover:bg-white/5')
           }
         >
-          Form view
+          Contract fields
         </button>
         <button
           onClick={() => setViewMode('guided')}
@@ -1189,18 +1286,18 @@ export function RepcWizard() {
       </div>
 
       {/* Two-column layout: dynamic main + side panel */}
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.7fr)_minmax(22rem,1fr)] 2xl:gap-8">
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_20rem] 2xl:grid-cols-[minmax(0,1fr)_21rem] 2xl:gap-6">
         {/* Form container */}
         <div className="space-y-6">
           {viewMode === 'form' && (
             <>
             {/* Quick Fill & Smart Fill Card */}
-            <Card className="p-4 md:p-5 space-y-5 bg-white/90 border border-slate-200 dark:bg-slate-900/40 dark:border-white/10">
+            <Card className="space-y-3 border border-slate-200 bg-white/90 p-3 dark:border-white/10 dark:bg-slate-900/40 md:p-4">
               {/* Quick Fill Presets */}
-              <div className="space-y-3">
+              <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <div className="text-xs font-bold text-slate-400 uppercase tracking-wide">Quick Fill Timelines</div>
-                  <div className="text-[10px] text-slate-500">One-click to set all deadlines</div>
+                  <div className="hidden text-[10px] text-slate-500 sm:block">One-click deadlines</div>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {Object.entries(QUICK_FILL_PRESETS).map(([key, preset]) => (
@@ -1213,24 +1310,24 @@ export function RepcWizard() {
                           showToast('success', `Applied ${preset.label} timeline`);
                         }
                       }}
-                      className="px-3 py-1.5 rounded-full text-xs text-white bg-gradient-to-r from-blue-600/80 to-indigo-600/80 hover:from-blue-500 hover:to-indigo-500 border border-blue-500/30 shadow-lg shadow-blue-500/10 transition-all group"
+                      className="rounded-full border border-blue-500/30 bg-gradient-to-r from-blue-600/80 to-indigo-600/80 px-2.5 py-1 text-[11px] text-white shadow-lg shadow-blue-500/10 transition-all hover:from-blue-500 hover:to-indigo-500"
                     >
                       <span className="font-semibold">{preset.label}</span>
-                      <span className="hidden sm:inline text-blue-200/70 ml-1">- {preset.description.split(',')[0]}</span>
+                      <span className="hidden text-blue-200/70 ml-1 2xl:inline">- {preset.description.split(',')[0]}</span>
                     </button>
                   ))}
                 </div>
               </div>
 
               {/* Smart Fill */}
-              <div className="pt-4 border-t border-slate-200 dark:border-white/10 space-y-3">
+              <div className="space-y-2 border-t border-slate-200 pt-3 dark:border-white/10">
                 <div className="flex items-center justify-between">
                   <div className="text-xs font-bold text-slate-400 uppercase tracking-wide">Smart Fill</div>
-                  <div className="text-[10px] text-slate-500">Import from deal/MLS or type naturally</div>
+                  <div className="hidden text-[10px] text-slate-500 sm:block">Deal, MLS, or plain English</div>
                 </div>
-                <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
-                  <div className="rounded-2xl border border-emerald-500/20 bg-emerald-900/10 p-3 space-y-3">
-                    <div className="text-[11px] font-bold uppercase tracking-[0.35em] text-emerald-200/80">Import Data</div>
+                <div className="grid gap-2 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+                  <div className="space-y-2 rounded-xl border border-emerald-500/20 bg-emerald-900/10 p-2.5">
+                    <div className="text-[10px] font-bold uppercase tracking-[0.22em] text-emerald-200/80">Import Data</div>
                     <div className="flex flex-wrap gap-2">
                       <Button
                         size="sm"
@@ -1257,7 +1354,7 @@ export function RepcWizard() {
                       >
                         AI Autofill
                       </Button>
-                      <span className="text-[10px] text-emerald-100/70 self-center">Buyer, seller, property, price</span>
+                      <span className="self-center text-[10px] text-emerald-100/70">Buyer, seller, price</span>
                     </div>
                     <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
                       <input
@@ -1298,7 +1395,7 @@ export function RepcWizard() {
                           onClick={() => applyMlsPrefill(mlsListing)}
                           className="bg-white/10 text-white hover:bg-white/20 border-white/10"
                         >
-                          {prefillAppliedId === mlsListing.id ? 'Prefill Applied' : 'Apply to REPC'}
+                          {prefillAppliedId === mlsListing.id ? 'Prefill Applied' : 'Apply to Contract'}
                         </Button>
                       </div>
                     )}
@@ -1309,8 +1406,8 @@ export function RepcWizard() {
                     )}
                   </div>
 
-                  <div className="rounded-2xl border border-blue-500/20 bg-blue-900/10 p-3 space-y-3">
-                    <div className="text-[11px] font-bold uppercase tracking-[0.35em] text-blue-200/80">Smart Prompt</div>
+                  <div className="space-y-2 rounded-xl border border-blue-500/20 bg-blue-900/10 p-2.5">
+                    <div className="text-[10px] font-bold uppercase tracking-[0.22em] text-blue-200/80">Smart Prompt</div>
                     <div className="flex flex-col sm:flex-row gap-2">
                       <input
                         value={smartPrompt}
@@ -1398,7 +1495,7 @@ export function RepcWizard() {
                     <div className="p-5 border-b border-white/10 flex items-center justify-between">
                       <div>
                         <h3 className="text-lg font-semibold text-white">Review {pendingSmartUpdate.label} changes</h3>
-                        <p className="text-xs text-slate-400 mt-1">Confirm before applying to your REPC draft.</p>
+                        <p className="text-xs text-slate-400 mt-1">Confirm before applying to your contract draft.</p>
                       </div>
                       <button
                         onClick={() => setPendingSmartUpdate(null)}
@@ -1465,76 +1562,6 @@ export function RepcWizard() {
                   </div>
                 </div>
               )}
-
-              {/* PDF Preview */}
-            <Card className="p-4 md:p-5 bg-white/90 border border-slate-200 dark:bg-slate-900/40 dark:border-white/10">
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="text-xs font-bold text-slate-300 uppercase tracking-wide">PDF Preview</div>
-                    <div className="text-[10px] text-slate-500">Live view of the REPC packet</div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={loadInlinePreview}
-                      className="text-[10px] font-semibold text-slate-300 border border-white/10 bg-white/5 px-2.5 py-1 rounded-full hover:bg-white/10"
-                    >
-                      Refresh
-                    </button>
-                    <Button size="sm" variant="secondary" onClick={async () => {
-                      setLoadingPdfPreview(true);
-                      try {
-                        const url = await fetchRepcPdfUrl();
-                        if (!url) {
-                          showToast('error', 'Could not load PDF workspace.');
-                          return;
-                        }
-                        setPdfPreviewUrl(url);
-                        setShowPdfPreview(true);
-                      } finally {
-                        setLoadingPdfPreview(false);
-                      }
-                    }}>
-                      Open workspace
-                    </Button>
-                  </div>
-                </div>
-                <div className="rounded-xl border border-white/10 bg-black/40 overflow-hidden">
-                  {pdfInlineLoading ? (
-                    <div className="h-[260px] flex items-center justify-center text-xs text-slate-400">
-                      Loading preview…
-                    </div>
-                  ) : pdfInlineError ? (
-                    <div className="h-[260px] flex flex-col items-center justify-center text-xs text-slate-400 gap-2">
-                      <div>{pdfInlineError}</div>
-                      <button
-                        type="button"
-                        onClick={loadInlinePreview}
-                        className="text-[10px] font-semibold text-blue-300 border border-blue-500/30 bg-blue-500/10 px-2.5 py-1 rounded-full"
-                      >
-                        Try again
-                      </button>
-                    </div>
-                  ) : pdfInlineUrl ? (
-                    <iframe
-                      title="REPC preview"
-                      src={pdfInlineUrl}
-                      className="w-full h-[260px]"
-                    />
-                  ) : (
-                    <div className="h-[260px] flex items-center justify-center text-xs text-slate-500">
-                      Preview will appear here after loading.
-                    </div>
-                  )}
-                </div>
-                {missingRequiredFields.length > 0 && (
-                  <div className="text-[10px] text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2">
-                    {missingRequiredFields.length} required fields missing. Open workspace to place markers on the PDF.
-                  </div>
-                )}
-              </div>
-            </Card>
 
             {/* Form Steps Card */}
             <Card className="p-4 md:p-6 space-y-6 bg-white/90 border border-slate-200 dark:bg-slate-900/40 dark:border-white/10">
@@ -2150,19 +2177,67 @@ export function RepcWizard() {
           )}
         </div>
 
-        {/* Guidance side panel */}
-        <div className="hidden xl:block space-y-4">
-          <Card className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
-            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-300">REPC guidance</div>
-            <div className="mt-2 text-sm font-semibold text-white">Review this before sending</div>
-            <ul className="mt-3 space-y-2 text-xs text-slate-300">
-              <li>• Confirm legal buyer/seller names match title records.</li>
-              <li>• Verify purchase price, earnest money, and possession timing.</li>
-              <li>• Check due diligence, finance/appraisal, and settlement deadlines.</li>
-              <li>• Save draft and use PDF preview for final review.</li>
-            </ul>
-            <div className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-100">
-              Always confirm final terms with your broker and the official Utah form.
+        {/* Paperwork side panel */}
+        <div className="hidden space-y-3 xl:block">
+          <Card className="rounded-xl border border-white/10 bg-slate-950/70 p-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-300">Paperwork at a glance</div>
+                <div className="mt-1 truncate text-sm font-semibold text-white">{formatMoney(draft.purchasePrice)} purchase</div>
+              </div>
+              <div className="shrink-0 text-right text-[10px] text-slate-400">
+                {errorIssues.length} errors
+                <br />
+                {warningIssues.length} warnings
+              </div>
+            </div>
+
+            <div className="mt-3 space-y-1.5">
+              {timelineItems.length === 0 ? (
+                <div className="rounded-lg border border-white/10 bg-white/5 px-2.5 py-2 text-xs text-slate-400">
+                  No contract dates set yet.
+                </div>
+              ) : (
+                timelineItems.map((item) => (
+                  <button
+                    key={item.key}
+                    type="button"
+                    onClick={() => focusField(item.key as keyof RepcDraft)}
+                    className={`flex w-full items-center justify-between gap-3 rounded-lg border px-2.5 py-1.5 text-left text-[11px] transition ${
+                      item.status === 'past'
+                        ? 'border-red-400/30 bg-red-500/10 text-red-200'
+                        : item.status === 'soon'
+                          ? 'border-amber-400/30 bg-amber-500/10 text-amber-100'
+                          : 'border-white/10 bg-white/5 text-slate-300 hover:bg-white/10'
+                    }`}
+                  >
+                    <span className="truncate font-semibold">{item.label}</span>
+                    <span className="shrink-0">{formatShortDate(item.date)}</span>
+                  </button>
+                ))
+              )}
+            </div>
+
+            {missingRequired.length > 0 && (
+              <div className="mt-3 rounded-lg border border-amber-400/30 bg-amber-500/10 px-2.5 py-2 text-[11px] text-amber-100">
+                <div className="font-semibold">Missing before send</div>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {missingRequired.slice(0, 5).map((field) => (
+                    <button
+                      key={field.id}
+                      type="button"
+                      onClick={() => focusField(field.key)}
+                      className="rounded-full border border-amber-400/25 bg-amber-500/10 px-2 py-1 text-[10px] font-semibold hover:bg-amber-500/20"
+                    >
+                      {field.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="mt-3 rounded-lg border border-blue-400/30 bg-blue-500/10 px-2.5 py-2 text-[10px] text-blue-100">
+              Always compare final terms against the official Utah form and your brokerage review process.
             </div>
           </Card>
         </div>

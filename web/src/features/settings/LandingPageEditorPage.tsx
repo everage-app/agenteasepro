@@ -10,7 +10,6 @@ import {
   Clipboard,
   Copy,
   DollarSign,
-  Download,
   Eye,
   FileText,
   Flame,
@@ -49,6 +48,7 @@ import { useAuthStore } from '../auth/authStore';
 import { getTemplateMediaPack } from '../landing/templateMediaSuggestions';
 import { toDisplayErrorMessage } from '../../lib/errorMessages';
 import { buildLandingPageQrToken, buildTrackedLandingQrUrl } from '../../lib/landingQr';
+import { getLandingPageIntent, type LandingPageKind } from '../../lib/landingPageIntent';
 
 function EditorIconBadge({ icon: Icon, tone = 'cyan' }: { icon: LucideIcon; tone?: 'blue' | 'cyan' | 'emerald' | 'amber' | 'purple' | 'rose' | 'pink' | 'red' }) {
   const toneClass = {
@@ -76,11 +76,32 @@ interface LandingPageAnalyticsData {
     leads: number;
     conversionRate: number;
     qrViews?: number;
+    qrLeads?: number;
+    qrConversionRate?: number;
+    funnel?: {
+      views: number;
+      uniqueVisitors: number;
+      qrScans: number;
+      leads: number;
+      qrLeads: number;
+    };
   };
   topSources: Array<{
     utmSource: string | null;
     _count: {
       utmSource: number;
+    };
+  }>;
+  topCampaigns?: Array<{
+    utmCampaign: string | null;
+    _count: {
+      utmCampaign: number;
+    };
+  }>;
+  topMediums?: Array<{
+    utmMedium: string | null;
+    _count: {
+      utmMedium: number;
     };
   }>;
   deviceBreakdown: Array<{
@@ -141,6 +162,8 @@ interface OpenHouse {
   notes?: string;
 }
 
+type LandingEditorTab = 'theme' | 'content' | 'sections' | 'style' | 'seo' | 'preview';
+
 interface LandingPageData {
   id: string;
   title: string;
@@ -150,6 +173,7 @@ interface LandingPageData {
   templateId: string;
   isActive: boolean;
   customContent?: {
+    pageKind?: string;
     headline?: string;
     subheadline?: string;
     ctaText?: string;
@@ -256,7 +280,11 @@ interface LandingPageAccountDefaults {
   brokerageLogoBackground: 'CARD' | 'TRANSPARENT';
   brokerageAddress: string;
   brokeragePhone: string;
+  brandPrimaryColor: string;
+  brandSecondaryColor: string;
   agentWebsiteUrl: string;
+  defaultAgentPageUrl: string;
+  defaultAgentPageSlug: string;
   agentFacebookUrl: string;
   agentInstagramUrl: string;
   agentLinkedinUrl: string;
@@ -393,6 +421,173 @@ const themes: ThemeConfig[] = [
   },
 ];
 
+const getHeadlineIdeas = (kind: LandingPageKind, listingName: string, agentName: string) => {
+  switch (kind) {
+    case 'listing':
+      return [
+        listingName,
+        `Private tour of ${listingName}`,
+        'Fresh listing with room to move',
+        'See the details before you tour',
+        'A smarter look at this property',
+        'Schedule your private showing',
+      ];
+    case 'agent-profile':
+      return [
+        `Meet ${agentName}`,
+        'Your local real estate guide',
+        'Buying, selling, or planning your next move?',
+        'Real estate help without the pressure',
+        'A clearer next step for your move',
+        'Local guidance from first question to closing',
+      ];
+    case 'seller':
+      return [
+        'What could your home sell for right now?',
+        'Get a local pricing strategy before you list',
+        'Know your home value before the next move',
+        'A smarter seller plan starts here',
+        'See what local buyers may pay',
+        'Prepare to sell with confidence',
+      ];
+    case 'buyer':
+      return [
+        'Find the right home with a sharper plan',
+        'Start your home search with local strategy',
+        'Know what to tour, offer, and avoid',
+        'Get a buyer game plan before you shop',
+        'See homes with a clearer next step',
+        'A better path to your next home',
+      ];
+    default:
+      return [
+        'Start your next real estate step here',
+        'Get local real estate guidance',
+        'A smarter real estate conversation starts here',
+        'Tell us what you need next',
+        'Simple real estate help, fast follow-up',
+        'Connect with a local expert',
+      ];
+  }
+};
+
+const getSubheadlineIdeas = (kind: LandingPageKind, listingFacts: string, agentName: string) => {
+  switch (kind) {
+    case 'listing':
+      return [
+        listingFacts || 'Get photos, pricing context, showing options, and direct guidance from the listing agent.',
+        'See the property highlights, ask questions, and request a private showing in one place.',
+        'Get direct follow-up on disclosures, showing times, and next steps before you tour.',
+        'Everything a serious buyer needs to decide whether this home is worth seeing.',
+      ];
+    case 'agent-profile':
+      return [
+        `Connect with ${agentName} for buying, selling, home value questions, and next-step guidance.`,
+        'Share what you are working on and get a clear, low-pressure next step.',
+        'One simple place to ask about buying, selling, pricing, or local market timing.',
+        'Fast follow-up, local strategy, and a direct line to your agent.',
+      ];
+    case 'seller':
+      return [
+        'Request a local pricing read using comps, timing, and prep-to-sell strategy.',
+        'Get a realistic selling snapshot before you commit to listing.',
+        'See what your home may be worth and what could improve your net.',
+        'Send the address and get a focused next-step seller plan.',
+      ];
+    case 'buyer':
+      return [
+        'Share your search goals and get showing options, offer strategy, and local guidance.',
+        'Get clear next steps before you spend weekends chasing the wrong homes.',
+        'Tell us budget, area, and timing so the agent can build a sharper search plan.',
+        'Move from browsing to a confident buyer plan.',
+      ];
+    default:
+      return [
+        'Share what you need and the agent will follow up with a clear next step.',
+        'A simple way to start the right real estate conversation.',
+        'Fast local follow-up for your next real estate move.',
+        'Tell us the goal and we will help route the next step.',
+      ];
+  }
+};
+
+const getCtaIdeas = (kind: LandingPageKind) => {
+  switch (kind) {
+    case 'listing':
+      return ['Schedule a Showing', 'Request Listing Info', 'Ask About This Home', 'Get Disclosures', 'Book Virtual Tour', 'Contact Listing Agent'];
+    case 'agent-profile':
+      return ['Connect With Me', 'Ask a Question', 'Start a Conversation', 'Get Local Guidance', 'Contact Agent', 'Send Message'];
+    case 'seller':
+      return ['Get My Home Value', 'Request Pricing Strategy', 'See What My Home Could Sell For', 'Start Seller Plan', 'Request Report', 'Talk Selling Timeline'];
+    case 'buyer':
+      return ['Get Buyer Game Plan', 'Share My Search Goals', 'Find Homes With a Plan', 'Start Home Search', 'Ask Buyer Question', 'Book Buyer Consult'];
+    default:
+      return ['Request Info', 'Ask a Question', 'Get Started', 'Contact Agent', 'Send Message', 'Book Consult'];
+  }
+};
+
+const getQuickHighlightIdeas = (kind: LandingPageKind) => {
+  switch (kind) {
+    case 'listing':
+      return [
+        'Gourmet Kitchen',
+        'Mountain Views',
+        'Smart Home',
+        'Pool & Spa',
+        'Home Office',
+        'Walk-in Closet',
+        'Hardwood Floors',
+        'Updated HVAC',
+        'Energy Efficient',
+        'Wine Cellar',
+        'Theater Room',
+        'RV Parking',
+      ];
+    case 'agent-profile':
+      return [
+        'Fast Follow-Up',
+        'Local Market Insight',
+        'Buyer and Seller Guidance',
+        'Clear Next Steps',
+        'Low-Pressure Advice',
+        'Brokerage Support',
+        'Referral Ready',
+        'QR Friendly',
+      ];
+    case 'seller':
+      return [
+        'Local Comp Review',
+        'Pricing Range',
+        'Prep-to-Sell Plan',
+        'Net Sheet Guidance',
+        'Market Timing',
+        'Listing Strategy',
+        'Showing Prep',
+        'Offer Review',
+      ];
+    case 'buyer':
+      return [
+        'Search Strategy',
+        'Showing Plan',
+        'Offer Guidance',
+        'Lender Prep',
+        'Neighborhood Fit',
+        'Budget Clarity',
+        'Tour Shortlist',
+        'Negotiation Help',
+      ];
+    default:
+      return [
+        'Fast Follow-Up',
+        'Local Strategy',
+        'Clear Next Steps',
+        'Market Guidance',
+        'Simple Contact',
+        'Agent Support',
+      ];
+  }
+};
+
 export function LandingPageEditorPage() {
   const { id } = useParams<{ id: string }>();
   const location = useLocation();
@@ -406,7 +601,7 @@ export function LandingPageEditorPage() {
   const [page, setPage] = useState<LandingPageData | null>(null);
   const [accountDefaults, setAccountDefaults] = useState<LandingPageAccountDefaults | null>(null);
   const [selectedTheme, setSelectedTheme] = useState<ThemeConfig | null>(null);
-  const [activeTab, setActiveTab] = useState<'theme' | 'content' | 'sections' | 'style' | 'seo' | 'preview'>('theme');
+  const [activeTab, setActiveTab] = useState<LandingEditorTab>('theme');
   const [previewDevice, setPreviewDevice] = useState<'desktop' | 'tablet' | 'mobile'>('desktop');
   const [previewNonce, setPreviewNonce] = useState(0);
   const [showShareModal, setShowShareModal] = useState(false);
@@ -423,6 +618,7 @@ export function LandingPageEditorPage() {
   const agentPhotoUploadRef = useRef<HTMLInputElement | null>(null);
   const brokerageLogoUploadRef = useRef<HTMLInputElement | null>(null);
   const galleryUploadRef = useRef<HTMLInputElement | null>(null);
+  const [spotlightSection, setSpotlightSection] = useState<string | null>(null);
   
   // Custom content state
   const [headline, setHeadline] = useState('');
@@ -500,7 +696,7 @@ export function LandingPageEditorPage() {
   
   // Lead capture state
   const [leadCaptureEnabled, setLeadCaptureEnabled] = useState(true);
-  const [formTitle, setFormTitle] = useState('Interested in this property?');
+  const [formTitle, setFormTitle] = useState('How can I help?');
   const [formSubtitle, setFormSubtitle] = useState('Fill out the form and we\'ll get back to you within 24 hours.');
   const [leadFormFields, setLeadFormFields] = useState<string[]>(['name', 'email', 'phone']);
   const [leadButtonText, setLeadButtonText] = useState('Request Information');
@@ -510,10 +706,10 @@ export function LandingPageEditorPage() {
   const [forceCaptureEnabled, setForceCaptureEnabled] = useState(false);
   const [forceCaptureDelay, setForceCaptureDelay] = useState(0);
   const [forceCaptureHeadline, setForceCaptureHeadline] = useState('Get instant access');
-  const [forceCaptureSubheadline, setForceCaptureSubheadline] = useState('Enter your details to unlock full property photos, pricing, and schedule a private tour.');
+  const [forceCaptureSubheadline, setForceCaptureSubheadline] = useState('Enter your details to unlock the next step and direct agent follow-up.');
   const [forceCaptureRequirePhone, setForceCaptureRequirePhone] = useState(false);
   const [forceCapturePersistMode, setForceCapturePersistMode] = useState<'SESSION' | 'ALWAYS'>('SESSION');
-  const [forceCaptureCtaText, setForceCaptureCtaText] = useState('Unlock property details');
+  const [forceCaptureCtaText, setForceCaptureCtaText] = useState('Get access');
   
   // Sections visibility state
   const [sections, setSections] = useState({
@@ -567,6 +763,35 @@ export function LandingPageEditorPage() {
     }
   }, [activeTab]);
 
+  useEffect(() => {
+    if (!page || !accountDefaults || !selectedTheme) {
+      return;
+    }
+
+    const savedPrimary = page.customStyles?.primaryColor;
+    const savedSecondary = page.customStyles?.secondaryColor;
+    const looksLikeTemplateDefaults = (!savedPrimary && !savedSecondary) ||
+      (savedPrimary === selectedTheme.colors.primary && savedSecondary === selectedTheme.colors.secondary);
+
+    if (!looksLikeTemplateDefaults) {
+      return;
+    }
+
+    if (accountDefaults.brandPrimaryColor) {
+      setPrimaryColor(accountDefaults.brandPrimaryColor);
+    }
+    if (accountDefaults.brandSecondaryColor) {
+      setSecondaryColor(accountDefaults.brandSecondaryColor);
+    }
+  }, [
+    accountDefaults?.brandPrimaryColor,
+    accountDefaults?.brandSecondaryColor,
+    page?.id,
+    page?.customStyles?.primaryColor,
+    page?.customStyles?.secondaryColor,
+    selectedTheme?.id,
+  ]);
+
   const fetchAccountDefaults = async () => {
     try {
       const [profileRes, brandingRes] = await Promise.all([
@@ -594,7 +819,11 @@ export function LandingPageEditorPage() {
         brokerageLogoBackground: settings.brokerageLogoBackground === 'TRANSPARENT' ? 'TRANSPARENT' : 'CARD',
         brokerageAddress: settings.brokerageAddress || '',
         brokeragePhone: settings.brokeragePhone || '',
+        brandPrimaryColor: brandingData?.primaryColor || settings.brandColor || '',
+        brandSecondaryColor: brandingData?.secondaryColor || settings.accentColor || '',
         agentWebsiteUrl: brandingData?.websiteUrl || '',
+        defaultAgentPageUrl: profileData?.defaultAgentPage?.url || '',
+        defaultAgentPageSlug: profileData?.defaultAgentPage?.slug || '',
         agentFacebookUrl: brandingData?.facebookUrl || '',
         agentInstagramUrl: brandingData?.instagramUrl || '',
         agentLinkedinUrl: brandingData?.linkedinUrl || '',
@@ -706,7 +935,7 @@ export function LandingPageEditorPage() {
 
         if (data.leadCapture) {
           setLeadCaptureEnabled(data.leadCapture.enabled !== false);
-          setFormTitle(data.leadCapture.formTitle || 'Interested in this property?');
+          setFormTitle(data.leadCapture.formTitle || 'How can I help?');
           setFormSubtitle(data.leadCapture.formSubtitle || "Fill out the form and we'll get back to you within 24 hours.");
           setLeadFormFields(data.leadCapture.requiredFields || ['name', 'email', 'phone']);
           setLeadButtonText(data.leadCapture.buttonText || 'Request Information');
@@ -718,10 +947,10 @@ export function LandingPageEditorPage() {
           setForceCaptureEnabled(Boolean(fc.enabled));
           setForceCaptureDelay(Number(fc.delay) || 0);
           setForceCaptureHeadline(fc.headline || 'Get instant access');
-          setForceCaptureSubheadline(fc.subheadline || 'Enter your details to unlock full property photos, pricing, and schedule a private tour.');
+          setForceCaptureSubheadline(fc.subheadline || 'Enter your details to unlock the next step and direct agent follow-up.');
           setForceCaptureRequirePhone(Boolean(fc.requirePhone));
           setForceCapturePersistMode(fc.persistMode === 'ALWAYS' ? 'ALWAYS' : 'SESSION');
-          setForceCaptureCtaText(fc.ctaText || 'Unlock property details');
+          setForceCaptureCtaText(fc.ctaText || 'Get access');
         }
 
         if (data.sections) {
@@ -740,19 +969,103 @@ export function LandingPageEditorPage() {
   const templateMediaPack = getTemplateMediaPack(activeTemplateId);
   const listingHasPhotoFeed = Boolean(page?.listing?.photos?.length);
   const listingIsLinked = Boolean(page?.listing?.addressLine1);
+  const pageIntent = getLandingPageIntent({
+    title: page?.title,
+    description: page?.description,
+    customContent: page?.customContent,
+    sections,
+    listing: page?.listing,
+  });
+  const effectiveAgentName = (agentDisplayName || accountDefaults?.agentDisplayName || page?.customContent?.agentDisplayName || 'your local agent').trim();
+  const effectiveAgentEmail = (agentEmail || accountDefaults?.agentEmail || page?.customContent?.agentEmail || '').trim();
+  const effectiveAgentPhone = (agentPhone || accountDefaults?.agentPhone || page?.customContent?.agentPhone || '').trim();
+  const effectiveAgentPhotoUrl = (agentPhotoUrl || accountDefaults?.agentPhotoUrl || page?.customContent?.agentPhotoUrl || '').trim();
+  const effectiveBrokerageName = (brokerageDisplayName || accountDefaults?.brokerageDisplayName || page?.customContent?.brokerageDisplayName || '').trim();
+  const effectiveBrokerageLogoUrl = (brokerageLogoUrl || accountDefaults?.brokerageLogoUrl || page?.customContent?.brokerageLogoUrl || '').trim();
+  const brandColorSynced = Boolean(
+    accountDefaults?.brandPrimaryColor &&
+    primaryColor.toLowerCase() === accountDefaults.brandPrimaryColor.toLowerCase(),
+  );
+  const brandingGaps = [
+    !effectiveAgentName && 'agent name',
+    !effectiveAgentEmail && 'agent email',
+    !effectiveAgentPhone && 'agent phone',
+    !(effectiveBrokerageName || effectiveBrokerageLogoUrl) && 'brokerage name or logo',
+  ].filter(Boolean) as string[];
+  const listingDisplayName = (page?.listing?.headline || page?.listing?.addressLine1 || page?.title || 'this property').trim();
+  const listingFactLine = [
+    page?.listing?.beds != null && page?.listing?.baths != null ? `${page.listing.beds} beds, ${page.listing.baths} baths` : '',
+    page?.listing?.sqft ? `${Number(page.listing.sqft).toLocaleString()} sqft` : '',
+    [page?.listing?.city, page?.listing?.state].filter(Boolean).join(', '),
+  ].filter(Boolean).join(' - ');
+  const headlineIdeas = getHeadlineIdeas(pageIntent.kind, listingDisplayName, effectiveAgentName);
+  const subheadlineIdeas = getSubheadlineIdeas(pageIntent.kind, listingFactLine, effectiveAgentName);
+  const ctaIdeas = getCtaIdeas(pageIntent.kind);
+  const quickHighlightIdeas = getQuickHighlightIdeas(pageIntent.kind);
+  const seoTitleFallback = pageIntent.kind === 'listing'
+    ? `${listingDisplayName} | For Sale`
+    : pageIntent.kind === 'agent-profile'
+      ? `${effectiveAgentName} | Real Estate`
+      : pageIntent.kind === 'seller'
+        ? 'Free Home Value Report | Local Pricing Strategy'
+        : pageIntent.kind === 'buyer'
+          ? 'Buyer Game Plan | Local Home Search Strategy'
+          : `${pageIntent.label} | Real Estate`;
+  const seoDescriptionFallback = subheadline || subheadlineIdeas[0] || pageIntent.editorDescription;
+  const leadFormTitleFallback = pageIntent.kind === 'listing'
+    ? 'Interested in this property?'
+    : pageIntent.kind === 'seller'
+      ? 'Request your home value report'
+      : pageIntent.kind === 'buyer'
+        ? 'Tell me what you are looking for'
+        : `Connect with ${effectiveAgentName}`;
+  const leadButtonFallback = pageIntent.kind === 'listing'
+    ? 'Request Information'
+    : pageIntent.kind === 'seller'
+      ? 'Request my report'
+      : pageIntent.kind === 'buyer'
+        ? 'Send my game plan'
+        : 'Send message';
+  const forceGateSubheadlinePlaceholder = pageIntent.kind === 'listing'
+    ? 'Enter your details to unlock full property photos, pricing, and schedule a private tour.'
+    : 'Enter your details to unlock this page and direct agent follow-up.';
+  const forceGateCtaPlaceholder = pageIntent.kind === 'listing' ? 'Unlock property details' : 'Get access';
+  const socialProofPlaceholder = pageIntent.kind === 'listing'
+    ? '47 people viewed this property today'
+    : pageIntent.kind === 'seller'
+      ? 'Local seller reports requested this week'
+      : pageIntent.kind === 'buyer'
+        ? 'Buyer plans started this week'
+        : 'Fast local follow-up available today';
+  const urgencyPresets = pageIntent.kind === 'listing'
+    ? ['Hot Property!', 'Price Reduced!', 'Open House Sunday', 'Just Listed', 'Multiple Offers']
+    : pageIntent.kind === 'seller'
+      ? ['Free Home Value Report', 'Market Shift Update', 'Seller Prep Window', 'Pricing Strategy Ready', 'Local Comps Available']
+      : pageIntent.kind === 'buyer'
+        ? ['Buyer Game Plan', 'Tour Shortlist Ready', 'New Search Strategy', 'Offer Prep Help', 'Local Market Update']
+        : ['Fast Reply', 'Local Guidance', 'No Obligation', 'Ask a Question', 'Start Here'];
   const editorPreviewHeroImage =
     heroImageUrl.trim() ||
     galleryImages[0] ||
     page?.listing?.photos?.[0] ||
     selectedTheme?.preview ||
     templateMediaPack.hero;
+  const heroImageCandidates = Array.from(new Map([
+    ...(heroImageUrl.trim() ? [{ url: heroImageUrl.trim(), label: 'Current hero' }] : []),
+    ...((page?.listing?.photos || []).slice(0, 8).map((url, index) => ({ url, label: `Listing photo ${index + 1}` }))),
+    ...(galleryImages.filter(Boolean).map((url, index) => ({ url, label: `Uploaded image ${index + 1}` }))),
+    ...(templateMediaPack.hero ? [{ url: templateMediaPack.hero, label: 'Style hero' }] : []),
+    ...templateMediaPack.gallery.slice(0, 6).map((url, index) => ({ url, label: `Style image ${index + 1}` })),
+  ]
+    .filter((item) => item.url && String(item.url).trim())
+    .map((item) => [item.url, item] as const)).values()).slice(0, 14);
   const editorOrigin = typeof window !== 'undefined' ? window.location.origin : '';
   const defaultListingUrl = page ? `${editorOrigin}/sites/${page.slug}` : '';
   const trimmedQrListingToken = qrListingToken.trim();
   const generatedListingQrUrl = trimmedQrListingToken && defaultListingUrl && page
     ? buildTrackedLandingQrUrl(defaultListingUrl, page.slug, trimmedQrListingToken)
     : '';
-  const effectiveListingQrDestination = qrListingUrl.trim() || generatedListingQrUrl || defaultListingUrl;
+  const effectiveListingQrDestination = generatedListingQrUrl || qrListingUrl.trim() || defaultListingUrl;
   const handleShowHeaderQrChange = (checked: boolean) => {
     setShowHeaderQr(checked);
     if (checked && !qrListingToken.trim() && !qrListingUrl.trim()) {
@@ -848,23 +1161,24 @@ export function LandingPageEditorPage() {
           heroImage: heroImageUrl.trim() || null,
           templateId: selectedTheme?.id,
           customContent: {
+            pageKind: page.customContent?.pageKind || pageIntent.storageKind,
             headline,
             subheadline,
             ctaText,
             ctaSecondaryText,
-            agentDisplayName,
-            agentTitle,
-            agentEmail,
-            agentPhone,
-            agentPhotoUrl,
-            agentWebsiteUrl,
-            agentFacebookUrl,
-            agentInstagramUrl,
-            agentLinkedinUrl,
-            brokerageDisplayName,
-            brokerageLogoUrl,
-            brokerageAddress,
-            brokeragePhone,
+            agentDisplayName: agentDisplayName.trim(),
+            agentTitle: agentTitle.trim(),
+            agentEmail: agentEmail.trim(),
+            agentPhone: agentPhone.trim(),
+            agentPhotoUrl: agentPhotoUrl.trim(),
+            agentWebsiteUrl: agentWebsiteUrl.trim(),
+            agentFacebookUrl: agentFacebookUrl.trim(),
+            agentInstagramUrl: agentInstagramUrl.trim(),
+            agentLinkedinUrl: agentLinkedinUrl.trim(),
+            brokerageDisplayName: brokerageDisplayName.trim(),
+            brokerageLogoUrl: brokerageLogoUrl.trim(),
+            brokerageAddress: brokerageAddress.trim(),
+            brokeragePhone: brokeragePhone.trim(),
             galleryImages,
             features,
             agentBio,
@@ -970,16 +1284,14 @@ export function LandingPageEditorPage() {
     page?.listing?.photos?.length,
   );
 
-  const brandingReady = Boolean(
-    (agentDisplayName.trim() || accountDefaults?.agentDisplayName) &&
-    (agentEmail.trim() || accountDefaults?.agentEmail) &&
-    (agentPhone.trim() || accountDefaults?.agentPhone),
-  );
+  const brandingReady = brandingGaps.length === 0;
 
   const leadCaptureReady = Boolean(
     !leadCaptureEnabled ||
     (formTitle.trim() && leadButtonText.trim() && leadFormFields.length > 0),
   );
+  const seoReady = Boolean(metaTitle.trim() && metaDescription.trim());
+  const qrReady = Boolean(!showHeaderQr || trimmedQrListingToken || qrListingUrl.trim());
 
   const creationChecklist = [
     {
@@ -988,20 +1300,28 @@ export function LandingPageEditorPage() {
       description: 'Pick the visual direction for the live page.',
       complete: Boolean(selectedTheme),
       targetTab: 'theme' as const,
+      targetSection: 'theme-picker',
+      actionLabel: selectedTheme ? 'Review theme' : 'Choose theme',
     },
     {
       id: 'content',
       label: 'Add hero and content',
-      description: 'Set the headline, media, and property story.',
+      description: pageIntent.kind === 'listing' ? 'Set the property headline, media, and listing story.' : 'Set the headline, media, and lead offer.',
       complete: contentReady,
       targetTab: 'content' as const,
+      targetSection: 'hero-content',
+      actionLabel: contentReady ? 'Review content' : 'Add content',
     },
     {
       id: 'branding',
       label: 'Confirm agent branding',
-      description: 'Make sure contact details and brokerage identity are ready.',
+      description: brandingReady
+        ? `${effectiveAgentName}${effectiveBrokerageName ? ` - ${effectiveBrokerageName}` : ''}`
+        : `Missing ${brandingGaps.join(', ')}.`,
       complete: brandingReady,
       targetTab: 'content' as const,
+      targetSection: 'agent-branding',
+      actionLabel: brandingReady ? 'Review branding' : 'Fix branding',
     },
     {
       id: 'leads',
@@ -1009,6 +1329,26 @@ export function LandingPageEditorPage() {
       description: 'Confirm the form title, fields, and CTA text.',
       complete: leadCaptureReady,
       targetTab: 'seo' as const,
+      targetSection: 'lead-capture',
+      actionLabel: leadCaptureReady ? 'Review form' : 'Fix form',
+    },
+    {
+      id: 'seo',
+      label: 'Set SEO preview text',
+      description: 'Add title and description for search and social previews.',
+      complete: seoReady,
+      targetTab: 'seo' as const,
+      targetSection: 'seo-preview',
+      actionLabel: seoReady ? 'Review SEO' : 'Add SEO',
+    },
+    {
+      id: 'qr',
+      label: 'Confirm QR tracking',
+      description: 'Keep the public QR tied to a tracked page token.',
+      complete: qrReady,
+      targetTab: 'seo' as const,
+      targetSection: 'qr-tracking',
+      actionLabel: qrReady ? 'Review QR' : 'Fix QR',
     },
     {
       id: 'preview',
@@ -1016,6 +1356,8 @@ export function LandingPageEditorPage() {
       description: 'Check how the public route looks before publishing.',
       complete: hasViewedPreview,
       targetTab: 'preview' as const,
+      targetSection: 'full-preview',
+      actionLabel: hasViewedPreview ? 'Open preview' : 'Preview page',
     },
     {
       id: 'save',
@@ -1023,10 +1365,39 @@ export function LandingPageEditorPage() {
       description: 'Persist the final version so the setup is complete.',
       complete: hasSavedSinceCreate,
       targetTab: activeTab,
+      targetSection: null,
+      actionLabel: hasSavedSinceCreate ? 'Save again' : 'Save now',
     },
   ];
 
   const completedChecklistCount = creationChecklist.filter((item) => item.complete).length;
+  const nextChecklistItem = creationChecklist.find((item) => !item.complete);
+  const sectionSpotlightClass = (sectionId: string) =>
+    spotlightSection === sectionId ? 'ring-2 ring-cyan-300/70 shadow-[0_0_0_1px_rgba(103,232,249,0.22),0_24px_80px_-44px_rgba(34,211,238,0.95)]' : '';
+
+  const jumpToWorkflowItem = (item: typeof creationChecklist[number]) => {
+    if (item.id === 'save') {
+      void handleSave();
+      return;
+    }
+
+    setActiveTab(item.targetTab);
+
+    const targetSection = item.targetSection;
+    if (!targetSection) {
+      return;
+    }
+
+    setSpotlightSection(targetSection);
+    window.setTimeout(() => {
+      document
+        .querySelector(`[data-editor-section="${targetSection}"]`)
+        ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 80);
+    window.setTimeout(() => {
+      setSpotlightSection((current) => (current === targetSection ? null : current));
+    }, 2200);
+  };
 
   const addFeature = () => {
     if (newFeature.trim() && features.length < 8) {
@@ -1053,13 +1424,19 @@ export function LandingPageEditorPage() {
     setBrokerageLogoUrl(accountDefaults.brokerageLogoUrl);
     setBrokerageAddress(accountDefaults.brokerageAddress);
     setBrokeragePhone(accountDefaults.brokeragePhone);
+    if (accountDefaults.brandPrimaryColor) {
+      setPrimaryColor(accountDefaults.brandPrimaryColor);
+    }
+    if (accountDefaults.brandSecondaryColor) {
+      setSecondaryColor(accountDefaults.brandSecondaryColor);
+    }
     if (!agentBio.trim()) {
       setAgentBio(accountDefaults.agentBio);
     }
+    showToast('success', 'Account branding loaded into this landing page. Save to publish it.');
   };
 
   const clearPageIdentityOverrides = () => {
-    setHeroImageUrl('');
     setAgentDisplayName('');
     setAgentTitle('');
     setAgentEmail('');
@@ -1143,7 +1520,7 @@ export function LandingPageEditorPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950">
+    <div className="ae-settings-content min-h-screen bg-slate-950">
       <input
         ref={heroImageUploadRef}
         data-upload-slot="hero"
@@ -1213,8 +1590,15 @@ export function LandingPageEditorPage() {
                 </svg>
               </button>
               <div>
-                <h1 className="text-lg font-bold text-white">{page.title}</h1>
-                <p className="text-xs text-slate-400">/sites/{page.slug}</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h1 className="text-lg font-bold text-white">{page.title}</h1>
+                  <span className="rounded-full border border-cyan-400/25 bg-cyan-500/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-cyan-200">
+                    {pageIntent.label}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-400">
+                  /sites/{page.slug} - {pageIntent.dashboardDetail}
+                </p>
               </div>
             </div>
             <div className="flex items-center gap-3">
@@ -1309,26 +1693,36 @@ export function LandingPageEditorPage() {
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
               <div>
                 <p className="text-xs uppercase tracking-[0.18em] text-cyan-300">New page workflow</p>
-                <h2 className="mt-2 text-lg font-semibold text-white">You are now in the full landing page editor</h2>
+                <h2 className="mt-2 text-lg font-semibold text-white">You are editing a {pageIntent.label.toLowerCase()}</h2>
                 <p className="mt-2 max-w-3xl text-sm text-slate-300">
-                  Finish the page the way your agents expect: choose the theme, tune the copy and sections, preview the live route, then save when the page is ready to publish.
+                  {pageIntent.editorDescription} Choose the theme, tune the copy and sections, preview the live route, then save when the page is ready to publish.
                 </p>
                 <div className="mt-4 inline-flex items-center gap-2 rounded-full border border-white/10 bg-slate-950/30 px-3 py-1 text-xs text-slate-200">
                   <span className="font-semibold text-cyan-200">{completedChecklistCount}/{creationChecklist.length}</span>
                   steps complete
                 </div>
+                {nextChecklistItem && (
+                  <button
+                    type="button"
+                    onClick={() => jumpToWorkflowItem(nextChecklistItem)}
+                    className="ml-0 mt-3 inline-flex items-center gap-2 rounded-full border border-amber-300/30 bg-amber-400/15 px-3 py-1.5 text-xs font-semibold text-amber-100 transition-colors hover:bg-amber-400/25 sm:ml-3 sm:mt-4"
+                  >
+                    Next: {nextChecklistItem.actionLabel}
+                    <span aria-hidden="true">-&gt;</span>
+                  </button>
+                )}
               </div>
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
-                  onClick={() => setActiveTab('content')}
+                  onClick={() => jumpToWorkflowItem(creationChecklist.find((item) => item.id === 'content') || creationChecklist[1])}
                   className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-medium text-slate-200 transition-colors hover:bg-white/10 hover:text-white"
                 >
                   Go To Content
                 </button>
                 <button
                   type="button"
-                  onClick={() => setActiveTab('preview')}
+                  onClick={() => jumpToWorkflowItem(creationChecklist.find((item) => item.id === 'preview') || creationChecklist[6])}
                   className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-2 text-sm font-medium text-cyan-200 transition-colors hover:bg-cyan-500/20 hover:text-cyan-100"
                 >
                   Jump To Preview
@@ -1348,23 +1742,19 @@ export function LandingPageEditorPage() {
                 <button
                   key={item.id}
                   type="button"
-                  onClick={() => {
-                    if (item.id === 'save') {
-                      void handleSave();
-                      return;
-                    }
-                    setActiveTab(item.targetTab);
-                  }}
-                  className={`rounded-2xl border p-4 text-left transition-colors ${
+                  onClick={() => jumpToWorkflowItem(item)}
+                  className={`group rounded-2xl border p-4 text-left transition-all hover:-translate-y-0.5 ${
                     item.complete
-                      ? 'border-emerald-500/20 bg-emerald-500/10'
-                      : 'border-white/10 bg-slate-950/20 hover:border-cyan-500/30 hover:bg-cyan-500/5'
+                      ? 'border-emerald-500/25 bg-emerald-500/10 hover:border-emerald-300/45 hover:bg-emerald-500/15'
+                      : 'border-white/10 bg-slate-950/20 hover:border-cyan-500/35 hover:bg-cyan-500/10'
                   }`}
                 >
                   <div className="flex items-start justify-between gap-3">
-                    <div>
+                    <div className="min-w-0">
                       <div className="text-sm font-semibold text-white">{item.label}</div>
-                      <p className="mt-1 text-xs text-slate-300">{item.description}</p>
+                      <p className={`mt-1 line-clamp-2 text-xs ${item.complete ? 'text-emerald-100/80' : item.id === 'branding' && !item.complete ? 'text-amber-100' : 'text-slate-300'}`}>
+                        {item.description}
+                      </p>
                     </div>
                     <div
                       className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full border ${
@@ -1377,14 +1767,22 @@ export function LandingPageEditorPage() {
                         <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                         </svg>
-                      ) : item.id === 'save' ? (
-                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                        </svg>
                       ) : (
                         <span className="text-xs font-semibold">Go</span>
                       )}
                     </div>
+                  </div>
+                  <div className="mt-3 flex items-center justify-between gap-3">
+                    <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                      item.complete
+                        ? 'bg-emerald-400/15 text-emerald-100'
+                        : 'bg-cyan-400/10 text-cyan-100 group-hover:bg-cyan-400/20'
+                    }`}>
+                      {item.actionLabel}
+                    </span>
+                    <span className="text-[11px] font-medium text-slate-500 group-hover:text-slate-300">
+                      {item.complete ? 'Ready' : 'Open'}
+                    </span>
                   </div>
                 </button>
               ))}
@@ -1403,14 +1801,16 @@ export function LandingPageEditorPage() {
             <div className="flex items-center justify-between gap-3">
               <div>
                 <p className="text-xs uppercase tracking-[0.18em] text-cyan-300">Live page wiring</p>
-                <h2 className="mt-2 text-lg font-semibold text-white">Profile, branding, preview, and live link are aligned</h2>
+                <h2 className="mt-2 text-lg font-semibold text-white">{pageIntent.label}: profile, branding, preview, and live link are aligned</h2>
               </div>
               <div className="rounded-xl bg-emerald-500/10 px-3 py-2 text-xs font-medium text-emerald-300 border border-emerald-500/20">
                 Public route active
               </div>
             </div>
             <p className="mt-3 text-sm text-slate-400">
-              This page now previews and publishes through the same public route. Agent profile, brokerage identity, contact details, and brand styling come from profile settings and are rendered on the live page visitors see.
+              {pageIntent.kind === 'listing'
+                ? 'This public route should lead with the property details first, then support the agent with brokerage identity, contact actions, QR tracking, and lead capture.'
+                : `${pageIntent.editorDescription} Agent profile, brokerage identity, contact details, and brand styling render on the live page visitors see.`}
             </p>
           </div>
 
@@ -1428,15 +1828,23 @@ export function LandingPageEditorPage() {
               <MetricCard label="Unique" value={String(analytics?.summary.uniqueVisitors ?? 0)} />
               <MetricCard label="Leads" value={String(analytics?.summary.leads ?? 0)} />
               <MetricCard label="QR scans" value={String(analytics?.summary.qrViews ?? 0)} />
+              <MetricCard label="QR leads" value={String(analytics?.summary.qrLeads ?? 0)} />
               <MetricCard label="Conversion" value={`${(analytics?.summary.conversionRate ?? 0).toFixed(1)}%`} />
+              <MetricCard label="QR conversion" value={`${(analytics?.summary.qrConversionRate ?? 0).toFixed(1)}%`} />
             </div>
 
             <div className="mt-4 space-y-2 text-xs text-slate-400">
               <div>
-                Listing QR: <span className="text-slate-200">{showHeaderQr ? (trimmedQrListingToken ? `Active token ${trimmedQrListingToken}` : 'Active page QR') : 'Hidden from public top tile'}</span>
+                Page QR: <span className="text-slate-200">{showHeaderQr ? (trimmedQrListingToken ? `Active token ${trimmedQrListingToken}` : 'Active page QR') : 'Hidden from public top tile'}</span>
               </div>
               <div>
                 Top source: <span className="text-slate-200">{analytics?.topSources?.[0]?.utmSource || 'Direct / uncategorized'}</span>
+              </div>
+              <div>
+                Top campaign: <span className="text-slate-200">{analytics?.topCampaigns?.[0]?.utmCampaign || 'No campaign data yet'}</span>
+              </div>
+              <div>
+                Top medium: <span className="text-slate-200">{analytics?.topMediums?.[0]?.utmMedium || 'No medium data yet'}</span>
               </div>
               <div>
                 Top device: <span className="text-slate-200">{analytics?.deviceBreakdown?.[0]?.device || 'Unknown'}</span>
@@ -1450,10 +1858,12 @@ export function LandingPageEditorPage() {
 
         {/* Theme Selection */}
         {activeTab === 'theme' && (
-          <div className="space-y-6">
+          <div data-editor-section="theme-picker" className={`scroll-mt-56 space-y-6 rounded-2xl transition-all duration-300 ${sectionSpotlightClass('theme-picker')}`}>
             <div>
               <h2 className="text-xl font-bold text-white mb-2">Choose Your Theme</h2>
-              <p className="text-slate-400 text-sm">Select a theme that matches your listing's style. You can customize colors in the Style tab.</p>
+              <p className="text-slate-400 text-sm">
+                Select a theme that matches this {pageIntent.label.toLowerCase()}. You can customize colors in the Style tab.
+              </p>
             </div>
             
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -1535,8 +1945,8 @@ export function LandingPageEditorPage() {
           <div className="space-y-8">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
-                <h2 className="text-xl font-bold text-white mb-2">Customize Content</h2>
-                <p className="text-slate-400 text-sm">Personalize your landing page with custom headlines, features, and more.</p>
+                <h2 className="text-xl font-bold text-white mb-2">{pageIntent.editorHeading}</h2>
+                <p className="text-slate-400 text-sm">{pageIntent.editorDescription}</p>
               </div>
               <button
                 type="button"
@@ -1566,7 +1976,7 @@ export function LandingPageEditorPage() {
                     <p className="mt-1 text-sm text-amber-100">
                       {listingIsLinked
                         ? 'This listing is linked but has no photos yet. Start with template images now, then replace them when listing photos arrive.'
-                        : 'No listing linked yet. We can prefill premium template images now so this page looks complete in seconds.'}
+                        : pageIntent.heroImageHelper}
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">
@@ -1584,7 +1994,7 @@ export function LandingPageEditorPage() {
                     >
                       Apply {selectedTheme?.name || 'template'} images
                     </button>
-                    {!listingIsLinked && (
+                    {pageIntent.kind === 'listing' && !listingIsLinked && (
                       <a
                         href="/landing-pages"
                         className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs font-medium text-slate-200 hover:bg-white/10"
@@ -1618,6 +2028,119 @@ export function LandingPageEditorPage() {
               </div>
             )}
 
+            <div
+              data-editor-section="hero-content"
+              className={`scroll-mt-56 rounded-2xl border border-cyan-400/20 bg-gradient-to-br from-slate-950/80 via-cyan-500/10 to-blue-500/10 p-5 shadow-[0_22px_60px_-42px_rgba(34,211,238,0.65)] transition-all duration-300 ${sectionSpotlightClass('hero-content')}`}
+            >
+              <div className="grid gap-5 lg:grid-cols-[minmax(280px,0.9fr)_minmax(0,1.1fr)] lg:items-start">
+                <div className="overflow-hidden rounded-2xl border border-white/10 bg-slate-950 shadow-2xl">
+                  <div className="relative aspect-[16/10]">
+                    {editorPreviewHeroImage ? (
+                      <img src={editorPreviewHeroImage} alt="Current hero preview" className="h-full w-full object-cover" />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center bg-slate-900 text-sm text-slate-400">
+                        No hero selected
+                      </div>
+                    )}
+                    <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent p-4">
+                      <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-cyan-200">Hero image</div>
+                      <div className="mt-1 line-clamp-2 text-sm font-semibold text-white">
+                        {heroImageUrl.trim() ? 'Custom hero selected' : 'Using first available page image'}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <div>
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                          <EditorIconBadge icon={ImageIcon} tone="cyan" />
+                          Hero Image Studio
+                        </h3>
+                        <p className="mt-2 text-xs leading-5 text-slate-400">{pageIntent.heroImageHelper}</p>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => heroImageUploadRef.current?.click()}
+                          disabled={Boolean(uploadingAssets.hero)}
+                          className="rounded-xl border border-cyan-400/30 bg-cyan-500/15 px-3 py-2 text-xs font-semibold text-cyan-100 hover:bg-cyan-500/25 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {uploadingAssets.hero ? 'Uploading...' : 'Upload hero'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const firstGallery = galleryImages[0] || page?.listing?.photos?.[0] || templateMediaPack.hero;
+                            if (firstGallery) setHeroImageUrl(firstGallery);
+                          }}
+                          disabled={!galleryImages[0] && !page?.listing?.photos?.[0] && !templateMediaPack.hero}
+                          className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-slate-200 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          Use first image
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setHeroImageUrl('')}
+                          disabled={!heroImageUrl.trim()}
+                          className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-slate-300 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          Clear custom
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="mt-4">
+                      <label className="block text-xs font-medium uppercase tracking-[0.16em] text-slate-500 mb-2">Hero image URL</label>
+                      <input
+                        type="url"
+                        value={heroImageUrl}
+                        onChange={(e) => setHeroImageUrl(e.target.value)}
+                        placeholder="https://example.com/hero-image.jpg"
+                        className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/50 transition-all"
+                      />
+                    </div>
+                  </div>
+
+                  {heroImageCandidates.length > 0 && (
+                    <div>
+                      <div className="mb-2 flex items-center justify-between gap-3">
+                        <p className="text-xs font-medium uppercase tracking-[0.16em] text-slate-500">Pick from available images</p>
+                        <span className="text-[11px] text-slate-500">{heroImageCandidates.length} ready</span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                        {heroImageCandidates.map((candidate) => {
+                          const isActiveHero = candidate.url === (heroImageUrl.trim() || editorPreviewHeroImage);
+                          return (
+                            <button
+                              key={candidate.url}
+                              type="button"
+                              onClick={() => setHeroImageUrl(candidate.url)}
+                              className={`group overflow-hidden rounded-xl border bg-slate-950 text-left transition-all ${
+                                isActiveHero
+                                  ? 'border-cyan-300 shadow-[0_0_0_1px_rgba(103,232,249,0.55)]'
+                                  : 'border-white/10 hover:border-cyan-400/45'
+                              }`}
+                            >
+                              <div className="aspect-[4/3] overflow-hidden">
+                                <img src={candidate.url} alt={candidate.label} className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105" />
+                              </div>
+                              <div className="flex items-center justify-between gap-2 px-2 py-1.5">
+                                <span className="truncate text-[10px] font-medium text-slate-200">{candidate.label}</span>
+                                {isActiveHero && <Check className="h-3.5 w-3.5 shrink-0 text-cyan-200" />}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
               {/* Left column - inputs */}
               <div className="space-y-6">
@@ -1628,26 +2151,20 @@ export function LandingPageEditorPage() {
                   </h3>
                   
                   <div>
-                    <label className="block text-sm font-medium text-slate-300 mb-2">Main Headline</label>
+                    <label className="block text-sm font-medium text-slate-300 mb-2">{pageIntent.headlineLabel}</label>
                     <input
                       type="text"
                       value={headline}
                       onChange={(e) => setHeadline(e.target.value)}
-                      placeholder={page.listing?.addressLine1 || 'Your Dream Home Awaits'}
+                      placeholder={headlineIdeas[0]}
                       className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/50 transition-all"
                     />
+                    <p className="mt-2 text-xs text-slate-500">{pageIntent.headlineHelper}</p>
                     {/* Headline suggestions */}
                     <div className="mt-2">
                       <p className="text-xs text-slate-500 mb-1">Headline Ideas:</p>
                       <div className="flex flex-wrap gap-1">
-                        {[
-                          `Welcome to ${page.listing?.addressLine1?.split(' ').slice(1).join(' ') || 'Your New Home'}`,
-                          'Live the Dream',
-                          'Where Luxury Meets Comfort',
-                          'Your Perfect Home Awaits',
-                          'A Rare Find',
-                          'Move-In Ready Beauty',
-                        ].map((suggestion) => (
+                        {headlineIdeas.map((suggestion) => (
                           <button
                             key={suggestion}
                             onClick={() => setHeadline(suggestion)}
@@ -1665,7 +2182,7 @@ export function LandingPageEditorPage() {
                     <textarea
                       value={subheadline}
                       onChange={(e) => setSubheadline(e.target.value)}
-                      placeholder="A stunning property in the heart of the city..."
+                      placeholder={subheadlineIdeas[0]}
                       rows={2}
                       className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/50 transition-all resize-none"
                     />
@@ -1673,19 +2190,13 @@ export function LandingPageEditorPage() {
                     <div className="mt-2">
                       <p className="text-xs text-slate-500 mb-1">Subheadline Ideas:</p>
                       <div className="flex flex-wrap gap-1">
-                        {[
-                          `${page.listing?.beds || 4} beds • ${page.listing?.baths || 3} baths • ${page.listing?.sqft?.toLocaleString() || '2,500'} sqft of luxury living`,
-                          'An exceptional opportunity in a prime location',
-                          'Where every detail has been thoughtfully designed',
-                          'Experience the perfect blend of style and comfort',
-                          'Your search ends here',
-                        ].map((suggestion) => (
+                        {subheadlineIdeas.map((suggestion) => (
                           <button
                             key={suggestion}
                             onClick={() => setSubheadline(suggestion)}
                             className="px-2 py-0.5 rounded bg-white/5 hover:bg-white/10 text-[10px] text-slate-400 transition-colors"
                           >
-                            {suggestion.slice(0, 40)}...
+                            {suggestion.length > 42 ? `${suggestion.slice(0, 40)}...` : suggestion}
                           </button>
                         ))}
                       </div>
@@ -1719,14 +2230,7 @@ export function LandingPageEditorPage() {
                   <div>
                     <p className="text-xs text-slate-500 mb-2">Popular CTAs</p>
                     <div className="flex flex-wrap gap-2">
-                      {[
-                        'Schedule a Showing',
-                        'Request Info',
-                        'Get Pre-Approved',
-                        'Ask a Question',
-                        'Book Virtual Tour',
-                        'Contact Agent',
-                      ].map((cta) => (
+                      {ctaIdeas.map((cta) => (
                         <button
                           key={cta}
                           onClick={() => setCtaText(cta)}
@@ -1742,13 +2246,17 @@ export function LandingPageEditorPage() {
                 <div className="p-6 rounded-2xl bg-white/5 border border-white/10 space-y-5">
                   <h3 className="text-sm font-semibold text-white flex items-center gap-2">
                     <EditorIconBadge icon={Sparkles} tone="emerald" />
-                    Property Features
+                    {pageIntent.kind === 'listing' ? 'Property Features' : 'Page Highlights'}
                   </h3>
 
                   <div className="rounded-2xl border border-white/10 bg-slate-950/50 p-4 space-y-3">
                     <div>
                       <div className="text-sm font-medium text-white">Gallery Images</div>
-                      <div className="mt-1 text-xs text-slate-400">Add extra property images to the public page gallery. Listing and MLS photos still flow through automatically.</div>
+                      <div className="mt-1 text-xs text-slate-400">
+                        {pageIntent.kind === 'listing'
+                          ? 'Add extra property images to the public page gallery. Listing and MLS photos still flow through automatically.'
+                          : 'Add page imagery that supports this campaign. Profile, brokerage, and lead capture still flow through automatically.'}
+                      </div>
                     </div>
                     <div className="flex justify-end">
                       <button
@@ -1772,7 +2280,7 @@ export function LandingPageEditorPage() {
                             setGalleryImageDraft('');
                           }
                         }}
-                        placeholder="https://example.com/property-photo.jpg"
+                        placeholder={pageIntent.kind === 'listing' ? 'https://example.com/property-photo.jpg' : 'https://example.com/page-photo.jpg'}
                         className="flex-1 px-4 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/50 transition-all text-sm"
                       />
                       <button
@@ -1796,6 +2304,16 @@ export function LandingPageEditorPage() {
                             </div>
                             <div className="min-w-0 flex-1 truncate text-xs text-slate-300">{imageUrl}</div>
                             <button
+                              onClick={() => setHeroImageUrl(imageUrl)}
+                              className={`rounded-lg px-2 py-1 text-xs ${
+                                heroImageUrl.trim() === imageUrl
+                                  ? 'bg-cyan-500/15 text-cyan-200'
+                                  : 'text-cyan-300 hover:bg-cyan-500/10'
+                              }`}
+                            >
+                              {heroImageUrl.trim() === imageUrl ? 'Hero' : 'Set hero'}
+                            </button>
+                            <button
                               onClick={() => setGalleryImages((current) => current.filter((item) => item !== imageUrl))}
                               className="rounded-lg px-2 py-1 text-xs text-rose-300 hover:bg-rose-500/10"
                             >
@@ -1811,20 +2329,7 @@ export function LandingPageEditorPage() {
                   <div>
                     <p className="text-xs text-slate-500 mb-2">Quick Add</p>
                     <div className="flex flex-wrap gap-2 mb-3">
-                      {[
-                        'Gourmet Kitchen',
-                        'Mountain Views',
-                        'Smart Home',
-                        'Pool & Spa',
-                        'Home Office',
-                        'Walk-in Closet',
-                        'Hardwood Floors',
-                        'Updated HVAC',
-                        'Energy Efficient',
-                        'Wine Cellar',
-                        'Theater Room',
-                        'RV Parking',
-                      ].filter(f => !features.includes(f)).slice(0, 6).map((feature) => (
+                      {quickHighlightIdeas.filter(f => !features.includes(f)).slice(0, 6).map((feature) => (
                         <button
                           key={feature}
                           onClick={() => features.length < 8 && setFeatures([...features, feature])}
@@ -1947,7 +2452,10 @@ export function LandingPageEditorPage() {
                   )}
                 </div>
 
-                <div className="p-6 rounded-2xl bg-white/5 border border-white/10 space-y-5">
+                <div
+                  data-editor-section="agent-branding"
+                  className={`scroll-mt-56 p-6 rounded-2xl bg-white/5 border border-white/10 space-y-5 transition-all duration-300 ${sectionSpotlightClass('agent-branding')}`}
+                >
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                     <div>
                       <h3 className="text-sm font-semibold text-white flex items-center gap-2">
@@ -1959,9 +2467,9 @@ export function LandingPageEditorPage() {
                     <div className="flex flex-wrap gap-2">
                       <button
                         onClick={applyAccountDefaultsToOverrides}
-                        className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-slate-200 hover:bg-white/10"
+                        className="rounded-xl border border-cyan-400/30 bg-cyan-500/10 px-3 py-2 text-xs font-semibold text-cyan-100 hover:bg-cyan-500/20"
                       >
-                        Use Current Settings
+                        Sync account branding
                       </button>
                       <button
                         onClick={clearPageIdentityOverrides}
@@ -1972,29 +2480,69 @@ export function LandingPageEditorPage() {
                     </div>
                   </div>
 
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div>
-                      <div className="mb-2 flex items-center justify-between gap-3">
-                        <label className="block text-sm font-medium text-slate-300">Hero Image URL</label>
-                        <button
-                          type="button"
-                          onClick={() => heroImageUploadRef.current?.click()}
-                          disabled={Boolean(uploadingAssets.hero)}
-                          className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-slate-200 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          {uploadingAssets.hero ? 'Uploading...' : 'Upload image'}
-                        </button>
+                  <div className={`rounded-2xl border p-4 ${brandingReady ? 'border-emerald-400/25 bg-emerald-500/10' : 'border-amber-400/25 bg-amber-500/10'}`}>
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                      <div>
+                        <div className={`text-xs font-bold uppercase tracking-[0.16em] ${brandingReady ? 'text-emerald-200' : 'text-amber-200'}`}>
+                          {brandingReady ? 'Branding ready' : 'Branding needs attention'}
+                        </div>
+                        <p className="mt-1 text-sm text-slate-200">
+                          This page will show {effectiveAgentName || 'the agent name'}
+                          {effectiveBrokerageName ? ` with ${effectiveBrokerageName}` : effectiveBrokerageLogoUrl ? ' with the brokerage logo' : ''}.
+                        </p>
+                        {!brandingReady && (
+                          <p className="mt-1 text-xs text-amber-100">
+                            Add {brandingGaps.join(', ')} or click Sync account branding.
+                          </p>
+                        )}
                       </div>
-                      <input
-                        type="url"
-                        value={heroImageUrl}
-                        onChange={(e) => setHeroImageUrl(e.target.value)}
-                        placeholder="https://example.com/hero-image.jpg"
-                        className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/50 transition-all"
-                      />
-                      <p className="mt-2 text-xs text-slate-500">Overrides the main hero image before gallery or listing photos.</p>
+                      <div className="flex flex-wrap gap-2">
+                        <a
+                          href="/settings/profile"
+                          target="_blank"
+                          rel="noreferrer"
+                          className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-slate-200 hover:bg-white/10"
+                        >
+                          Profile settings
+                        </a>
+                        <a
+                          href="/settings/branding"
+                          target="_blank"
+                          rel="noreferrer"
+                          className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-slate-200 hover:bg-white/10"
+                        >
+                          Brand settings
+                        </a>
+                      </div>
                     </div>
 
+                    <div className="mt-4 grid gap-3 md:grid-cols-3">
+                      <div className="rounded-xl border border-white/10 bg-slate-950/35 p-3">
+                        <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">Contact</div>
+                        <div className="mt-2 text-sm font-semibold text-white">{effectiveAgentName || 'Agent name missing'}</div>
+                        <div className="mt-1 truncate text-xs text-slate-400">{effectiveAgentEmail || 'Email missing'}</div>
+                        <div className="truncate text-xs text-slate-400">{effectiveAgentPhone || 'Phone missing'}</div>
+                      </div>
+                      <div className="rounded-xl border border-white/10 bg-slate-950/35 p-3">
+                        <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">Brokerage</div>
+                        <div className="mt-2 text-sm font-semibold text-white">{effectiveBrokerageName || 'Brokerage name missing'}</div>
+                        <div className="mt-1 text-xs text-slate-400">{effectiveBrokerageLogoUrl ? 'Logo ready' : 'Logo optional, name required'}</div>
+                      </div>
+                      <div className="rounded-xl border border-white/10 bg-slate-950/35 p-3">
+                        <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">Brand colors</div>
+                        <div className="mt-2 flex items-center gap-2">
+                          <span className="h-5 w-5 rounded-full border border-white/20" style={{ backgroundColor: primaryColor }} />
+                          <span className="h-5 w-5 rounded-full border border-white/20" style={{ backgroundColor: secondaryColor }} />
+                          <span className="text-xs font-semibold text-slate-200">{brandColorSynced ? 'Synced' : 'Page custom'}</span>
+                        </div>
+                        <div className="mt-1 text-xs text-slate-400">
+                          {accountDefaults?.brandPrimaryColor ? 'Account brand available' : 'Set brand colors in settings'}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-4 md:grid-cols-2">
                     <div>
                       <div className="mb-2 flex items-center justify-between gap-3">
                         <label className="block text-sm font-medium text-slate-300">Agent Photo URL</label>
@@ -2245,13 +2793,13 @@ export function LandingPageEditorPage() {
                           className="text-lg font-bold leading-tight"
                           style={{ color: selectedTheme?.colors.text || '#f1f5f9' }}
                         >
-                          {headline || page.listing?.addressLine1 || 'Your Dream Home'}
+                          {headline || page.listing?.addressLine1 || headlineIdeas[0]}
                         </h2>
                         <p 
                           className="text-xs mt-1 opacity-80"
                           style={{ color: selectedTheme?.colors.text || '#f1f5f9' }}
                         >
-                          {subheadline || 'A stunning property awaits...'}
+                          {subheadline || subheadlineIdeas[0]}
                         </p>
                       </div>
                     </div>
@@ -2705,7 +3253,7 @@ export function LandingPageEditorPage() {
           <div className="space-y-8">
             <div>
               <h2 className="text-xl font-bold text-white mb-2">Manage Sections</h2>
-              <p className="text-slate-400 text-sm">Choose which sections to display and customize their content.</p>
+              <p className="text-slate-400 text-sm">Choose which sections fit this {pageIntent.label.toLowerCase()}.</p>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -2713,13 +3261,13 @@ export function LandingPageEditorPage() {
               <div className="lg:col-span-2 space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {[
-                    { id: 'hero', name: 'Hero Banner', icon: ImageIcon, description: 'Eye-catching header with property image' },
-                    { id: 'gallery', name: 'Photo Gallery', icon: Camera, description: 'Showcase all property photos' },
-                    { id: 'features', name: 'Property Features', icon: Sparkles, description: 'Highlight key amenities' },
-                    { id: 'video', name: 'Property Video', icon: Video, description: 'Embed walkthrough video' },
-                    { id: 'virtualTour', name: 'Virtual Tour', icon: Home, description: '3D tour or Matterport embed' },
-                    { id: 'floorPlan', name: 'Floor Plan', icon: Ruler, description: 'Interactive floor plan view' },
-                    { id: 'neighborhood', name: 'Neighborhood', icon: MapPinned, description: 'Area description and highlights' },
+                    { id: 'hero', name: 'Hero Banner', icon: ImageIcon, description: pageIntent.kind === 'listing' ? 'Property-first header with agent presenter card' : 'Campaign header with agent presenter card' },
+                    { id: 'gallery', name: 'Photo Gallery', icon: Camera, description: pageIntent.kind === 'listing' ? 'Showcase all property photos' : 'Showcase page or brand images' },
+                    { id: 'features', name: pageIntent.kind === 'listing' ? 'Property Features' : 'Page Highlights', icon: Sparkles, description: pageIntent.kind === 'listing' ? 'Highlight key amenities' : 'Highlight the offer and agent value' },
+                    { id: 'video', name: pageIntent.kind === 'listing' ? 'Property Video' : 'Campaign Video', icon: Video, description: pageIntent.kind === 'listing' ? 'Embed walkthrough video' : 'Embed agent, offer, or market video' },
+                    { id: 'virtualTour', name: pageIntent.kind === 'listing' ? 'Virtual Tour' : 'Featured Tour Link', icon: Home, description: pageIntent.kind === 'listing' ? '3D tour or Matterport embed' : 'Add a featured tour or resource link' },
+                    { id: 'floorPlan', name: pageIntent.kind === 'listing' ? 'Floor Plan' : 'Resource PDF', icon: Ruler, description: pageIntent.kind === 'listing' ? 'Interactive floor plan view' : 'Attach a guide, checklist, or campaign PDF' },
+                    { id: 'neighborhood', name: 'Neighborhood', icon: MapPinned, description: pageIntent.kind === 'listing' ? 'Area description and highlights' : 'Service area description and highlights' },
                     { id: 'amenities', name: 'Nearby Amenities', icon: MapPinned, description: 'Schools, restaurants, parks' },
                     { id: 'testimonials', name: 'Testimonials', icon: Star, description: 'Client reviews and ratings' },
                     { id: 'agent', name: 'Agent Profile', icon: UserRound, description: 'Your bio and contact info' },
@@ -3016,7 +3564,10 @@ export function LandingPageEditorPage() {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
               {/* SEO Settings */}
               <div className="space-y-6">
-                <div className="p-6 rounded-2xl bg-white/5 border border-white/10 space-y-5">
+                <div
+                  data-editor-section="seo-preview"
+                  className={`scroll-mt-56 p-6 rounded-2xl bg-white/5 border border-white/10 space-y-5 transition-all duration-300 ${sectionSpotlightClass('seo-preview')}`}
+                >
                   <h3 className="text-sm font-semibold text-white flex items-center gap-2">
                     <EditorIconBadge icon={Search} tone="blue" />
                     Search Engine Optimization
@@ -3030,7 +3581,7 @@ export function LandingPageEditorPage() {
                       type="text"
                       value={metaTitle}
                       onChange={(e) => setMetaTitle(e.target.value)}
-                      placeholder={`${page.listing?.addressLine1 || 'Beautiful Home'} | For Sale`}
+                      placeholder={seoTitleFallback}
                       className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
                     />
                     <p className="text-xs text-slate-500 mt-1">{metaTitle.length}/60 characters recommended</p>
@@ -3043,7 +3594,7 @@ export function LandingPageEditorPage() {
                     <textarea
                       value={metaDescription}
                       onChange={(e) => setMetaDescription(e.target.value)}
-                      placeholder="Stunning 4-bed, 3-bath home with modern amenities, gourmet kitchen, and mountain views..."
+                      placeholder={seoDescriptionFallback}
                       rows={3}
                       className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 resize-none"
                     />
@@ -3095,13 +3646,13 @@ export function LandingPageEditorPage() {
                     <p className="text-xs text-slate-500 mb-2">Google Preview</p>
                     <div className="space-y-1">
                       <p className="text-blue-400 text-sm font-medium truncate">
-                        {metaTitle || `${page.listing?.addressLine1 || 'Beautiful Home'} | For Sale`}
+                        {metaTitle || seoTitleFallback}
                       </p>
                       <p className="text-emerald-400 text-xs">
                         {window.location.origin}/sites/{page.slug}
                       </p>
                       <p className="text-slate-400 text-xs line-clamp-2">
-                        {metaDescription || 'Discover this amazing property. Schedule a showing today!'}
+                        {metaDescription || seoDescriptionFallback}
                       </p>
                     </div>
                   </div>
@@ -3123,10 +3674,10 @@ export function LandingPageEditorPage() {
                       />
                     </div>
                     <p className="text-white text-sm font-medium truncate">
-                      {metaTitle || page.listing?.addressLine1 || 'Property For Sale'}
+                      {metaTitle || seoTitleFallback}
                     </p>
                     <p className="text-slate-400 text-xs mt-1 line-clamp-2">
-                      {metaDescription || subheadline || 'Check out this amazing property!'}
+                      {metaDescription || seoDescriptionFallback}
                     </p>
                     <p className="text-slate-500 text-xs mt-1">{window.location.host}</p>
                   </div>
@@ -3135,7 +3686,10 @@ export function LandingPageEditorPage() {
 
               {/* Lead Capture Settings */}
               <div className="space-y-6">
-                <div className="p-6 rounded-2xl bg-white/5 border border-white/10 space-y-5">
+                <div
+                  data-editor-section="lead-capture"
+                  className={`scroll-mt-56 p-6 rounded-2xl bg-white/5 border border-white/10 space-y-5 transition-all duration-300 ${sectionSpotlightClass('lead-capture')}`}
+                >
                   <div className="flex items-center justify-between">
                     <h3 className="text-sm font-semibold text-white flex items-center gap-2">
                       <EditorIconBadge icon={Mail} tone="emerald" />
@@ -3159,7 +3713,7 @@ export function LandingPageEditorPage() {
                           type="text"
                           value={formTitle}
                           onChange={(e) => setFormTitle(e.target.value)}
-                          placeholder="Interested in this property?"
+                          placeholder={leadFormTitleFallback}
                           className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-slate-500"
                         />
                       </div>
@@ -3215,7 +3769,7 @@ export function LandingPageEditorPage() {
                           type="text"
                           value={leadButtonText}
                           onChange={(e) => setLeadButtonText(e.target.value)}
-                          placeholder="Request Information"
+                          placeholder={leadButtonFallback}
                           className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-slate-500"
                         />
                       </div>
@@ -3242,7 +3796,11 @@ export function LandingPageEditorPage() {
                         <EditorIconBadge icon={LockKeyhole} tone="rose" />
                         Force Lead Capture Gate
                       </h3>
-                      <p className="text-xs text-slate-400 mt-1">Require visitors to submit their info before seeing the page. Great for high-value listings & paid ads.</p>
+                      <p className="text-xs text-slate-400 mt-1">
+                        {pageIntent.kind === 'listing'
+                          ? 'Require visitors to submit their info before seeing the page. Great for high-value listings and paid ads.'
+                          : 'Require visitors to submit their info before seeing the page. Useful for paid campaigns and high-intent offers.'}
+                      </p>
                     </div>
                     <label className="relative inline-flex items-center cursor-pointer flex-none">
                       <input type="checkbox" checked={forceCaptureEnabled} onChange={(e) => setForceCaptureEnabled(e.target.checked)} className="sr-only peer" />
@@ -3268,7 +3826,7 @@ export function LandingPageEditorPage() {
                           value={forceCaptureSubheadline}
                           onChange={(e) => setForceCaptureSubheadline(e.target.value)}
                           rows={2}
-                          placeholder="Enter your details to unlock full property photos, pricing, and schedule a private tour."
+                          placeholder={forceGateSubheadlinePlaceholder}
                           className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-slate-500"
                         />
                       </div>
@@ -3291,7 +3849,7 @@ export function LandingPageEditorPage() {
                           type="text"
                           value={forceCaptureCtaText}
                           onChange={(e) => setForceCaptureCtaText(e.target.value)}
-                          placeholder="Unlock property details"
+                          placeholder={forceGateCtaPlaceholder}
                           className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-slate-500"
                         />
                       </div>
@@ -3331,14 +3889,17 @@ export function LandingPageEditorPage() {
                 </div>
 
                 {/* Header QR destinations */}
-                <div className="p-6 rounded-2xl bg-white/5 border border-white/10 space-y-5">
+                <div
+                  data-editor-section="qr-tracking"
+                  className={`scroll-mt-56 p-6 rounded-2xl bg-white/5 border border-white/10 space-y-5 transition-all duration-300 ${sectionSpotlightClass('qr-tracking')}`}
+                >
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <h3 className="text-sm font-semibold text-white flex items-center gap-2">
                         <EditorIconBadge icon={QrCode} tone="cyan" />
                         Header QR Options
                       </h3>
-                      <p className="text-xs text-slate-400 mt-1">Let visitors scan this listing page or your personal profile card directly from the hero/header area.</p>
+                      <p className="text-xs text-slate-400 mt-1">Let visitors scan this landing page or your personal profile card directly from the hero/header area.</p>
                     </div>
                     <label className="relative inline-flex items-center cursor-pointer flex-none">
                       <input type="checkbox" checked={showHeaderQr} onChange={(e) => handleShowHeaderQrChange(e.target.checked)} className="sr-only peer" />
@@ -3349,7 +3910,7 @@ export function LandingPageEditorPage() {
                   {showHeaderQr && (
                     <div className="space-y-4 pt-2 border-t border-white/10">
                       <div>
-                        <label className="block text-sm font-medium text-slate-300 mb-2">Listing/Page QR destination (optional override)</label>
+                        <label className="block text-sm font-medium text-slate-300 mb-2">Landing page QR destination (optional override)</label>
                         <input
                           type="url"
                           value={qrListingUrl}
@@ -3357,13 +3918,13 @@ export function LandingPageEditorPage() {
                           placeholder={defaultListingUrl}
                           className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-slate-500"
                         />
-                        <p className="mt-1 text-xs text-slate-500">Leave blank to use the generated listing QR URL with lpqr and UTM tracking automatically.</p>
-                        <p className="mt-1 text-[11px] text-slate-500 break-all">Active listing QR destination: {effectiveListingQrDestination || 'Not available yet'}</p>
+                        <p className="mt-1 text-xs text-slate-500">Leave blank to use the generated tracked page scan URL with lpqr and UTM tracking automatically. If a token exists, that unique URL is used first.</p>
+                        <p className="mt-1 text-[11px] text-slate-500 break-all">Active page scan destination: {effectiveListingQrDestination || 'Not available yet'}</p>
                       </div>
 
                       <div className="rounded-xl border border-white/10 bg-slate-950/40 p-3 space-y-3">
                         <div className="flex items-center justify-between gap-2">
-                          <label className="block text-xs font-medium uppercase tracking-[0.16em] text-slate-400">Unique listing QR token</label>
+                          <label className="block text-xs font-medium uppercase tracking-[0.16em] text-slate-400">Unique page scan token</label>
                           {trimmedQrListingToken && (
                             <span className="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-200">
                               Active
@@ -3384,7 +3945,7 @@ export function LandingPageEditorPage() {
                               const nextToken = buildQrListingToken();
                               setQrListingToken(nextToken);
                               setQrListingUrl('');
-                              showToast('success', 'Generated a new unique listing QR token.');
+                              showToast('success', 'Generated a new tracked page scan token.');
                             }}
                             className="rounded-xl border border-cyan-400/30 bg-cyan-500/15 px-3 py-2 text-xs font-semibold text-cyan-100 hover:bg-cyan-500/25"
                           >
@@ -3400,7 +3961,7 @@ export function LandingPageEditorPage() {
                           </button>
                         </div>
                         <div>
-                          <div className="text-[11px] text-slate-500">Generated unique listing URL</div>
+                          <div className="text-[11px] text-slate-500">Generated tracked page scan URL</div>
                           <div className="mt-1 rounded-lg border border-white/10 bg-white/5 px-2.5 py-2 text-xs break-all text-slate-200">
                             {generatedListingQrUrl || `${defaultListingUrl}?lpqr=...`}
                           </div>
@@ -3414,9 +3975,10 @@ export function LandingPageEditorPage() {
                           type="url"
                           value={qrPersonalUrl}
                           onChange={(e) => setQrPersonalUrl(e.target.value)}
-                          placeholder={accountDefaults?.agentWebsiteUrl || 'https://your-site.com/about'}
+                          placeholder={accountDefaults?.defaultAgentPageUrl || accountDefaults?.agentWebsiteUrl || 'https://your-site.com/about'}
                           className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-slate-500"
                         />
+                        <p className="mt-1 text-xs text-slate-500">Leave blank to use your default AgentEasePro profile page.</p>
                       </div>
 
                       <div>
@@ -3458,20 +4020,14 @@ export function LandingPageEditorPage() {
                       type="text"
                       value={socialProofText}
                       onChange={(e) => setSocialProofText(e.target.value)}
-                      placeholder="47 people viewed this property today"
+                      placeholder={socialProofPlaceholder}
                       className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-slate-500"
                     />
                   </div>
 
                   {/* Quick urgency presets */}
                   <div className="flex flex-wrap gap-2">
-                    {[
-                      'Hot Property!',
-                      'Price Reduced!',
-                      'Open House Sunday',
-                      'Just Listed',
-                      'Multiple Offers',
-                    ].map((preset) => (
+                    {urgencyPresets.map((preset) => (
                       <button
                         key={preset}
                         onClick={() => setUrgencyText(preset)}
@@ -3489,7 +4045,7 @@ export function LandingPageEditorPage() {
                     <p className="text-xs text-slate-500 mb-3">Form Preview</p>
                     <div className="p-4 rounded-xl border border-white/10" style={{ backgroundColor: selectedTheme?.colors.background || '#0f172a' }}>
                       <h4 className="text-sm font-semibold mb-1" style={{ color: selectedTheme?.colors.text || '#f1f5f9' }}>
-                        {formTitle || 'Interested in this property?'}
+                        {formTitle || leadFormTitleFallback}
                       </h4>
                       <p className="text-xs opacity-70 mb-3" style={{ color: selectedTheme?.colors.text || '#f1f5f9' }}>
                         {formSubtitle || "We'll get back to you within 24 hours."}
@@ -3502,7 +4058,7 @@ export function LandingPageEditorPage() {
                           className="w-full py-2 rounded text-xs font-semibold text-white"
                           style={{ backgroundColor: primaryColor }}
                         >
-                          {leadButtonText || 'Request Information'}
+                          {leadButtonText || leadButtonFallback}
                         </button>
                       </div>
                     </div>
@@ -3515,7 +4071,7 @@ export function LandingPageEditorPage() {
 
         {/* Full Preview */}
         {activeTab === 'preview' && (
-          <div className="space-y-6">
+          <div data-editor-section="full-preview" className={`scroll-mt-56 space-y-6 rounded-2xl transition-all duration-300 ${sectionSpotlightClass('full-preview')}`}>
             <div className="flex items-center justify-between">
               <div>
                 <h2 className="text-xl font-bold text-white mb-2">Full Preview</h2>
@@ -3635,17 +4191,18 @@ export function LandingPageEditorPage() {
       {showShareModal && (() => {
         const origin = typeof window !== 'undefined' ? window.location.origin : '';
         const baseUrl = `${origin}/sites/${page.slug}`;
-        const listingUrl = qrListingUrl.trim() || (trimmedQrListingToken ? buildTrackedLandingQrUrl(baseUrl, page.slug, trimmedQrListingToken) : baseUrl);
+        const listingUrl = (trimmedQrListingToken ? buildTrackedLandingQrUrl(baseUrl, page.slug, trimmedQrListingToken) : '') || qrListingUrl.trim() || baseUrl;
         const gatedUrl = `${listingUrl}${listingUrl.includes('?') ? '&' : '?'}gate=1`;
         const captureUrl = `${origin}/api/integrations/lead-capture?landingPageId=${page.id}&label=${encodeURIComponent(page.title)}`;
-        const personalUrl = qrPersonalUrl.trim() || accountDefaults?.agentWebsiteUrl || `mailto:${agentEmail || accountDefaults?.agentEmail || ''}`;
+        const personalUrl = qrPersonalUrl.trim() || accountDefaults?.defaultAgentPageUrl || accountDefaults?.agentWebsiteUrl || `mailto:${agentEmail || accountDefaults?.agentEmail || ''}`;
+        const pageScanName = (headline.trim() || page.title || 'Landing page').replace(/^free\s+/i, '').trim() || 'Landing page';
         const variants = [
           {
             id: 'page',
-            label: trimmedQrListingToken ? 'Listing QR (unique)' : 'Landing page',
+            label: trimmedQrListingToken ? 'Tracked page scan' : 'Landing page scan',
             description: trimmedQrListingToken
-              ? 'Unique listing QR with tracking token for this page'
-              : 'Scan to open the full page',
+              ? `${pageScanName}: unique QR URL with scan tracking for this page`
+              : `${pageScanName}: scan to open the full page`,
             url: listingUrl,
             accent: 'cyan',
           },
@@ -3659,11 +4216,6 @@ export function LandingPageEditorPage() {
           subheadline.trim() || page.description || 'Private details, showing options, and direct agent follow-up are ready here:',
           active.url,
         ].filter(Boolean).join('\n');
-        const accentRingClass = active.accent === 'rose'
-          ? 'border-rose-400/40 bg-rose-500/15 text-rose-100 hover:bg-rose-500/25'
-          : active.accent === 'emerald'
-            ? 'border-emerald-400/40 bg-emerald-500/15 text-emerald-100 hover:bg-emerald-500/25'
-            : 'border-cyan-400/30 bg-cyan-500/15 text-cyan-100 hover:bg-cyan-500/25';
         return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4" onClick={() => setShowShareModal(false)}>
           <div className="w-full max-w-md rounded-3xl border border-white/10 bg-gradient-to-br from-slate-950 to-[#101525] p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
@@ -3673,7 +4225,7 @@ export function LandingPageEditorPage() {
                 <X className="h-5 w-5" />
               </button>
             </div>
-            <p className="mt-1 text-xs text-slate-400">Pick a link variant, then scan, copy, download, or send it anywhere.</p>
+            <p className="mt-1 text-xs text-slate-400">Pick a link variant, then scan, copy, or send it anywhere.</p>
 
             {/* Variant selector */}
             <div className="mt-4 grid grid-cols-2 gap-1.5 rounded-xl bg-slate-950/60 border border-white/10 p-1 sm:grid-cols-4">
@@ -3698,12 +4250,12 @@ export function LandingPageEditorPage() {
                   setQrListingToken(nextToken);
                   setQrListingUrl('');
                   setShareQrVariant('page');
-                  showToast('success', 'Generated a new unique listing QR. Save changes to persist it.');
+                  showToast('success', 'Generated a new tracked page scan QR. Save changes to persist it.');
                 }}
                 className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-400/30 bg-cyan-500/15 px-3 py-1.5 text-[11px] font-semibold text-cyan-100 hover:bg-cyan-500/25"
               >
                 <QrCode className="h-3.5 w-3.5" />
-                Generate New Listing QR
+                Generate New Page QR
               </button>
               {trimmedQrListingToken && (
                 <span className="inline-flex items-center rounded-lg border border-emerald-400/30 bg-emerald-500/10 px-3 py-1.5 text-[11px] font-medium text-emerald-200">
@@ -3737,16 +4289,6 @@ export function LandingPageEditorPage() {
                 <Copy className="h-4 w-4" />
                 Copy Link
               </button>
-              <a
-                href={`https://api.qrserver.com/v1/create-qr-code/?size=600x600&margin=20&format=png&data=${encodeURIComponent(active.url)}`}
-                download={`${page.slug}-${active.id}-qr.png`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className={`inline-flex items-center justify-center gap-2 rounded-xl border px-4 py-2.5 text-xs font-semibold transition-colors ${accentRingClass}`}
-              >
-                <Download className="h-4 w-4" />
-                Download QR
-              </a>
               <a
                 href={`mailto:?subject=${encodeURIComponent(page.title)}&body=${encodeURIComponent(active.url)}`}
                 className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-xs font-semibold text-white hover:bg-white/10 transition-colors"

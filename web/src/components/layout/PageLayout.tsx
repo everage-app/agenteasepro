@@ -8,7 +8,7 @@ export interface PageLayoutProps {
   actions?: ReactNode;
   headerActions?: ReactNode;
   breadcrumbs?: Array<{ label: string; href?: string }>;
-  maxWidth?: 'xl' | '2xl' | '4xl' | '6xl' | '7xl' | 'full';
+  maxWidth?: 'xl' | '2xl' | '4xl' | '6xl' | '7xl' | 'workspace' | 'full';
 }
 
 export function PageLayout({
@@ -26,6 +26,7 @@ export function PageLayout({
     '4xl': 'max-w-4xl',
     '6xl': 'max-w-6xl',
     '7xl': 'max-w-7xl',
+    workspace: 'max-w-[1680px]',
     full: 'max-w-full',
   };
 
@@ -69,7 +70,7 @@ export function PageLayout({
               )}
             </div>
             {(actions || headerActions) && (
-              <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
+              <div className="flex flex-wrap items-center justify-start gap-2 sm:justify-end sm:gap-3 sm:flex-shrink-0">
                 {actions || headerActions}
               </div>
             )}

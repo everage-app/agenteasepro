@@ -635,7 +635,7 @@ export function BrandingSettingsPage() {
               <div className="space-y-4">
                 <input
                   type="file"
-                  accept="image/*"
+                  accept="image/jpeg,image/png,image/gif,image/svg+xml,image/webp"
                   onChange={handleBrokerageLogoUpload}
                   className="hidden"
                   id="brokerage-logo-upload"
@@ -660,7 +660,7 @@ export function BrandingSettingsPage() {
                   )}
                 </div>
                 <p className="text-xs text-slate-500">
-                  PNG, JPG, or SVG up to 5MB. Required for marketing compliance.
+                  JPG, PNG, GIF, SVG, or WebP up to 5MB. Required for marketing compliance.
                 </p>
 
                 <div>

@@ -4,6 +4,8 @@ import { prisma } from '../lib/prisma';
 import multer from 'multer';
 import path from 'path';
 import { storage } from '../services/storageService';
+import { buildLandingPageQrToken } from '../services/defaultAgentLandingPage';
+import { isInternalLandingPageSlug } from '../services/publicLandingSeo';
 
 const router = Router();
 
@@ -117,6 +119,68 @@ function extractPhotoUrls(value: unknown): string[] {
 
 function asPlainObject(value: unknown): Record<string, any> {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, any>) : {};
+}
+
+function ensureHeaderQrToken(content: Record<string, any>) {
+  if (
+    content.showHeaderQr === true &&
+    !String(content.qrListingToken || '').trim() &&
+    !String(content.qrListingUrl || '').trim()
+  ) {
+    return { ...content, qrListingToken: buildLandingPageQrToken() };
+  }
+
+  return content;
+}
+
+function cleanText(value: unknown) {
+  return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+function ensureSeoDefaults(content: Record<string, any>, page: { title?: string | null; description?: string | null; slug?: string | null }) {
+  const seoSettings = asPlainObject(content.seoSettings);
+  const headline = cleanText(content.headline || page.title);
+  const subheadline = cleanText(content.subheadline || page.description);
+  const defaultTitle = cleanText(seoSettings.metaTitle) || `${headline || 'Utah Real Estate Landing Page'} | AgentEasePro`;
+  const defaultDescription = cleanText(seoSettings.metaDescription)
+    || subheadline
+    || 'Request local Utah real estate guidance, listing details, or a custom home value report from the agent.';
+  const defaultKeywords = Array.isArray(seoSettings.keywords) && seoSettings.keywords.length > 0
+    ? seoSettings.keywords
+    : ['Utah real estate', 'home value report', 'listing agent', 'real estate lead'];
+
+  return {
+    ...content,
+    seoSettings: {
+      ...seoSettings,
+      metaTitle: cleanText(defaultTitle).slice(0, 68),
+      metaDescription: cleanText(defaultDescription).slice(0, 158),
+      keywords: defaultKeywords.map(cleanText).filter(Boolean).slice(0, 12),
+    },
+  };
+}
+
+function buildPublishBlockers(page: { slug?: string | null; title?: string | null; customContent?: Record<string, any> }) {
+  const blockers: string[] = [];
+  const slug = cleanText(page.slug).toLowerCase();
+  const title = cleanText(page.title);
+  const customContent = asPlainObject(page.customContent);
+  const leadCapture = asPlainObject(customContent.leadCapture);
+  const requiredFields = Array.isArray(leadCapture.requiredFields)
+    ? leadCapture.requiredFields.map(cleanText).filter(Boolean)
+    : [];
+
+  if (!slug || !title) blockers.push('Slug and title are required before publishing.');
+  if (isInternalLandingPageSlug(slug, title)) blockers.push('Test, demo, audit, and Playwright landing pages cannot be published.');
+  if (leadCapture.enabled !== false && (!requiredFields.includes('name') || !requiredFields.includes('email'))) {
+    blockers.push('Lead capture must require at least name and email before publishing.');
+  }
+
+  return blockers;
+}
+
+function shouldEnforcePublishQuality() {
+  return process.env.NODE_ENV === 'production';
 }
 
 function decorateListing<T extends { listing?: any | null; customContent?: any }>(page: T) {
@@ -268,14 +332,21 @@ router.post('/', async (req: AuthenticatedRequest, res) => {
       return res.status(400).json({ error: 'Slug already in use' });
     }
 
-    const initialCustomContent = {
+    const initialCustomContent = ensureSeoDefaults(ensureHeaderQrToken({
       ...asPlainObject(customContent),
       ...(seoSettings !== undefined ? { seoSettings: asPlainObject(seoSettings) } : {}),
       ...(leadCapture !== undefined ? { leadCapture: asPlainObject(leadCapture) } : {}),
       ...(forceCapture !== undefined ? { forceCapture: asPlainObject(forceCapture) } : {}),
       ...(sections !== undefined ? { sections: asPlainObject(sections) } : {}),
-    };
+    }), { title, description, slug });
     const initialCustomStyles = asPlainObject(customStyles);
+
+    const publishBlockers = isActive !== false
+      ? buildPublishBlockers({ slug, title, customContent: initialCustomContent })
+      : [];
+    if (publishBlockers.length > 0 && shouldEnforcePublishQuality()) {
+      return res.status(400).json({ error: 'Landing page is not ready to publish', issues: publishBlockers });
+    }
 
     const landingPage = await prisma.landingPage.create({
       data: {
@@ -385,21 +456,46 @@ router.patch('/:id', async (req: AuthenticatedRequest, res) => {
     if (heroImage !== undefined) updateData.heroImage = heroImage;
     if (isActive !== undefined) updateData.isActive = isActive;
     if (templateId !== undefined) updateData.templateId = templateId;
+    let nextCustomContent = existingCustomContent;
     if (customContent !== undefined || seoSettings !== undefined || leadCapture !== undefined || forceCapture !== undefined || sections !== undefined) {
-      updateData.customContent = {
+      nextCustomContent = ensureSeoDefaults(ensureHeaderQrToken({
         ...existingCustomContent,
         ...(customContent && typeof customContent === 'object' ? customContent : {}),
         ...(seoSettings !== undefined ? { seoSettings } : {}),
         ...(leadCapture !== undefined ? { leadCapture } : {}),
         ...(forceCapture !== undefined ? { forceCapture } : {}),
         ...(sections !== undefined ? { sections } : {}),
-      };
+      }), {
+        title: title !== undefined ? title : existingPage.title,
+        description: description !== undefined ? description : existingPage.description,
+        slug: slug !== undefined ? slug : existingPage.slug,
+      });
+      updateData.customContent = nextCustomContent;
+    } else if (isActive === true) {
+      nextCustomContent = ensureSeoDefaults(ensureHeaderQrToken(existingCustomContent), {
+        title: title !== undefined ? title : existingPage.title,
+        description: description !== undefined ? description : existingPage.description,
+        slug: slug !== undefined ? slug : existingPage.slug,
+      });
+      updateData.customContent = nextCustomContent;
     }
     if (customStyles !== undefined) {
       updateData.customStyles = {
         ...existingCustomStyles,
         ...(customStyles && typeof customStyles === 'object' ? customStyles : {}),
       };
+    }
+
+    const nextIsActive = isActive !== undefined ? Boolean(isActive) : existingPage.isActive;
+    if (nextIsActive) {
+      const publishBlockers = buildPublishBlockers({
+        slug: slug !== undefined ? slug : existingPage.slug,
+        title: title !== undefined ? title : existingPage.title,
+        customContent: nextCustomContent,
+      });
+      if (publishBlockers.length > 0 && shouldEnforcePublishQuality()) {
+        return res.status(400).json({ error: 'Landing page is not ready to publish', issues: publishBlockers });
+      }
     }
 
     const landingPage = await prisma.landingPage.update({
@@ -513,9 +609,12 @@ router.get('/:id/analytics', async (req: AuthenticatedRequest, res) => {
       uniqueVisitors,
       leads,
       qrViews,
+      qrLeads,
       conversionRate,
       viewsByDay,
       topSources,
+      topCampaigns,
+      topMediums,
       deviceBreakdown,
       locationData,
     ] = await Promise.all([
@@ -550,6 +649,16 @@ router.get('/:id/analytics', async (req: AuthenticatedRequest, res) => {
           ],
         },
       }),
+      qrListingToken
+        ? prisma.lead.count({
+            where: {
+              agentId: req.agentId,
+              landingPageId: id,
+              createdAt: { gte: startDate },
+              tags: { has: `QR:${qrListingToken}` },
+            },
+          })
+        : Promise.resolve(0),
       prisma.landingPage.findUnique({
         where: { id },
         select: { totalViews: true, leadsGenerated: true },
@@ -573,6 +682,28 @@ router.get('/:id/analytics', async (req: AuthenticatedRequest, res) => {
         },
         _count: true,
         orderBy: { _count: { utmSource: 'desc' } },
+        take: 10,
+      }),
+      prisma.pageView.groupBy({
+        by: ['utmCampaign'],
+        where: {
+          landingPageId: id,
+          createdAt: { gte: startDate },
+          utmCampaign: { not: null },
+        },
+        _count: true,
+        orderBy: { _count: { utmCampaign: 'desc' } },
+        take: 10,
+      }),
+      prisma.pageView.groupBy({
+        by: ['utmMedium'],
+        where: {
+          landingPageId: id,
+          createdAt: { gte: startDate },
+          utmMedium: { not: null },
+        },
+        _count: true,
+        orderBy: { _count: { utmMedium: 'desc' } },
         take: 10,
       }),
       prisma.pageView.groupBy({
@@ -607,10 +738,21 @@ router.get('/:id/analytics', async (req: AuthenticatedRequest, res) => {
         uniqueVisitors: uniqueVisitors.length,
         leads,
         qrViews,
+        qrLeads,
+        qrConversionRate: qrViews > 0 ? Number(((qrLeads / qrViews) * 100).toFixed(2)) : 0,
         conversionRate: parseFloat(conversion.toFixed(2)),
+        funnel: {
+          views: pageViews,
+          uniqueVisitors: uniqueVisitors.length,
+          qrScans: qrViews,
+          leads,
+          qrLeads,
+        },
       },
       viewsByDay,
       topSources,
+      topCampaigns,
+      topMediums,
       deviceBreakdown,
       locationData,
     });

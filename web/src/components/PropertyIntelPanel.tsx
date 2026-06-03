@@ -11,7 +11,6 @@ import {
   PropertyIntelResult,
   getPropertyIntel,
   getCountyAssessorInfo,
-  buildEmbedMapUrl,
   buildStaticMapUrl,
   formatAddress,
   fetchCensusData,
@@ -302,14 +301,15 @@ export default function PropertyIntelPanel({ query, expanded = true, onClose }: 
                   {/* Map Preview */}
                   <div className="overflow-hidden rounded-xl border border-slate-200/70 bg-slate-100 shadow-[0_14px_34px_-28px_rgba(15,23,42,0.55)] dark:border-[#f2d894]/15 dark:bg-white/5">
                     {mapAddress ? (
-                      <div className="relative h-[220px]">
-                        <iframe
-                          title="Property location map"
-                          src={buildEmbedMapUrl(mapAddress)}
-                          className="h-full w-full border-0"
-                          loading="lazy"
-                          referrerPolicy="no-referrer-when-downgrade"
-                        />
+                      <div className="relative flex h-[220px] items-center justify-center overflow-hidden bg-gradient-to-br from-slate-100 via-white to-[#fff4cf] p-5 text-center dark:from-[#101827] dark:via-[#0b1220] dark:to-[#18130a]">
+                        <div className="pointer-events-none absolute inset-0 opacity-60" style={{ backgroundImage: 'linear-gradient(rgba(148,163,184,0.18) 1px, transparent 1px), linear-gradient(90deg, rgba(148,163,184,0.18) 1px, transparent 1px)', backgroundSize: '28px 28px' }} />
+                        <div className="relative max-w-xs">
+                          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl border border-[#d6b56d]/40 bg-white/90 text-[#7a5a24] shadow-lg dark:border-[#f2d894]/25 dark:bg-white/10 dark:text-[#f2d894]">
+                            <Icons.Map />
+                          </div>
+                          <div className="mt-3 text-sm font-bold text-slate-900 dark:text-white">Map preview</div>
+                          <div className="mt-1 line-clamp-2 text-xs font-medium text-slate-600 dark:text-slate-300">{mapAddress}</div>
+                        </div>
                         <div className="absolute bottom-3 left-3 right-3 flex flex-wrap gap-2">
                           <a
                             href={buildGoogleMapsSearchUrl(mapAddress)}

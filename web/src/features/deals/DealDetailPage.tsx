@@ -337,10 +337,10 @@ export function DealDetailPage() {
             Deal Cockpit
           </Link>
           <Link
-            to={`/deals/${deal.id}/repc`}
+            to={`/contracts/${deal.id}`}
             className="px-4 py-2 text-sm rounded-xl border border-white/10 hover:border-cyan-500/40 bg-white/5 hover:bg-cyan-500/10 text-slate-200 transition-all"
           >
-            REPC Wizard
+            Contracts
           </Link>
           <button
             onClick={() => navigate(`/deals/${deal.id}`)}

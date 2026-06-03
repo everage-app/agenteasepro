@@ -29,6 +29,7 @@ interface DocumentChecklistProps {
   onStartRepc?: () => void;
   onEditRepc?: () => void;
   onSendRepc?: () => void;
+  defaultExpanded?: boolean;
 }
 
 // Utah transaction typical forms
@@ -50,12 +51,13 @@ export function DocumentChecklist({
   onStartRepc,
   onEditRepc,
   onSendRepc,
+  defaultExpanded = false,
 }: DocumentChecklistProps) {
   const navigate = useNavigate();
   const [formDefs, setFormDefs] = useState<FormDefinition[]>([]);
   const [instances, setInstances] = useState<FormInstance[]>([]);
   const [loading, setLoading] = useState(true);
-  const [isExpanded, setIsExpanded] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(defaultExpanded);
 
   useEffect(() => {
     loadData();
@@ -125,11 +127,13 @@ export function DocumentChecklist({
         onStartRepc();
       } else if (onEditRepc) {
         onEditRepc();
+      } else {
+        navigate(`/contracts/${dealId}`);
       }
       return;
     }
     // For other forms, navigate to form editor
-    navigate(`/deals/${dealId}/forms/${code}`);
+    navigate(`/contracts/${dealId}/forms/${code}`);
   };
 
   if (loading) {
@@ -144,41 +148,41 @@ export function DocumentChecklist({
   }
 
   return (
-    <div className="rounded-2xl border border-cyan-500/30 bg-gradient-to-br from-cyan-600/10 via-slate-900/40 to-slate-950/60 backdrop-blur-xl overflow-hidden">
+    <div className="overflow-hidden rounded-xl border border-cyan-500/30 bg-gradient-to-br from-cyan-600/10 via-slate-900/40 to-slate-950/60 backdrop-blur-xl">
       {/* Header */}
       <div 
-        className="p-4 cursor-pointer hover:bg-white/5 transition-colors"
+        className="cursor-pointer p-3 transition-colors hover:bg-white/5"
         onClick={() => setIsExpanded(!isExpanded)}
       >
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-500 to-teal-500 text-white shadow-lg shadow-cyan-500/25">
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-cyan-500 to-teal-500 text-white shadow-lg shadow-cyan-500/25">
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
               </svg>
             </div>
-            <div>
-              <h3 className="text-sm font-bold text-white">Document Checklist</h3>
+            <div className="min-w-0">
+              <h3 className="truncate text-sm font-bold text-white">Document Checklist</h3>
               <p className="text-xs text-cyan-200/70">{completedRequired} of {requiredForms.length} required complete</p>
             </div>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex shrink-0 items-center gap-2">
             {/* Progress Ring */}
-            <div className="relative h-10 w-10">
-              <svg className="h-10 w-10 transform -rotate-90">
+            <div className="relative h-8 w-8">
+              <svg className="h-8 w-8 -rotate-90">
                 <circle
-                  cx="20"
-                  cy="20"
-                  r="16"
+                  cx="16"
+                  cy="16"
+                  r="12"
                   stroke="currentColor"
                   strokeWidth="3"
                   fill="none"
                   className="text-slate-700"
                 />
                 <circle
-                  cx="20"
-                  cy="20"
-                  r="16"
+                  cx="16"
+                  cy="16"
+                  r="12"
                   stroke="currentColor"
                   strokeWidth="3"
                   fill="none"
@@ -188,13 +192,13 @@ export function DocumentChecklist({
                   style={{ strokeDasharray: `${progressPercent * 1.005} 100` }}
                 />
               </svg>
-              <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-cyan-300">
+              <span className="absolute inset-0 flex items-center justify-center text-[9px] font-bold text-cyan-300">
                 {progressPercent}%
               </span>
             </div>
             {/* Expand Arrow */}
             <svg 
-              className={`w-5 h-5 text-slate-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+              className={`h-4 w-4 text-slate-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
               fill="none" 
               viewBox="0 0 24 24" 
               stroke="currentColor"
@@ -230,8 +234,8 @@ export function DocumentChecklist({
       {isExpanded && (
         <div className="border-t border-white/5">
           {/* Required Documents */}
-          <div className="p-4">
-            <h4 className="text-[11px] font-bold text-cyan-400 uppercase tracking-wide mb-3">
+          <div className="p-3">
+            <h4 className="mb-2 text-[10px] font-bold uppercase tracking-wide text-cyan-400">
               <span className="inline-flex items-center gap-2"><FileText className="h-3.5 w-3.5" /> Required Documents</span>
             </h4>
             <div className="space-y-2">
@@ -243,20 +247,20 @@ export function DocumentChecklist({
                 return (
                   <div
                     key={form.code}
-                    className="flex items-center justify-between rounded-xl bg-slate-800/40 p-3 hover:bg-slate-800/60 transition-colors"
+                    className="flex items-center justify-between gap-2 rounded-lg bg-slate-800/40 p-2 transition-colors hover:bg-slate-800/60"
                   >
-                    <div className="flex items-center gap-3">
-                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${config.bg}`}>
-                        <StatusIcon className={`h-4 w-4 ${config.text}`} strokeWidth={2.2} />
+                    <div className="flex min-w-0 items-center gap-2">
+                      <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${config.bg}`}>
+                        <StatusIcon className={`h-3.5 w-3.5 ${config.text}`} strokeWidth={2.2} />
                       </div>
-                      <div>
-                        <p className="text-xs font-semibold text-white">{form.name}</p>
+                      <div className="min-w-0">
+                        <p className="truncate text-xs font-semibold text-white">{form.name}</p>
                         <p className={`text-[10px] ${config.text}`}>{config.label}</p>
                       </div>
                     </div>
                     <button
                       onClick={() => handleFormAction(form.code, status)}
-                      className={`text-[10px] font-semibold px-3 py-1.5 rounded-lg transition-colors ${
+                      className={`shrink-0 rounded-lg px-2.5 py-1.5 text-[10px] font-semibold transition-colors ${
                         status === 'not_started'
                           ? 'bg-cyan-500/20 text-cyan-300 hover:bg-cyan-500/30'
                           : status === 'signed'
@@ -275,8 +279,8 @@ export function DocumentChecklist({
           </div>
 
           {/* Optional Documents */}
-          <div className="p-4 border-t border-white/5">
-            <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-wide mb-3">
+          <div className="border-t border-white/5 p-3">
+            <h4 className="mb-2 text-[10px] font-bold uppercase tracking-wide text-slate-400">
               <span className="inline-flex items-center gap-2"><FileText className="h-3.5 w-3.5" /> Optional Documents</span>
             </h4>
             <div className="grid grid-cols-2 gap-2">
@@ -289,10 +293,10 @@ export function DocumentChecklist({
                   <button
                     key={form.code}
                     onClick={() => handleFormAction(form.code, status)}
-                    className="flex items-center gap-2 rounded-lg bg-slate-800/30 p-2 hover:bg-slate-800/50 transition-colors text-left"
+                    className="flex items-center gap-1.5 rounded-lg bg-slate-800/30 p-2 text-left transition-colors hover:bg-slate-800/50"
                   >
-                    <StatusIcon className={`h-3.5 w-3.5 ${config.text}`} strokeWidth={2.2} />
-                    <span className="text-[11px] text-slate-300 truncate">{form.name}</span>
+                    <StatusIcon className={`h-3.5 w-3.5 shrink-0 ${config.text}`} strokeWidth={2.2} />
+                    <span className="truncate text-[10px] text-slate-300">{form.name}</span>
                   </button>
                 );
               })}
@@ -301,7 +305,7 @@ export function DocumentChecklist({
 
           {/* Quick Actions */}
           {hasRepc && repcStatus === 'draft' && onSendRepc && (
-            <div className="p-4 border-t border-white/5 bg-gradient-to-r from-cyan-500/10 to-transparent">
+            <div className="border-t border-white/5 bg-gradient-to-r from-cyan-500/10 to-transparent p-3">
               <Button
                 onClick={onSendRepc}
                 variant="primary"

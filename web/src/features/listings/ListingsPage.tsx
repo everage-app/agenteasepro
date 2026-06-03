@@ -164,6 +164,7 @@ export function ListingsPage() {
   return (
     <PageLayout
       title="Listings"
+      maxWidth="workspace"
       subtitle="Active and pending listings across your Utah markets — ready to edit, share, and market."
       actions={
         <button
