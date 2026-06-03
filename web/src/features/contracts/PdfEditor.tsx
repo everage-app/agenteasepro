@@ -57,6 +57,12 @@ type SelectedPageEntry = {
   preview: PagePreview;
 };
 
+type PreparedEsignPdf = {
+  data: ArrayBuffer;
+  pageCount: number;
+  source: 'original' | 'merged' | 'rasterized';
+};
+
 interface DealSummary {
   id: string;
   title?: string;
@@ -140,6 +146,7 @@ export function PdfEditor() {
   const [esignStep, setEsignStep] = useState<'recipients' | 'preview'>('recipients');
   const [esignPreviewUrl, setEsignPreviewUrl] = useState<string | null>(null);
   const [esignPreviewData, setEsignPreviewData] = useState<ArrayBuffer | null>(null);
+  const [esignPreviewPageCount, setEsignPreviewPageCount] = useState(0);
   const [esignSigners, setEsignSigners] = useState<EsignSigner[]>([]);
   const [esignSubject, setEsignSubject] = useState('Please review and sign');
   const [esignMessage, setEsignMessage] = useState('Please review and sign the attached documents.');
@@ -721,7 +728,11 @@ export function PdfEditor() {
     }
   };
 
-  const pdfHasVisiblePages = async (pdfBuffer: ArrayBuffer, label: string) => {
+  const verifyEsignPdfCandidate = async (
+    pdfBuffer: ArrayBuffer,
+    label: string,
+    expectedPageCount: number,
+  ) => {
     let loadingTask: pdfjsLib.PDFDocumentLoadingTask | null = null;
     let pdfDoc: pdfjsLib.PDFDocumentProxy | null = null;
 
@@ -731,7 +742,17 @@ export function PdfEditor() {
         ...PDF_DOCUMENT_LOAD_OPTIONS,
       });
       pdfDoc = await loadingTask.promise;
-      const pagesToCheck = Math.min(pdfDoc.numPages, 3);
+      const actualPageCount = pdfDoc.numPages;
+
+      if (actualPageCount !== expectedPageCount) {
+        console.warn(
+          `E-sign PDF candidate "${label}" has ${actualPageCount} page(s), expected ${expectedPageCount}. Trying the next preparation strategy.`,
+        );
+        return { ready: false, pageCount: actualPageCount };
+      }
+
+      const pagesToCheck = Math.min(actualPageCount, 3);
+      let hasVisiblePage = false;
 
       for (let pageNumber = 1; pageNumber <= pagesToCheck; pageNumber += 1) {
         try {
@@ -743,44 +764,57 @@ export function PdfEditor() {
             imageQuality: 0.72,
             throwOnBlank: true,
           });
-          return true;
+          hasVisiblePage = true;
+          break;
         } catch (error) {
           console.warn(`E-sign PDF visibility check could not render ${label} page ${pageNumber}:`, error);
         }
       }
 
-      return false;
+      return { ready: hasVisiblePage, pageCount: actualPageCount };
     } catch (error) {
       console.warn(`E-sign PDF visibility check failed for ${label}:`, error);
-      return false;
+      return { ready: false, pageCount: 0 };
     } finally {
       await pdfDoc?.destroy();
       loadingTask?.destroy();
     }
   };
 
-  const generateEsignPdf = async (): Promise<ArrayBuffer> => {
+  const generateEsignPdf = async (): Promise<PreparedEsignPdf> => {
     const entries = getSelectedPageEntries();
+    const expectedPageCount = entries.length;
+    if (expectedPageCount === 0) {
+      throw new Error('Select at least one page before preparing an e-sign packet.');
+    }
+
     const unchangedFile = getUnchangedSingleFileSelection(entries);
 
     if (unchangedFile) {
       const originalBytes = unchangedFile.data.slice(0);
-      if (await pdfHasVisiblePages(originalBytes, 'original upload')) {
-        return originalBytes;
+      const check = await verifyEsignPdfCandidate(originalBytes, 'original upload', expectedPageCount);
+      if (check.ready) {
+        return { data: originalBytes, pageCount: check.pageCount, source: 'original' };
       }
     }
 
-    const copiedBytes = await generateMergedPdf();
-    if (await pdfHasVisiblePages(copiedBytes, 'merged copy')) {
-      return copiedBytes;
+    try {
+      const copiedBytes = await generateMergedPdf();
+      const check = await verifyEsignPdfCandidate(copiedBytes, 'merged copy', expectedPageCount);
+      if (check.ready) {
+        return { data: copiedBytes, pageCount: check.pageCount, source: 'merged' };
+      }
+    } catch (error) {
+      console.warn('E-sign merged-copy preparation failed; trying rasterized packet:', error);
     }
 
     const rasterizedBytes = await generateRasterizedPdfForEntries(entries);
-    if (await pdfHasVisiblePages(rasterizedBytes, 'rasterized packet')) {
-      return rasterizedBytes;
+    const rasterizedCheck = await verifyEsignPdfCandidate(rasterizedBytes, 'rasterized packet', expectedPageCount);
+    if (rasterizedCheck.ready) {
+      return { data: rasterizedBytes, pageCount: rasterizedCheck.pageCount, source: 'rasterized' };
     }
 
-    throw new Error('The selected PDF pages could not be prepared with a visible preview. Try re-uploading a freshly downloaded or flattened PDF.');
+    throw new Error(`The selected PDF pages could not be prepared with all ${expectedPageCount} page(s). Try re-uploading a freshly downloaded or flattened PDF.`);
   };
 
   const createPreviewUrl = async () => {
@@ -790,11 +824,13 @@ export function PdfEditor() {
   };
 
   const createPreviewDocument = async () => {
-    const pdfBuffer = await generateEsignPdf();
-    const blob = new Blob([pdfBuffer], { type: 'application/pdf' });
+    const preparedPdf = await generateEsignPdf();
+    const blob = new Blob([preparedPdf.data], { type: 'application/pdf' });
     return {
-      data: pdfBuffer.slice(0),
+      data: preparedPdf.data.slice(0),
       url: URL.createObjectURL(blob),
+      pageCount: preparedPdf.pageCount,
+      source: preparedPdf.source,
     };
   };
 
@@ -865,6 +901,7 @@ export function PdfEditor() {
       }
       setEsignPreviewUrl(previewDocument.url);
       setEsignPreviewData(previewDocument.data);
+      setEsignPreviewPageCount(previewDocument.pageCount);
       setEsignSigners(buildDefaultSigners());
       setEsignSubject(`Please sign: ${contextLabel}`);
       setEsignMessage('Please review and sign the attached document.');
@@ -885,6 +922,7 @@ export function PdfEditor() {
       }
       setEsignStep('recipients');
       setShowEsign(true);
+      showToast('success', `E-sign studio prepared ${previewDocument.pageCount} page${previewDocument.pageCount === 1 ? '' : 's'}`);
     } catch (error) {
       console.error('Error preparing e-sign preview:', error);
       showToast('error', 'Failed to prepare e-sign preview');
@@ -896,6 +934,7 @@ export function PdfEditor() {
   const closeEsign = () => {
     setShowEsign(false);
     setEsignStep('recipients');
+    setEsignPreviewPageCount(0);
     if (esignPreviewUrl) {
       URL.revokeObjectURL(esignPreviewUrl);
     }
@@ -958,7 +997,9 @@ export function PdfEditor() {
     setEsignSending(true);
     try {
       setEsignFieldPlacements(fieldPlacements);
-      const pdfBuffer = await generateEsignPdf();
+      const preparedPdf = await generateEsignPdf();
+      const pdfBuffer = preparedPdf.data;
+      setEsignPreviewPageCount(preparedPdf.pageCount);
       const documentName = (outputName || contextLabel || 'document').trim() || 'document';
       const safeDocumentBaseName = documentName
         .replace(/\.pdf$/i, '')
@@ -2206,6 +2247,7 @@ export function PdfEditor() {
           <PdfAnnotator
             pdfUrl={esignPreviewUrl}
             pdfData={esignPreviewData}
+            expectedPageCount={esignPreviewPageCount || selectedPages.size}
             signers={includedEsignSigners.map(s => ({ role: s.role, name: s.name, email: s.email }))}
             dealData={dealData}
             onSave={(annotations) => {

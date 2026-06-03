@@ -321,6 +321,8 @@ test.describe('Contracts • Document e-sign studio', () => {
       renderedPage,
       `PDF render console messages:\n${pdfConsoleMessages.join('\n') || 'none'}`,
     ).toBeVisible({ timeout: 30000 });
+    await expect(page.getByText(/Studio loaded all 6 pages/i)).toBeVisible({ timeout: 30000 });
+    await expect(page.getByRole('button', { name: /Open page 6/i })).toBeVisible({ timeout: 30000 });
     await expect(page.getByText(/PDF preview unavailable/i)).toHaveCount(0);
 
     const dimensions = await renderedPage.evaluate((image) => ({
@@ -356,5 +358,20 @@ test.describe('Contracts • Document e-sign studio', () => {
       return sampled > 0 ? nonWhite / sampled : 0;
     });
     expect(inkRatio).toBeGreaterThan(0.00035);
+
+    await page.getByRole('button', { name: /Open page 6/i }).click();
+    const renderedLastPage = page.locator('img[alt="PDF page 6"]').first();
+    await expect(
+      renderedLastPage,
+      `PDF render console messages:\n${pdfConsoleMessages.join('\n') || 'none'}`,
+    ).toBeVisible({ timeout: 30000 });
+    const lastPageDimensions = await renderedLastPage.evaluate((image) => ({
+      width: (image as HTMLImageElement).naturalWidth,
+      height: (image as HTMLImageElement).naturalHeight,
+      src: (image as HTMLImageElement).src,
+    }));
+    expect(lastPageDimensions.width).toBeGreaterThan(100);
+    expect(lastPageDimensions.height).toBeGreaterThan(100);
+    expect(lastPageDimensions.src).toContain('data:image/');
   });
 });

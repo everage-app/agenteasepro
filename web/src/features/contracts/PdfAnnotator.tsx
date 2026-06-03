@@ -10,7 +10,7 @@
  * - Export annotated PDF
  */
 
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min?url';
@@ -78,6 +78,7 @@ interface DealData {
 interface PdfAnnotatorProps {
   pdfUrl: string | null;
   pdfData?: ArrayBuffer | Uint8Array | null;
+  expectedPageCount?: number;
   signers: Signer[];
   onSave?: (annotations: Annotation[]) => void;
   onCancel?: () => void;
@@ -124,7 +125,7 @@ const SIGNER_COLORS: Record<string, { bg: string; border: string; text: string }
   OTHER: { bg: 'bg-amber-500/20', border: 'border-amber-500', text: 'text-amber-400' },
 };
 
-export function PdfAnnotator({ pdfUrl, pdfData, signers, onSave, onCancel, onSend, dealData, dealInfo, sending, requiredFields }: PdfAnnotatorProps) {
+export function PdfAnnotator({ pdfUrl, pdfData, expectedPageCount, signers, onSave, onCancel, onSend, dealData, dealInfo, sending, requiredFields }: PdfAnnotatorProps) {
   const PAGE_WIDTH = 612;
   const PAGE_HEIGHT = 792;
   const GRID_SIZE = 8;
@@ -741,6 +742,22 @@ export function PdfAnnotator({ pdfUrl, pdfData, signers, onSave, onCancel, onSen
   };
 
   const currentPageAnnotations = annotations.filter(ann => ann.page === currentPage);
+  const pageNumbers = useMemo(
+    () => Array.from({ length: totalPages }, (_, index) => index + 1),
+    [totalPages],
+  );
+  const annotationCountsByPage = useMemo(() => {
+    const counts = new Map<number, number>();
+    annotations.forEach((annotation) => {
+      counts.set(annotation.page, (counts.get(annotation.page) || 0) + 1);
+    });
+    return counts;
+  }, [annotations]);
+  const pageCountMismatch = Boolean(
+    expectedPageCount &&
+    pdfLoaded &&
+    totalPages !== expectedPageCount,
+  );
   const nativePreviewUrl = pdfUrl
     ? `${pdfUrl}${pdfUrl.includes('#') ? '&' : '#'}page=${currentPage}&toolbar=0&navpanes=0&view=FitH`
     : null;
@@ -1087,6 +1104,30 @@ export function PdfAnnotator({ pdfUrl, pdfData, signers, onSave, onCancel, onSen
           </div>
         </div>
 
+        <div className={`flex items-center justify-between gap-3 border-t px-4 py-2 text-xs ${
+          pageCountMismatch
+            ? 'border-amber-500/30 bg-amber-500/10 text-amber-100'
+            : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-100'
+        }`}>
+          <div className="flex items-center gap-2">
+            {pageCountMismatch ? (
+              <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
+            ) : (
+              <Check className="h-4 w-4 shrink-0" aria-hidden="true" />
+            )}
+            <span className="font-semibold">
+              {!pdfLoaded
+                ? `Preparing ${expectedPageCount || totalPages} page${(expectedPageCount || totalPages) === 1 ? '' : 's'} for review`
+                : pageCountMismatch
+                  ? `Studio loaded ${totalPages} of ${expectedPageCount} expected pages`
+                  : `Studio loaded all ${totalPages} page${totalPages === 1 ? '' : 's'}`}
+            </span>
+          </div>
+          <span className="hidden sm:inline text-white/60">
+            Use the page rail to review every page before sending.
+          </span>
+        </div>
+
         {/* Smart Fields Panel */}
         {showSmartFields && (
           <div className="px-4 py-3 bg-gradient-to-r from-emerald-900/30 to-green-900/20 border-t border-emerald-500/20">
@@ -1398,6 +1439,44 @@ export function PdfAnnotator({ pdfUrl, pdfData, signers, onSave, onCancel, onSen
 
       {/* Main Content */}
       <div className="flex-1 flex overflow-hidden">
+        <aside className="w-24 shrink-0 border-r border-white/10 bg-slate-950/95 flex flex-col">
+          <div className="border-b border-white/10 px-3 py-3">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Pages</div>
+            <div className="mt-0.5 text-sm font-bold text-white">{totalPages}</div>
+          </div>
+          <div className="flex-1 overflow-y-auto p-2 space-y-2">
+            {pageNumbers.map((pageNumber) => {
+              const isActivePage = pageNumber === currentPage;
+              const fieldCount = annotationCountsByPage.get(pageNumber) || 0;
+
+              return (
+                <button
+                  key={pageNumber}
+                  type="button"
+                  aria-label={`Open page ${pageNumber}`}
+                  onClick={() => {
+                    setCurrentPage(pageNumber);
+                    setSelectedTool(null);
+                  }}
+                  className={`relative flex h-16 w-full flex-col items-center justify-center rounded-lg border text-xs transition-all ${
+                    isActivePage
+                      ? 'border-blue-400 bg-blue-500/20 text-white shadow-lg shadow-blue-950/30'
+                      : 'border-white/10 bg-white/[0.04] text-slate-300 hover:border-blue-400/60 hover:bg-blue-500/10'
+                  }`}
+                >
+                  <FileText className="h-4 w-4" aria-hidden="true" />
+                  <span className="mt-1 font-bold">Page {pageNumber}</span>
+                  {fieldCount > 0 && (
+                    <span className="absolute -right-1 -top-1 rounded-full border border-slate-950 bg-emerald-400 px-1.5 py-0.5 text-[9px] font-black text-slate-950">
+                      {fieldCount}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </aside>
+
         {/* PDF Viewer */}
         <div 
           ref={containerRef}
