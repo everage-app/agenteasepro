@@ -1360,9 +1360,11 @@ export function PdfEditor() {
                   <p className="mt-1 text-xs leading-5 text-slate-600 dark:text-slate-400">{item.detail}</p>
                 </div>
                 <span className={`rounded-full border px-2 py-1 text-[10px] font-bold uppercase ${
-                  workflowIntent === item.id
-                    ? 'border-emerald-300 bg-white text-emerald-700 dark:border-emerald-400/30 dark:bg-emerald-500/10 dark:text-emerald-200'
-                    : 'border-slate-300 bg-white text-slate-500 dark:border-white/10 dark:bg-white/10 dark:text-slate-300'
+                  item.id === 'esign'
+                    ? 'contract-esign-studio-pill'
+                    : workflowIntent === item.id
+                      ? 'border-emerald-300 bg-white text-emerald-700 dark:border-emerald-400/30 dark:bg-emerald-500/10 dark:text-emerald-200'
+                      : 'border-slate-300 bg-white text-slate-500 dark:border-white/10 dark:bg-white/10 dark:text-slate-300'
                 }`}>
                   {item.action}
                 </span>
@@ -1387,7 +1389,7 @@ export function PdfEditor() {
                 void handleOpenEsign();
               }}
               disabled={processing || selectedCount === 0}
-              className="whitespace-nowrap"
+              className="contract-esign-studio-button whitespace-nowrap"
             >
               Open E-sign Studio
             </Button>
