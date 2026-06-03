@@ -134,7 +134,7 @@ export function PdfAnnotator({ pdfUrl, pdfData, expectedPageCount, signers, onSa
   const MIN_FIELD_HEIGHT = 24;
   const MIN_CHECKBOX_SIZE = 20;
   const containerRef = useRef<HTMLDivElement>(null);
-  const pageRef = useRef<HTMLDivElement>(null);
+  const pageRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [selectedTool, setSelectedTool] = useState<AnnotationType | null>(null);
   const [selectedAnnotation, setSelectedAnnotation] = useState<string | null>(null);
@@ -161,7 +161,7 @@ export function PdfAnnotator({ pdfUrl, pdfData, expectedPageCount, signers, onSa
   const [showRequiredPanel, setShowRequiredPanel] = useState(false);
   const [smartFieldOverrides, setSmartFieldOverrides] = useState<Partial<Record<keyof DealData, string>>>({});
   const [smartPlacementNotice, setSmartPlacementNotice] = useState('');
-  const [alignmentGuide, setAlignmentGuide] = useState<{ x: number | null; y: number | null }>({ x: null, y: null });
+  const [alignmentGuide, setAlignmentGuide] = useState<{ page: number | null; x: number | null; y: number | null }>({ page: null, x: null, y: null });
   const smartPlacementTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const didAutoFitRef = useRef(false);
   const clampZoom = (value: number) => Math.max(0.5, Math.min(2, value));
@@ -242,14 +242,14 @@ export function PdfAnnotator({ pdfUrl, pdfData, expectedPageCount, signers, onSa
 
   useEffect(() => {
     if (!activeInteraction) {
-      setAlignmentGuide({ x: null, y: null });
+      setAlignmentGuide({ page: null, x: null, y: null });
     }
   }, [activeInteraction]);
   
   const [pdfDoc, setPdfDoc] = useState<pdfjsLib.PDFDocumentProxy | null>(null);
-  const [pdfPageImage, setPdfPageImage] = useState<string | null>(null);
-  const [pdfRenderError, setPdfRenderError] = useState<string | null>(null);
-  const [pdfRendering, setPdfRendering] = useState(false);
+  const [pdfPageImages, setPdfPageImages] = useState<Record<number, string>>({});
+  const [pdfRenderErrors, setPdfRenderErrors] = useState<Record<number, string>>({});
+  const [pdfRenderingPages, setPdfRenderingPages] = useState<Record<number, boolean>>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -259,10 +259,13 @@ export function PdfAnnotator({ pdfUrl, pdfData, expectedPageCount, signers, onSa
     const loadPdf = async () => {
       setPdfLoaded(false);
       setPdfDoc(null);
-      setPdfPageImage(null);
-      setPdfRenderError(null);
+      setPdfPageImages({});
+      setPdfRenderErrors({});
+      setPdfRenderingPages({});
       setTotalPages(1);
       setCurrentPage(1);
+      pageRefs.current = {};
+      didAutoFitRef.current = false;
 
       const sourcePdfUrl = pdfUrl;
       if (!sourcePdfUrl && !pdfData) {
@@ -295,7 +298,9 @@ export function PdfAnnotator({ pdfUrl, pdfData, expectedPageCount, signers, onSa
       } catch (error) {
         console.error('Failed to load PDF for e-sign field placement:', error);
         if (!cancelled) {
-          setPdfRenderError('This PDF could not be rendered in the field studio. Try re-uploading the PDF or use a freshly downloaded copy.');
+          setPdfRenderErrors({
+            1: 'This PDF could not be rendered in the field studio. Try re-uploading the PDF or use a freshly downloaded copy.',
+          });
         }
       }
     };
@@ -312,51 +317,59 @@ export function PdfAnnotator({ pdfUrl, pdfData, expectedPageCount, signers, onSa
   useEffect(() => {
     let cancelled = false;
 
-    const renderPage = async () => {
+    const renderPages = async () => {
       if (!pdfDoc) {
-        setPdfPageImage(null);
+        setPdfPageImages({});
+        setPdfRenderingPages({});
         return;
       }
 
-      setPdfRendering(true);
-      setPdfRenderError(null);
+      const pageCount = Math.max(1, pdfDoc.numPages);
+      setPdfPageImages({});
+      setPdfRenderErrors({});
+      setPdfRenderingPages(
+        Array.from({ length: pageCount }, (_, index) => index + 1).reduce<Record<number, boolean>>((acc, pageNumber) => {
+          acc[pageNumber] = true;
+          return acc;
+        }, {}),
+      );
 
-      try {
-        const page = await pdfDoc.getPage(currentPage);
-        const rendered = await renderPdfPageToImage(page, {
-          maxWidth: PAGE_WIDTH,
-          maxHeight: PAGE_HEIGHT,
-          outputScale: Math.max(1, Math.min(2, window.devicePixelRatio || 1)),
-          imageType: 'image/png',
-        });
+      for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
+        try {
+          const page = await pdfDoc.getPage(pageNumber);
+          const rendered = await renderPdfPageToImage(page, {
+            maxWidth: PAGE_WIDTH,
+            maxHeight: PAGE_HEIGHT,
+            outputScale: Math.max(1, Math.min(2, window.devicePixelRatio || 1)),
+            imageType: 'image/png',
+          });
 
-        if (!cancelled) {
-          setPdfPageImage(rendered.imageSrc);
-        }
-      } catch (error) {
-        console.error('Failed to render PDF page for e-sign field placement:', error);
-        if (!cancelled) {
-          setPdfPageImage(null);
+          if (cancelled) return;
+          setPdfPageImages((prev) => ({ ...prev, [pageNumber]: rendered.imageSrc }));
+        } catch (error) {
+          console.error(`Failed to render PDF page ${pageNumber} for e-sign field placement:`, error);
+          if (cancelled) return;
           const errorMessage = error instanceof Error ? error.message : '';
-          setPdfRenderError(
-            /blank/i.test(errorMessage)
+          setPdfRenderErrors((prev) => ({
+            ...prev,
+            [pageNumber]: /blank/i.test(errorMessage)
               ? 'The fast preview rendered this page blank, so the studio switched to the browser PDF fallback. If field alignment looks off, re-upload a freshly downloaded or flattened copy before sending.'
               : 'This page could not be displayed in the fast preview. The studio will use the browser PDF fallback when available.',
-          );
-        }
-      } finally {
-        if (!cancelled) {
-          setPdfRendering(false);
+          }));
+        } finally {
+          if (!cancelled) {
+            setPdfRenderingPages((prev) => ({ ...prev, [pageNumber]: false }));
+          }
         }
       }
     };
 
-    renderPage();
+    renderPages();
 
     return () => {
       cancelled = true;
     };
-  }, [pdfDoc, currentPage, PAGE_WIDTH, PAGE_HEIGHT]);
+  }, [pdfDoc, PAGE_WIDTH, PAGE_HEIGHT]);
 
   useEffect(() => {
     if (currentPage > totalPages) {
@@ -418,24 +431,43 @@ export function PdfAnnotator({ pdfUrl, pdfData, expectedPageCount, signers, onSa
     return { value: bestValue, guide: bestGuide };
   };
 
-  const getViewportContext = useCallback(() => {
-    const containerEl = containerRef.current;
-    const pageEl = pageRef.current;
-    if (!containerEl || !pageEl) return null;
-
-    return {
-      containerEl,
-      containerRect: containerEl.getBoundingClientRect(),
-      pageRect: pageEl.getBoundingClientRect(),
-    };
-  }, []);
-
   const isPointInsidePage = (clientX: number, clientY: number, pageRect: DOMRect) => (
     clientX >= pageRect.left &&
     clientX <= pageRect.right &&
     clientY >= pageRect.top &&
     clientY <= pageRect.bottom
   );
+
+  const getViewportContextForPage = useCallback((pageNumber = currentPage) => {
+    const containerEl = containerRef.current;
+    const pageEl = pageRefs.current[pageNumber];
+    if (!containerEl || !pageEl) return null;
+
+    return {
+      containerEl,
+      containerRect: containerEl.getBoundingClientRect(),
+      page: pageNumber,
+      pageEl,
+      pageRect: pageEl.getBoundingClientRect(),
+    };
+  }, [currentPage]);
+
+  const getViewportContextForPoint = useCallback((clientX: number, clientY: number, preferredPage = currentPage) => {
+    const preferredContext = getViewportContextForPage(preferredPage);
+    if (preferredContext && isPointInsidePage(clientX, clientY, preferredContext.pageRect)) {
+      return preferredContext;
+    }
+
+    for (let pageNumber = 1; pageNumber <= totalPages; pageNumber += 1) {
+      if (pageNumber === preferredPage) continue;
+      const context = getViewportContextForPage(pageNumber);
+      if (context && isPointInsidePage(clientX, clientY, context.pageRect)) {
+        return context;
+      }
+    }
+
+    return null;
+  }, [currentPage, totalPages, getViewportContextForPage]);
 
   const autoScrollViewer = (containerEl: HTMLDivElement, containerRect: DOMRect, clientX: number, clientY: number) => {
     const edgeBuffer = 72;
@@ -456,7 +488,7 @@ export function PdfAnnotator({ pdfUrl, pdfData, expectedPageCount, signers, onSa
 
   const endInteraction = useCallback(() => {
     setActiveInteraction(null);
-    setAlignmentGuide({ x: null, y: null });
+    setAlignmentGuide({ page: null, x: null, y: null });
   }, []);
 
   const buildAnnotation = (type: AnnotationType, x: number, y: number, page = currentPage): Annotation | null => {
@@ -483,19 +515,20 @@ export function PdfAnnotator({ pdfUrl, pdfData, expectedPageCount, signers, onSa
   const handleCanvasClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     if (!selectedTool || !!activeInteraction) return;
 
-    const context = getViewportContext();
-    if (!context || !isPointInsidePage(e.clientX, e.clientY, context.pageRect)) return;
+    const context = getViewportContextForPoint(e.clientX, e.clientY);
+    if (!context) return;
 
     const x = (e.clientX - context.pageRect.left) / zoom;
     const y = (e.clientY - context.pageRect.top) / zoom;
 
-    const newAnnotation = buildAnnotation(selectedTool, x, y, currentPage);
+    const newAnnotation = buildAnnotation(selectedTool, x, y, context.page);
     if (!newAnnotation) return;
 
     setAnnotations(prev => [...prev, newAnnotation]);
     setSelectedAnnotation(newAnnotation.id);
+    setCurrentPage(context.page);
     setSelectedTool(null);
-  }, [selectedTool, currentPage, zoom, activeInteraction, getViewportContext]);
+  }, [selectedTool, zoom, activeInteraction, getViewportContextForPoint]);
 
   const handleFieldDragStart = (e: React.DragEvent<HTMLButtonElement>, type: AnnotationType) => {
     e.dataTransfer.setData('application/x-ae-field', type);
@@ -509,16 +542,17 @@ export function PdfAnnotator({ pdfUrl, pdfData, expectedPageCount, signers, onSa
     const droppedType = (e.dataTransfer.getData('application/x-ae-field') || e.dataTransfer.getData('text/plain')) as AnnotationType;
     if (!droppedType) return;
 
-    const context = getViewportContext();
-    if (!context || !isPointInsidePage(e.clientX, e.clientY, context.pageRect)) return;
+    const context = getViewportContextForPoint(e.clientX, e.clientY);
+    if (!context) return;
 
     const x = (e.clientX - context.pageRect.left) / zoom;
     const y = (e.clientY - context.pageRect.top) / zoom;
-    const newAnnotation = buildAnnotation(droppedType, x, y, currentPage);
+    const newAnnotation = buildAnnotation(droppedType, x, y, context.page);
     if (!newAnnotation) return;
     setAnnotations((prev) => [...prev, newAnnotation]);
     setSelectedAnnotation(newAnnotation.id);
-  }, [zoom, currentPage, getViewportContext]);
+    setCurrentPage(context.page);
+  }, [zoom, getViewportContextForPoint]);
 
   const handleCanvasDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -532,6 +566,7 @@ export function PdfAnnotator({ pdfUrl, pdfData, expectedPageCount, signers, onSa
     const ann = annotations.find(a => a.id === annId);
     if (ann) {
       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      setCurrentPage(ann.page);
       setActiveInteraction({
         mode: 'drag',
         annotationId: annId,
@@ -549,6 +584,7 @@ export function PdfAnnotator({ pdfUrl, pdfData, expectedPageCount, signers, onSa
 
     const ann = annotations.find((a) => a.id === annId);
     if (!ann) return;
+    setCurrentPage(ann.page);
 
     setActiveInteraction({
       mode: 'resize',
@@ -563,18 +599,19 @@ export function PdfAnnotator({ pdfUrl, pdfData, expectedPageCount, signers, onSa
   const updateActiveInteraction = useCallback((clientX: number, clientY: number) => {
     if (!activeInteraction) return;
 
-    const context = getViewportContext();
+    const target = annotations.find((ann) => ann.id === activeInteraction.annotationId);
+    if (!target) return;
+
+    const context = getViewportContextForPage(target.page);
     if (!context) return;
 
     autoScrollViewer(context.containerEl, context.containerRect, clientX, clientY);
 
-    const livePageRect = pageRef.current?.getBoundingClientRect();
+    const livePageRect = context.pageEl.getBoundingClientRect();
     if (!livePageRect) return;
 
-    const target = annotations.find((ann) => ann.id === activeInteraction.annotationId);
-    if (!target) return;
     const peerAnnotations = annotations.filter(
-      (ann) => ann.page === currentPage && ann.id !== activeInteraction.annotationId,
+      (ann) => ann.page === target.page && ann.id !== activeInteraction.annotationId,
     );
     const candidateX = [PAGE_WIDTH / 2, ...peerAnnotations.flatMap((ann) => [ann.x, ann.x + ann.width / 2, ann.x + ann.width])];
     const candidateY = [PAGE_HEIGHT / 2, ...peerAnnotations.flatMap((ann) => [ann.y, ann.y + ann.height / 2, ann.y + ann.height])];
@@ -589,6 +626,7 @@ export function PdfAnnotator({ pdfUrl, pdfData, expectedPageCount, signers, onSa
       const clamped = clampPosition(snappedX.start, snappedY.start, target.width, target.height);
 
       setAlignmentGuide({
+        page: target.page,
         x: snappedX.guide,
         y: snappedY.guide,
       });
@@ -628,6 +666,7 @@ export function PdfAnnotator({ pdfUrl, pdfData, expectedPageCount, signers, onSa
     }
 
     setAlignmentGuide({
+      page: target.page,
       x: snappedRight.guide,
       y: snappedBottom.guide,
     });
@@ -640,7 +679,7 @@ export function PdfAnnotator({ pdfUrl, pdfData, expectedPageCount, signers, onSa
         ? { ...ann, width, height }
         : ann,
     ));
-  }, [activeInteraction, zoom, annotations, currentPage, PAGE_WIDTH, PAGE_HEIGHT, MIN_CHECKBOX_SIZE, MIN_FIELD_HEIGHT, MIN_FIELD_WIDTH, getViewportContext]);
+  }, [activeInteraction, zoom, annotations, PAGE_WIDTH, PAGE_HEIGHT, MIN_CHECKBOX_SIZE, MIN_FIELD_HEIGHT, MIN_FIELD_WIDTH, getViewportContextForPage]);
 
   useEffect(() => {
     if (!activeInteraction) return;
@@ -741,7 +780,6 @@ export function PdfAnnotator({ pdfUrl, pdfData, expectedPageCount, signers, onSa
     return SIGNER_COLORS[role || 'OTHER'] || SIGNER_COLORS.OTHER;
   };
 
-  const currentPageAnnotations = annotations.filter(ann => ann.page === currentPage);
   const pageNumbers = useMemo(
     () => Array.from({ length: totalPages }, (_, index) => index + 1),
     [totalPages],
@@ -758,9 +796,48 @@ export function PdfAnnotator({ pdfUrl, pdfData, expectedPageCount, signers, onSa
     pdfLoaded &&
     totalPages !== expectedPageCount,
   );
-  const nativePreviewUrl = pdfUrl
-    ? `${pdfUrl}${pdfUrl.includes('#') ? '&' : '#'}page=${currentPage}&toolbar=0&navpanes=0&view=FitH`
-    : null;
+  const getNativePreviewUrl = useCallback((pageNumber: number) => (
+    pdfUrl
+      ? `${pdfUrl}${pdfUrl.includes('#') ? '&' : '#'}page=${pageNumber}&toolbar=0&navpanes=0&view=FitH`
+      : null
+  ), [pdfUrl]);
+
+  const scrollToPage = useCallback((pageNumber: number, behavior: ScrollBehavior = 'smooth') => {
+    const boundedPage = Math.max(1, Math.min(totalPages, pageNumber));
+    setCurrentPage(boundedPage);
+
+    const containerEl = containerRef.current;
+    const pageEl = pageRefs.current[boundedPage];
+    if (!containerEl || !pageEl) return;
+
+    containerEl.scrollTo({
+      top: Math.max(0, pageEl.offsetTop - 24),
+      behavior,
+    });
+  }, [totalPages]);
+
+  const handleDocumentScroll = useCallback(() => {
+    const containerEl = containerRef.current;
+    if (!containerEl) return;
+
+    const containerRect = containerEl.getBoundingClientRect();
+    const anchorY = containerRect.top + Math.min(containerRect.height * 0.35, 260);
+    let closestPage = currentPage;
+    let closestDistance = Infinity;
+
+    for (let pageNumber = 1; pageNumber <= totalPages; pageNumber += 1) {
+      const pageEl = pageRefs.current[pageNumber];
+      if (!pageEl) continue;
+      const rect = pageEl.getBoundingClientRect();
+      const distance = Math.abs(rect.top - anchorY);
+      if (distance < closestDistance) {
+        closestDistance = distance;
+        closestPage = pageNumber;
+      }
+    }
+
+    setCurrentPage((prev) => (prev === closestPage ? prev : closestPage));
+  }, [currentPage, totalPages]);
 
   // Helper to add a smart field with auto-populated value
   const addSmartField = (field: typeof SMART_FIELDS[0], x: number, y: number) => {
@@ -1124,7 +1201,7 @@ export function PdfAnnotator({ pdfUrl, pdfData, expectedPageCount, signers, onSa
             </span>
           </div>
           <span className="hidden sm:inline text-white/60">
-            Use the page rail to review every page before sending.
+            Scroll the full document or use the page rail to jump before sending.
           </span>
         </div>
 
@@ -1453,9 +1530,9 @@ export function PdfAnnotator({ pdfUrl, pdfData, expectedPageCount, signers, onSa
                 <button
                   key={pageNumber}
                   type="button"
-                  aria-label={`Open page ${pageNumber}`}
+                  aria-label={`Jump to page ${pageNumber}`}
                   onClick={() => {
-                    setCurrentPage(pageNumber);
+                    scrollToPage(pageNumber);
                     setSelectedTool(null);
                   }}
                   className={`relative flex h-16 w-full flex-col items-center justify-center rounded-lg border text-xs transition-all ${
@@ -1484,167 +1561,200 @@ export function PdfAnnotator({ pdfUrl, pdfData, expectedPageCount, signers, onSa
           onClick={handleCanvasClick}
           onDragOver={handleCanvasDragOver}
           onDrop={handleCanvasDrop}
+          onScroll={handleDocumentScroll}
           style={{ cursor: selectedTool ? 'crosshair' : activeInteraction?.mode === 'drag' ? 'grabbing' : activeInteraction?.mode === 'resize' ? 'nwse-resize' : 'default' }}
         >
-          {/* PDF Display */}
-          <div 
-            ref={pageRef}
-            className="relative mx-auto my-6 select-none"
-            style={{ 
-              width: `${PAGE_WIDTH * zoom}px`, 
-              height: `${PAGE_HEIGHT * zoom}px`,
-              minHeight: `${PAGE_HEIGHT * zoom}px`,
-              backgroundColor: 'white',
-              boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
-              borderRadius: '4px',
-            }}
-          >
-            {pdfPageImage && (
-              <img
-                src={pdfPageImage}
-                alt={`PDF page ${currentPage}`}
-                className="absolute inset-0 h-full w-full rounded object-contain"
-                draggable={false}
-              />
-            )}
+          <div className="mx-auto flex w-max min-w-full flex-col items-center gap-7 px-4 py-6">
+            {pageNumbers.map((pageNumber) => {
+              const pageImage = pdfPageImages[pageNumber];
+              const pageRenderError = pdfRenderErrors[pageNumber];
+              const pageRendering = Boolean(pdfRenderingPages[pageNumber]);
+              const nativePreviewUrl = getNativePreviewUrl(pageNumber);
+              const pageAnnotations = annotations.filter((ann) => ann.page === pageNumber);
+              const isActivePage = currentPage === pageNumber;
 
-            {pdfRenderError && nativePreviewUrl && !pdfPageImage && (
-              <iframe
-                src={nativePreviewUrl}
-                title={`PDF page ${currentPage} fallback preview`}
-                className="absolute inset-0 h-full w-full rounded bg-white"
-                style={{ pointerEvents: 'none' }}
-              />
-            )}
+              return (
+                <section
+                  key={pageNumber}
+                  className="flex flex-col items-center"
+                  aria-label={`Page ${pageNumber} of ${totalPages}`}
+                >
+                  <div className={`mb-2 rounded-full border px-3 py-1 text-[11px] font-bold uppercase tracking-wider transition-colors ${
+                    isActivePage
+                      ? 'border-blue-400/50 bg-blue-500/20 text-blue-100'
+                      : 'border-white/10 bg-slate-950/60 text-slate-400'
+                  }`}>
+                    Page {pageNumber}
+                  </div>
 
-            {(pdfRendering || (!pdfPageImage && !pdfRenderError)) && (
-              <div className="absolute inset-0 z-10 flex items-center justify-center rounded bg-white text-sm font-semibold text-slate-500">
-                Rendering PDF page...
-              </div>
-            )}
-
-            {pdfRenderError && !pdfPageImage && !nativePreviewUrl && (
-              <div className="absolute inset-0 z-10 flex items-center justify-center rounded bg-white px-8 text-center">
-                <div>
-                  <AlertTriangle className="mx-auto mb-3 h-8 w-8 text-amber-500" aria-hidden="true" />
-                  <p className="text-sm font-semibold text-slate-800">PDF preview unavailable</p>
-                  <p className="mt-2 text-xs leading-5 text-slate-500">{pdfRenderError}</p>
-                </div>
-              </div>
-            )}
-
-            {pdfRenderError && nativePreviewUrl && !pdfPageImage && (
-              <div className="absolute left-4 right-4 top-4 z-20 rounded-xl border border-amber-300/40 bg-amber-50/95 px-3 py-2 text-xs font-medium leading-5 text-amber-950 shadow-lg">
-                {pdfRenderError}
-              </div>
-            )}
-
-            {/* Annotation Overlays */}
-            <div className="absolute inset-0 pointer-events-none" style={{ transform: `scale(${zoom})`, transformOrigin: 'top left' }}>
-              {alignmentGuide.x !== null && (
-                <div
-                  className="absolute top-0 bottom-0 w-px bg-blue-500/70"
-                  style={{ left: alignmentGuide.x }}
-                />
-              )}
-              {alignmentGuide.y !== null && (
-                <div
-                  className="absolute left-0 right-0 h-px bg-blue-500/70"
-                  style={{ top: alignmentGuide.y }}
-                />
-              )}
-              {currentPageAnnotations.map(ann => {
-                const colors = getSignerColor(ann.assignedTo);
-                const isSelected = selectedAnnotation === ann.id;
-                
-                return (
                   <div
-                    key={ann.id}
-                    className={`group absolute pointer-events-auto cursor-grab select-none transition-shadow active:cursor-grabbing ${colors.bg} ${colors.border} border-2 rounded ${
-                      isSelected ? 'ring-2 ring-white/90 ring-offset-2 ring-offset-slate-900 shadow-lg' : ''
-                    } ${ann.type === 'checkbox' ? 'rounded-md' : ''}`}
-                    style={{
-                      left: ann.x,
-                      top: ann.y,
-                      width: ann.width,
-                      height: ann.height,
-                      minWidth: ann.type === 'checkbox' ? 24 : 60,
-                      touchAction: 'none',
+                    ref={(element) => {
+                      pageRefs.current[pageNumber] = element;
                     }}
-                    onMouseDown={(e) => handleAnnotationMouseDown(e, ann.id)}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSelectedAnnotation(ann.id);
+                    data-page-number={pageNumber}
+                    className="relative select-none"
+                    style={{
+                      width: `${PAGE_WIDTH * zoom}px`,
+                      height: `${PAGE_HEIGHT * zoom}px`,
+                      minHeight: `${PAGE_HEIGHT * zoom}px`,
+                      backgroundColor: 'white',
+                      boxShadow: isActivePage
+                        ? '0 0 0 2px rgba(59,130,246,0.35), 0 4px 24px rgba(0,0,0,0.55)'
+                        : '0 4px 20px rgba(0,0,0,0.5)',
+                      borderRadius: '4px',
                     }}
                   >
-                    {/* Field content */}
-                    <div className="w-full h-full flex items-center justify-center px-2 overflow-hidden">
-                      {ann.type === 'signature' && (
-                        <div className="text-center">
-                          <span className={`inline-flex items-center gap-1 text-xs font-bold ${colors.text}`}><PenLine className="h-3 w-3" /> SIGN</span>
-                          <div className={`text-[10px] ${colors.text} opacity-70`}>{ann.assignedTo}</div>
-                        </div>
-                      )}
-                      {ann.type === 'initials' && (
-                        <span className={`text-xs font-bold ${colors.text}`}>INIT</span>
-                      )}
-                      {ann.type === 'date' && (
-                        <span className={`inline-flex items-center gap-1 text-xs ${colors.text}`}><CalendarDays className="h-3 w-3" /> {ann.value || 'Date'}</span>
-                      )}
-                      {ann.type === 'text' && (
-                        <input
-                          type="text"
-                          value={ann.value}
-                          onChange={(e) => updateAnnotation(ann.id, { value: e.target.value })}
-                          placeholder={ann.placeholder}
-                          className="w-full h-full bg-transparent text-xs text-slate-800 outline-none"
-                          onMouseDown={(e) => e.stopPropagation()}
-                          onClick={(e) => e.stopPropagation()}
-                        />
-                      )}
-                      {ann.type === 'address' && (
-                        <span className={`text-xs ${colors.text}`}>{ann.value || getSmartFieldValue('address') || 'Address'}</span>
-                      )}
-                      {ann.type === 'name' && (
-                        <span className={`text-xs ${colors.text}`}>{ann.value || ann.placeholder || 'Name'}</span>
-                      )}
-                      {ann.type === 'email' && (
-                        <span className={`text-xs ${colors.text}`}>{ann.value || ann.placeholder || 'Email'}</span>
-                      )}
-                      {ann.type === 'price' && (
-                        <span className={`text-xs ${colors.text}`}>{ann.value || getSmartFieldValue('purchasePrice') || 'Price'}</span>
-                      )}
-                      {ann.type === 'mls' && (
-                        <span className={`text-xs ${colors.text}`}>{ann.value || getSmartFieldValue('mlsNumber') || 'MLS #'}</span>
-                      )}
-                      {ann.type === 'checkbox' && (
-                        <button
-                          type="button"
-                          className={`text-sm ${colors.text}`}
-                          onMouseDown={(e) => e.stopPropagation()}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            updateAnnotation(ann.id, { value: ann.value === 'checked' ? '' : 'checked' });
-                          }}
-                        >
-                          {ann.value === 'checked' ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
-                        </button>
-                      )}
-                    </div>
+                    {pageImage && (
+                      <img
+                        src={pageImage}
+                        alt={`PDF page ${pageNumber}`}
+                        className="absolute inset-0 h-full w-full rounded object-contain"
+                        draggable={false}
+                      />
+                    )}
 
-                    {/* Resize handle */}
-                    {isSelected && (
-                      <div
-                        className="absolute -right-2 -bottom-2 flex h-5 w-5 items-center justify-center rounded-full border-2 border-blue-500 bg-white text-[9px] text-blue-600 shadow-lg cursor-se-resize"
-                        onMouseDown={(e) => handleResizeMouseDown(e, ann.id)}
-                      >
-                        <Ruler className="h-3 w-3" />
+                    {pageRenderError && nativePreviewUrl && !pageImage && (
+                      <iframe
+                        src={nativePreviewUrl}
+                        title={`PDF page ${pageNumber} fallback preview`}
+                        className="absolute inset-0 h-full w-full rounded bg-white"
+                        style={{ pointerEvents: 'none' }}
+                      />
+                    )}
+
+                    {(pageRendering || (!pageImage && !pageRenderError)) && (
+                      <div className="absolute inset-0 z-10 flex items-center justify-center rounded bg-white text-sm font-semibold text-slate-500">
+                        Rendering PDF page {pageNumber}...
                       </div>
                     )}
+
+                    {pageRenderError && !pageImage && !nativePreviewUrl && (
+                      <div className="absolute inset-0 z-10 flex items-center justify-center rounded bg-white px-8 text-center">
+                        <div>
+                          <AlertTriangle className="mx-auto mb-3 h-8 w-8 text-amber-500" aria-hidden="true" />
+                          <p className="text-sm font-semibold text-slate-800">PDF preview unavailable</p>
+                          <p className="mt-2 text-xs leading-5 text-slate-500">{pageRenderError}</p>
+                        </div>
+                      </div>
+                    )}
+
+                    {pageRenderError && nativePreviewUrl && !pageImage && (
+                      <div className="absolute left-4 right-4 top-4 z-20 rounded-xl border border-amber-300/40 bg-amber-50/95 px-3 py-2 text-xs font-medium leading-5 text-amber-950 shadow-lg">
+                        {pageRenderError}
+                      </div>
+                    )}
+
+                    {/* Annotation Overlays */}
+                    <div className="absolute inset-0 pointer-events-none" style={{ transform: `scale(${zoom})`, transformOrigin: 'top left' }}>
+                      {alignmentGuide.page === pageNumber && alignmentGuide.x !== null && (
+                        <div
+                          className="absolute top-0 bottom-0 w-px bg-blue-500/70"
+                          style={{ left: alignmentGuide.x }}
+                        />
+                      )}
+                      {alignmentGuide.page === pageNumber && alignmentGuide.y !== null && (
+                        <div
+                          className="absolute left-0 right-0 h-px bg-blue-500/70"
+                          style={{ top: alignmentGuide.y }}
+                        />
+                      )}
+                      {pageAnnotations.map(ann => {
+                        const colors = getSignerColor(ann.assignedTo);
+                        const isSelected = selectedAnnotation === ann.id;
+
+                        return (
+                          <div
+                            key={ann.id}
+                            className={`group absolute pointer-events-auto cursor-grab select-none transition-shadow active:cursor-grabbing ${colors.bg} ${colors.border} border-2 rounded ${
+                              isSelected ? 'ring-2 ring-white/90 ring-offset-2 ring-offset-slate-900 shadow-lg' : ''
+                            } ${ann.type === 'checkbox' ? 'rounded-md' : ''}`}
+                            style={{
+                              left: ann.x,
+                              top: ann.y,
+                              width: ann.width,
+                              height: ann.height,
+                              minWidth: ann.type === 'checkbox' ? 24 : 60,
+                              touchAction: 'none',
+                            }}
+                            onMouseDown={(e) => handleAnnotationMouseDown(e, ann.id)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedAnnotation(ann.id);
+                              setCurrentPage(ann.page);
+                            }}
+                          >
+                            {/* Field content */}
+                            <div className="w-full h-full flex items-center justify-center px-2 overflow-hidden">
+                              {ann.type === 'signature' && (
+                                <div className="text-center">
+                                  <span className={`inline-flex items-center gap-1 text-xs font-bold ${colors.text}`}><PenLine className="h-3 w-3" /> SIGN</span>
+                                  <div className={`text-[10px] ${colors.text} opacity-70`}>{ann.assignedTo}</div>
+                                </div>
+                              )}
+                              {ann.type === 'initials' && (
+                                <span className={`text-xs font-bold ${colors.text}`}>INIT</span>
+                              )}
+                              {ann.type === 'date' && (
+                                <span className={`inline-flex items-center gap-1 text-xs ${colors.text}`}><CalendarDays className="h-3 w-3" /> {ann.value || 'Date'}</span>
+                              )}
+                              {ann.type === 'text' && (
+                                <input
+                                  type="text"
+                                  value={ann.value}
+                                  onChange={(e) => updateAnnotation(ann.id, { value: e.target.value })}
+                                  placeholder={ann.placeholder}
+                                  className="w-full h-full bg-transparent text-xs text-slate-800 outline-none"
+                                  onMouseDown={(e) => e.stopPropagation()}
+                                  onClick={(e) => e.stopPropagation()}
+                                />
+                              )}
+                              {ann.type === 'address' && (
+                                <span className={`text-xs ${colors.text}`}>{ann.value || getSmartFieldValue('address') || 'Address'}</span>
+                              )}
+                              {ann.type === 'name' && (
+                                <span className={`text-xs ${colors.text}`}>{ann.value || ann.placeholder || 'Name'}</span>
+                              )}
+                              {ann.type === 'email' && (
+                                <span className={`text-xs ${colors.text}`}>{ann.value || ann.placeholder || 'Email'}</span>
+                              )}
+                              {ann.type === 'price' && (
+                                <span className={`text-xs ${colors.text}`}>{ann.value || getSmartFieldValue('purchasePrice') || 'Price'}</span>
+                              )}
+                              {ann.type === 'mls' && (
+                                <span className={`text-xs ${colors.text}`}>{ann.value || getSmartFieldValue('mlsNumber') || 'MLS #'}</span>
+                              )}
+                              {ann.type === 'checkbox' && (
+                                <button
+                                  type="button"
+                                  className={`text-sm ${colors.text}`}
+                                  onMouseDown={(e) => e.stopPropagation()}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    updateAnnotation(ann.id, { value: ann.value === 'checked' ? '' : 'checked' });
+                                  }}
+                                >
+                                  {ann.value === 'checked' ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
+                                </button>
+                              )}
+                            </div>
+
+                            {/* Resize handle */}
+                            {isSelected && (
+                              <div
+                                className="absolute -right-2 -bottom-2 flex h-5 w-5 items-center justify-center rounded-full border-2 border-blue-500 bg-white text-[9px] text-blue-600 shadow-lg cursor-se-resize"
+                                onMouseDown={(e) => handleResizeMouseDown(e, ann.id)}
+                              >
+                                <Ruler className="h-3 w-3" />
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
-                );
-              })}
-            </div>
+                </section>
+              );
+            })}
           </div>
         </div>
 
@@ -1795,7 +1905,7 @@ export function PdfAnnotator({ pdfUrl, pdfData, expectedPageCount, signers, onSa
                               key={ann.id}
                               onClick={() => {
                                 setSelectedAnnotation(ann.id);
-                                setCurrentPage(ann.page);
+                                scrollToPage(ann.page);
                               }}
                               className={`w-full p-2 rounded-lg text-left text-xs transition-colors ${
                                 selectedAnnotation === ann.id
@@ -1945,7 +2055,7 @@ export function PdfAnnotator({ pdfUrl, pdfData, expectedPageCount, signers, onSa
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2 bg-slate-800 rounded-lg p-1">
             <button
-              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+              onClick={() => scrollToPage(currentPage - 1)}
               disabled={currentPage <= 1}
               className="p-2 rounded hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed text-white"
             >
@@ -1957,7 +2067,7 @@ export function PdfAnnotator({ pdfUrl, pdfData, expectedPageCount, signers, onSa
               Page {currentPage} of {totalPages}
             </span>
             <button
-              onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+              onClick={() => scrollToPage(currentPage + 1)}
               disabled={currentPage >= totalPages}
               className="p-2 rounded hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed text-white"
             >

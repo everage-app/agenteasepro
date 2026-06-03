@@ -322,7 +322,8 @@ test.describe('Contracts • Document e-sign studio', () => {
       `PDF render console messages:\n${pdfConsoleMessages.join('\n') || 'none'}`,
     ).toBeVisible({ timeout: 30000 });
     await expect(page.getByText(/Studio loaded all 6 pages/i)).toBeVisible({ timeout: 30000 });
-    await expect(page.getByRole('button', { name: /Open page 6/i })).toBeVisible({ timeout: 30000 });
+    await expect(page.locator('img[alt^="PDF page "]')).toHaveCount(6, { timeout: 30000 });
+    await expect(page.getByRole('button', { name: /Jump to page 6/i })).toBeVisible({ timeout: 30000 });
     await expect(page.getByText(/PDF preview unavailable/i)).toHaveCount(0);
 
     const dimensions = await renderedPage.evaluate((image) => ({
@@ -359,8 +360,9 @@ test.describe('Contracts • Document e-sign studio', () => {
     });
     expect(inkRatio).toBeGreaterThan(0.00035);
 
-    await page.getByRole('button', { name: /Open page 6/i }).click();
+    await page.getByRole('button', { name: /Jump to page 6/i }).click();
     const renderedLastPage = page.locator('img[alt="PDF page 6"]').first();
+    await renderedLastPage.scrollIntoViewIfNeeded();
     await expect(
       renderedLastPage,
       `PDF render console messages:\n${pdfConsoleMessages.join('\n') || 'none'}`,
@@ -373,5 +375,17 @@ test.describe('Contracts • Document e-sign studio', () => {
     expect(lastPageDimensions.width).toBeGreaterThan(100);
     expect(lastPageDimensions.height).toBeGreaterThan(100);
     expect(lastPageDimensions.src).toContain('data:image/');
+
+    await page.getByRole('button', { name: /^Signature$/i }).click();
+    const lastPageBox = await renderedLastPage.boundingBox();
+    expect(lastPageBox).not.toBeNull();
+    await renderedLastPage.click({
+      position: {
+        x: Math.min(260, lastPageBox!.width - 20),
+        y: Math.min(220, lastPageBox!.height - 20),
+      },
+    });
+    await expect(page.getByText(/Fields \(1\)/i)).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText(/pg 6/i)).toBeVisible({ timeout: 10000 });
   });
 });
