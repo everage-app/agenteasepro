@@ -1,3 +1,6 @@
+import { prisma } from '../lib/prisma';
+import { withPrismaRetry } from '../lib/prismaRetry';
+
 /**
  * Email Service - SendGrid Integration
  * Centralized email sending for all app features:
@@ -8,6 +11,7 @@
  */
 
 interface EmailParams {
+  agentId?: string;
   to: string | string[];
   cc?: string | string[];
   bcc?: string | string[];
@@ -17,6 +21,9 @@ interface EmailParams {
   replyTo?: string;
   fromName?: string;
   fromEmail?: string;
+  quotaFeature?: string;
+  countAgainstMonthlyLimit?: boolean;
+  recordQuotaUsage?: boolean;
   categories?: string[];
   customArgs?: Record<string, string>;
   headers?: Record<string, string>;
@@ -36,7 +43,17 @@ interface SendResult {
   success: boolean;
   messageId?: string;
   error?: string;
+  quotaBlocked?: boolean;
+  quota?: AgentEmailUsage & { requested: number };
 }
+
+export type AgentEmailUsage = {
+  limit: number;
+  used: number;
+  remaining: number;
+  monthStart: Date;
+  monthEnd: Date;
+};
 
 type ResolvedEmailIdentity = {
   fromEmail: string;
@@ -47,6 +64,15 @@ type ResolvedEmailIdentity = {
 };
 
 const SENDGRID_API_URL = 'https://api.sendgrid.com/v3/mail/send';
+const DEFAULT_MONTHLY_AGENT_EMAIL_LIMIT = 200;
+const AGENT_EMAIL_USAGE_EVENT = 'agent_email_sent';
+
+export function getMonthlyAgentEmailLimit(): number {
+  const configured = Number(process.env.AGENT_MONTHLY_EMAIL_LIMIT || process.env.MONTHLY_AGENT_EMAIL_LIMIT || 0);
+  return Number.isFinite(configured) && configured > 0
+    ? Math.floor(configured)
+    : DEFAULT_MONTHLY_AGENT_EMAIL_LIMIT;
+}
 
 function normalizeEmail(value: unknown): string {
   return String(value || '').trim().toLowerCase();
@@ -87,6 +113,117 @@ function compactStringRecord(input: Record<string, string | undefined | null>) {
     Object.entries(input)
       .map(([key, value]) => [key, String(value || '').trim()] as const)
       .filter(([, value]) => Boolean(value)),
+  );
+}
+
+function getMonthRange(date = new Date()) {
+  const start = new Date(date.getFullYear(), date.getMonth(), 1, 0, 0, 0, 0);
+  const end = new Date(date.getFullYear(), date.getMonth() + 1, 1, 0, 0, 0, 0);
+  return { start, end };
+}
+
+function asMetaRecord(meta: unknown): Record<string, any> {
+  return meta && typeof meta === 'object' && !Array.isArray(meta) ? meta as Record<string, any> : {};
+}
+
+function readRecipientCount(meta: unknown, fallback = 1): number {
+  const record = asMetaRecord(meta);
+  const count = Number(record.recipientsCount ?? record.recipientCount ?? record.count);
+  return Number.isFinite(count) && count > 0 ? Math.floor(count) : fallback;
+}
+
+function normalizeQuotaFeature(value: unknown): string {
+  const feature = String(value || 'email')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, '_')
+    .slice(0, 60);
+  return feature || 'email';
+}
+
+export async function getMonthlyAgentEmailUsage(agentId: string, date = new Date()): Promise<AgentEmailUsage> {
+  const { start, end } = getMonthRange(date);
+
+  const [marketingRows, quotaEvents, legacyContactEvents] = await withPrismaRetry(() =>
+    Promise.all([
+      prisma.marketingDeliveryLog.findMany({
+        where: {
+          agentId,
+          status: 'SENT',
+          createdAt: { gte: start, lt: end },
+        },
+        select: { recipientsCount: true },
+      }),
+      prisma.internalEvent.findMany({
+        where: {
+          agentId,
+          kind: AGENT_EMAIL_USAGE_EVENT,
+          createdAt: { gte: start, lt: end },
+        },
+        select: { meta: true },
+      }),
+      prisma.internalEvent.findMany({
+        where: {
+          agentId,
+          kind: 'contact_email_sent',
+          createdAt: { gte: start, lt: end },
+        },
+        select: { meta: true },
+      }),
+    ]),
+  );
+
+  const marketingUsed = marketingRows.reduce((sum, row) => sum + Math.max(0, row.recipientsCount || 0), 0);
+  const ledgerUsed = quotaEvents.reduce((sum, row) => sum + readRecipientCount(row.meta), 0);
+  const ledgerContactUsed = quotaEvents
+    .filter((row) => normalizeQuotaFeature(asMetaRecord(row.meta).feature) === 'contact_email')
+    .reduce((sum, row) => sum + readRecipientCount(row.meta), 0);
+  const legacyContactUsed = Math.max(0, legacyContactEvents.length - ledgerContactUsed);
+  const used = marketingUsed + ledgerUsed + legacyContactUsed;
+  const limit = getMonthlyAgentEmailLimit();
+
+  return {
+    limit,
+    used,
+    remaining: Math.max(0, limit - used),
+    monthStart: start,
+    monthEnd: end,
+  };
+}
+
+async function recordAgentEmailUsage(params: {
+  agentId: string;
+  recipientsCount: number;
+  feature: string;
+  subject: string;
+  messageId?: string;
+  categories?: string[];
+  fromEmail: string;
+  fromName: string;
+  replyTo?: string;
+  requestedFromEmail?: string;
+  senderMode: ResolvedEmailIdentity['senderMode'];
+}) {
+  await withPrismaRetry(() =>
+    prisma.internalEvent.create({
+      data: {
+        agentId: params.agentId,
+        kind: AGENT_EMAIL_USAGE_EVENT,
+        path: 'emailService.sendEmail',
+        meta: {
+          feature: params.feature,
+          recipientsCount: params.recipientsCount,
+          subject: params.subject.slice(0, 300),
+          messageId: params.messageId || null,
+          categories: params.categories || [],
+          fromEmail: params.fromEmail,
+          fromName: params.fromName,
+          replyTo: params.replyTo || null,
+          requestedFromEmail: params.requestedFromEmail || null,
+          senderMode: params.senderMode,
+        },
+      },
+    }),
   );
 }
 
@@ -161,6 +298,10 @@ export async function sendEmail(params: EmailParams): Promise<SendResult> {
   const apiKey = process.env.SENDGRID_API_KEY;
   const identity = resolveEmailIdentity(params);
   const fromEmail = identity.fromEmail;
+  const agentId = String(params.agentId || '').trim();
+  const quotaFeature = normalizeQuotaFeature(params.quotaFeature || params.categories?.[0] || params.customArgs?.feature);
+  const countAgainstMonthlyLimit = Boolean(agentId) && params.countAgainstMonthlyLimit !== false;
+  const recordQuotaUsage = countAgainstMonthlyLimit && params.recordQuotaUsage !== false;
 
   if (!apiKey) {
     console.warn('⚠️ SENDGRID_API_KEY not configured - email not sent');
@@ -183,6 +324,23 @@ export async function sendEmail(params: EmailParams): Promise<SendResult> {
 
   if (recipients.length === 0) {
     return { success: false, error: 'No valid recipients provided' };
+  }
+
+  if (countAgainstMonthlyLimit) {
+    try {
+      const usage = await getMonthlyAgentEmailUsage(agentId);
+      if (recipients.length > usage.remaining) {
+        return {
+          success: false,
+          quotaBlocked: true,
+          quota: { ...usage, requested: recipients.length },
+          error: `Monthly email limit exceeded. Remaining: ${usage.remaining}, requested: ${recipients.length}.`,
+        };
+      }
+    } catch (error) {
+      console.error('Email quota check failed:', error);
+      return { success: false, error: 'Email quota temporarily unavailable. Please try again.' };
+    }
   }
 
   try {
@@ -217,10 +375,16 @@ export async function sendEmail(params: EmailParams): Promise<SendResult> {
       ],
     };
 
-    if (params.customArgs && Object.keys(params.customArgs).length > 0) {
+    const customArgs = compactStringRecord({
+      ...(params.customArgs || {}),
+      ...(agentId ? { agentId } : {}),
+      feature: quotaFeature,
+    });
+
+    if (Object.keys(customArgs).length > 0) {
       payload.personalizations = payload.personalizations.map((personalization: Record<string, any>) => ({
         ...personalization,
-        custom_args: params.customArgs,
+        custom_args: customArgs,
       }));
     }
 
@@ -270,6 +434,24 @@ export async function sendEmail(params: EmailParams): Promise<SendResult> {
     // Get message ID from headers if available
     const messageId = response.headers.get('x-message-id') || undefined;
 
+    if (recordQuotaUsage) {
+      recordAgentEmailUsage({
+        agentId,
+        recipientsCount: recipients.length,
+        feature: quotaFeature,
+        subject: params.subject,
+        messageId,
+        categories: params.categories,
+        fromEmail,
+        fromName: identity.fromName,
+        replyTo: identity.replyTo,
+        requestedFromEmail: identity.requestedFromEmail,
+        senderMode: identity.senderMode,
+      }).catch((error) => {
+        console.error('Email sent but quota usage logging failed:', error);
+      });
+    }
+
     console.log('✅ Email sent successfully to:', recipients.join(', '));
     return { success: true, messageId };
   } catch (error) {
@@ -284,6 +466,7 @@ export async function sendEmail(params: EmailParams): Promise<SendResult> {
 // E-sign tracking email defaults to the verified sender when a dedicated audit inbox is not configured.
 
 export async function sendSigningRequestEmail(params: {
+  agentId?: string;
   signerName: string;
   signerEmail: string;
   property: string;
@@ -407,6 +590,7 @@ Sent via AgentEase Pro${agentName ? ` on behalf of ${agentName}` : ''}
     : undefined;
 
   return sendEmail({
+    agentId: params.agentId,
     to: params.signerEmail,
     ...(ccRecipients ? { cc: ccRecipients } : {}),
     subject: params.subject,
@@ -415,6 +599,7 @@ Sent via AgentEase Pro${agentName ? ` on behalf of ${agentName}` : ''}
     replyTo: params.agentEmail,
     fromEmail: params.agentEmail,
     fromName,
+    quotaFeature: 'esign',
     categories: sendgridCategories,
     customArgs,
   });
@@ -491,6 +676,7 @@ AgentEase Pro
  * Send marketing email blast
  */
 export async function sendMarketingEmail(params: {
+  agentId?: string;
   recipients: string[];
   subject: string;
   htmlContent: string;
@@ -503,6 +689,7 @@ export async function sendMarketingEmail(params: {
   fromEmail?: string;
   fromName?: string;
   replyTo?: string;
+  countAgainstMonthlyLimit?: boolean;
   headers?: Record<string, string>;
   asm?: {
     groupId: number;
@@ -544,6 +731,7 @@ export async function sendMarketingEmail(params: {
     .trim()}`;
 
   return sendEmail({
+    agentId: params.agentId,
     to: params.recipients,
     subject: params.subject,
     html: fullHtml,
@@ -551,6 +739,9 @@ export async function sendMarketingEmail(params: {
     fromEmail: params.fromEmail,
     fromName: params.fromName || params.agentName,
     replyTo: params.replyTo,
+    quotaFeature: 'marketing',
+    countAgainstMonthlyLimit: params.countAgainstMonthlyLimit,
+    recordQuotaUsage: false,
     categories: params.categories,
     customArgs: params.customArgs,
     headers: params.headers,
@@ -562,6 +753,7 @@ export async function sendMarketingEmail(params: {
  * Send notification email (generic)
  */
 export async function sendNotificationEmail(params: {
+  agentId?: string;
   to: string;
   subject: string;
   title: string;
@@ -600,11 +792,13 @@ export async function sendNotificationEmail(params: {
   `;
 
   return sendEmail({
+    agentId: params.agentId,
     to: params.to,
     subject: params.subject,
     html,
     text: params.message,
     replyTo: params.replyTo,
+    quotaFeature: 'notification',
   });
 }
 

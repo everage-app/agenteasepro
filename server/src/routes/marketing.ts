@@ -20,7 +20,12 @@ import {
   resolveBlastDestination,
 } from '../services/marketingService';
 import { dispatchAutomationEvent } from '../automation/runner';
-import { resolveEmailIdentity, sendMarketingEmail } from '../services/emailService';
+import {
+  getMonthlyAgentEmailLimit,
+  getMonthlyAgentEmailUsage,
+  resolveEmailIdentity,
+  sendMarketingEmail,
+} from '../services/emailService';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { createAIChatCompletion, isAIConfigured } from '../lib/aiClient';
@@ -112,7 +117,7 @@ const SendBlastSchema = z
   })
   .strict();
 
-const MONTHLY_MARKETING_EMAIL_LIMIT = 200;
+const MONTHLY_MARKETING_EMAIL_LIMIT = getMonthlyAgentEmailLimit();
 const MARKETING_SUPPRESSING_EVENT_TYPES = ['UNSUBSCRIBE', 'SPAMREPORT', 'BOUNCE', 'BLOCKED', 'DROPPED'];
 const MARKETING_ENGAGEMENT_EVENT_TYPES = ['OPEN', 'CLICK', 'INBOUND_REPLY'];
 const MARKETING_SENT_EVENT_TYPES = ['PROCESSED', 'DELIVERED'];
@@ -141,12 +146,6 @@ const MassEmailPreviewSchema = z
     recipientEmails: z.array(z.string().trim().email()).max(2000).optional(),
   })
   .strict();
-
-function getMonthRange(date = new Date()) {
-  const start = new Date(date.getFullYear(), date.getMonth(), 1, 0, 0, 0, 0);
-  const end = new Date(date.getFullYear(), date.getMonth() + 1, 1, 0, 0, 0, 0);
-  return { start, end };
-}
 
 function normalizeRecipientList(emails: string[] | undefined, maxRecipients: number): string[] {
   if (!Array.isArray(emails) || emails.length === 0) return [];
@@ -702,26 +701,7 @@ function buildMarketingEmailOptions(replyTo?: string) {
 }
 
 async function getMonthlyMarketingEmailUsage(agentId: string) {
-  const { start, end } = getMonthRange();
-  const rows = await prisma.marketingDeliveryLog.findMany({
-    where: {
-      agentId,
-      status: 'SENT',
-      createdAt: { gte: start, lt: end },
-    },
-    select: { recipientsCount: true },
-  });
-
-  const used = rows.reduce((sum, row) => sum + (row.recipientsCount || 0), 0);
-  const remaining = Math.max(0, MONTHLY_MARKETING_EMAIL_LIMIT - used);
-
-  return {
-    limit: MONTHLY_MARKETING_EMAIL_LIMIT,
-    used,
-    remaining,
-    monthStart: start,
-    monthEnd: end,
-  };
+  return getMonthlyAgentEmailUsage(agentId);
 }
 
 async function resolveMassEmailRecipients(params: {
@@ -934,6 +914,7 @@ export async function processDueScheduledMassEmails() {
             : emailHtml;
 
           const result = await sendMarketingEmail({
+            agentId: blast.agentId,
             recipients: sendableRecipients,
             subject: channel.previewText || blast.title,
             htmlContent,
@@ -1352,6 +1333,7 @@ router.post('/email/send', async (req: AuthenticatedRequest, res, next) => {
     const emailOptions = buildMarketingEmailOptions(emailIdentity.replyTo);
 
     const result = await sendMarketingEmail({
+      agentId: req.agentId,
       recipients: sendableRecipients,
       subject: parsed.data.subject,
       htmlContent: messageHtml,
@@ -1798,6 +1780,7 @@ router.post('/blasts/:id/send', async (req: AuthenticatedRequest, res, next) => 
       const recipientsSample = sendableRecipientEmails.slice(0, 5);
 
       const result = await sendMarketingEmail({
+        agentId: req.agentId,
         recipients: sendableRecipientEmails,
         subject: channel.previewText || blast.title,
         htmlContent: fullHtml,

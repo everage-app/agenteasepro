@@ -160,6 +160,7 @@ async function sendEnvelopeEmails(params: {
       }
 
       const result = await sendSigningRequestEmail({
+        agentId: params.agentId,
         signerName: signer.name,
         signerEmail: email,
         property: params.propertyLabel,

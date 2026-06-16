@@ -111,6 +111,7 @@ export async function runLeadCaptureWorkflow(options: LeadCaptureWorkflowOptions
 
     try {
       await sendNotificationEmail({
+        agentId: options.agentId,
         to: agent.email,
         subject: `New lead captured: ${leadName}`,
         title: 'New lead captured',

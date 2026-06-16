@@ -485,6 +485,7 @@ export async function sendgridInboundParseHandler(req: Request, res: Response) {
       const safeName = contact.name || (contactType === 'lead' ? 'Lead' : 'Client');
 
       await sendEmail({
+        agentId,
         to: agent.email,
         subject: `New reply from ${safeName}`,
         text: `${safeName} replied${subject ? `: ${subject}` : '.'}\n\n${snippet || '(No message preview)'}\n\nOpen ${contactType} list: ${destination}`,
@@ -495,6 +496,7 @@ export async function sendgridInboundParseHandler(req: Request, res: Response) {
           <a href="${destination}" style="display:inline-block;padding:10px 14px;border-radius:8px;background:#0891b2;color:#fff;text-decoration:none;font-weight:600;">Open in AgentEase Pro</a>
         </div>`,
         categories: ['contact-email-reply-alert'],
+        quotaFeature: 'contact_reply_alert',
         customArgs: {
           agentId,
           contactType,

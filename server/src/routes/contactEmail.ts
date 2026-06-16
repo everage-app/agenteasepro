@@ -179,6 +179,7 @@ router.post('/send', async (req: AuthenticatedRequest, res) => {
     });
 
     const sendResult = await sendEmail({
+      agentId,
       to: contact.email,
       cc: ccAgent ? agent.email : undefined,
       subject: resolvedSubject,
@@ -187,6 +188,7 @@ router.post('/send', async (req: AuthenticatedRequest, res) => {
       replyTo: senderIdentity.replyTo,
       fromEmail: senderIdentity.requestedFromEmail,
       fromName: senderIdentity.fromName,
+      quotaFeature: 'contact_email',
       categories: ['contact-email'],
       customArgs: {
         agentId,
@@ -263,7 +265,10 @@ router.post('/send', async (req: AuthenticatedRequest, res) => {
     }
 
     if (!sendResult.success) {
-      return res.status(502).json({ error: sendResult.error || 'Failed to send email' });
+      return res.status(sendResult.quotaBlocked ? 429 : 502).json({
+        error: sendResult.error || 'Failed to send email',
+        quota: sendResult.quota,
+      });
     }
 
     return res.status(201).json({

@@ -1,5 +1,19 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { resolveEmailIdentity, sendSigningRequestEmail } from './emailService';
+
+vi.mock('../lib/prisma', () => ({
+  prisma: {
+    marketingDeliveryLog: {
+      findMany: vi.fn(),
+    },
+    internalEvent: {
+      findMany: vi.fn(),
+      create: vi.fn(),
+    },
+  },
+}));
+
+import { prisma } from '../lib/prisma';
+import { resolveEmailIdentity, sendEmail, sendSigningRequestEmail } from './emailService';
 
 const envKeys = ['SENDGRID_API_KEY', 'SENDGRID_FROM_EMAIL', 'SENDER_EMAIL', 'SENDGRID_ALLOWED_FROM_DOMAINS', 'ESIGN_TRACKING_EMAIL', 'APP_BASE_URL'] as const;
 const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
@@ -16,6 +30,9 @@ afterEach(() => {
   for (const key of envKeys) {
     setEnv(key, originalEnv[key]);
   }
+  vi.mocked(prisma.marketingDeliveryLog.findMany).mockReset();
+  vi.mocked(prisma.internalEvent.findMany).mockReset();
+  vi.mocked(prisma.internalEvent.create).mockReset();
   vi.restoreAllMocks();
 });
 
@@ -126,5 +143,69 @@ describe('sendSigningRequestEmail', () => {
     expect(html).toContain('123 &lt;Main&gt; St');
     expect(html).toContain('Best &lt;Brokerage&gt;');
     expect(html).not.toContain('Please review <today>');
+  });
+});
+
+describe('agent monthly email quota', () => {
+  it('blocks agent-associated sends before calling SendGrid when the monthly cap would be exceeded', async () => {
+    setEnv('SENDGRID_API_KEY', 'SG.test');
+    setEnv('SENDGRID_FROM_EMAIL', 'hello@agenteasepro.com');
+
+    vi.mocked(prisma.marketingDeliveryLog.findMany).mockResolvedValue([{ recipientsCount: 199 }] as any);
+    vi.mocked(prisma.internalEvent.findMany)
+      .mockResolvedValueOnce([] as any)
+      .mockResolvedValueOnce([] as any);
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true } as any);
+
+    const result = await sendEmail({
+      agentId: 'agent-1',
+      to: ['client-1@example.com', 'client-2@example.com'],
+      subject: 'Quota test',
+      html: '<p>Test</p>',
+      quotaFeature: 'contact_email',
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.quotaBlocked).toBe(true);
+    expect(result.quota?.remaining).toBe(1);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('records successful agent-associated sends in the quota ledger', async () => {
+    setEnv('SENDGRID_API_KEY', 'SG.test');
+    setEnv('SENDGRID_FROM_EMAIL', 'hello@agenteasepro.com');
+
+    vi.mocked(prisma.marketingDeliveryLog.findMany).mockResolvedValue([] as any);
+    vi.mocked(prisma.internalEvent.findMany)
+      .mockResolvedValueOnce([] as any)
+      .mockResolvedValueOnce([] as any);
+    const createMock = vi.mocked(prisma.internalEvent.create).mockResolvedValue({ id: 'event-1' } as any);
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      headers: { get: (name: string) => (name === 'x-message-id' ? 'msg-123' : null) },
+      text: async () => '',
+    } as any);
+
+    const result = await sendEmail({
+      agentId: 'agent-1',
+      to: 'client@example.com',
+      subject: 'Ledger test',
+      html: '<p>Test</p>',
+      quotaFeature: 'contact_email',
+    });
+
+    expect(result.success).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(createMock).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        agentId: 'agent-1',
+        kind: 'agent_email_sent',
+        meta: expect.objectContaining({
+          feature: 'contact_email',
+          recipientsCount: 1,
+          messageId: 'msg-123',
+        }),
+      }),
+    }));
   });
 });
