@@ -748,7 +748,7 @@ export function PdfEditor() {
         console.warn(
           `E-sign PDF candidate "${label}" has ${actualPageCount} page(s), expected ${expectedPageCount}. Trying the next preparation strategy.`,
         );
-        return { ready: false, pageCount: actualPageCount };
+        return { ready: false, pageCount: actualPageCount, previewVisible: false };
       }
 
       const pagesToCheck = Math.min(actualPageCount, 3);
@@ -767,14 +767,18 @@ export function PdfEditor() {
           hasVisiblePage = true;
           break;
         } catch (error) {
-          console.warn(`E-sign PDF visibility check could not render ${label} page ${pageNumber}:`, error);
+          console.warn(`E-sign PDF preview visibility check could not render ${label} page ${pageNumber}; preserving structurally valid PDF bytes:`, error);
         }
       }
 
-      return { ready: hasVisiblePage, pageCount: actualPageCount };
+      if (!hasVisiblePage) {
+        console.warn(`E-sign PDF candidate "${label}" loaded with the correct page count but the fast preview could not prove visible ink. Keeping the PDF bytes intact.`);
+      }
+
+      return { ready: true, pageCount: actualPageCount, previewVisible: hasVisiblePage };
     } catch (error) {
       console.warn(`E-sign PDF visibility check failed for ${label}:`, error);
-      return { ready: false, pageCount: 0 };
+      return { ready: false, pageCount: 0, previewVisible: false };
     } finally {
       await pdfDoc?.destroy();
       loadingTask?.destroy();
@@ -814,7 +818,58 @@ export function PdfEditor() {
       return { data: rasterizedBytes, pageCount: rasterizedCheck.pageCount, source: 'rasterized' };
     }
 
-    throw new Error(`The selected PDF pages could not be prepared with all ${expectedPageCount} page(s). Try re-uploading a freshly downloaded or flattened PDF.`);
+    throw new Error(`The selected PDF pages could not be prepared with all ${expectedPageCount} page(s). Select the original pages again or try a freshly downloaded PDF.`);
+  };
+
+  const generateEsignPreviewPdf = async (): Promise<PreparedEsignPdf> => {
+    const entries = getSelectedPageEntries();
+    const expectedPageCount = entries.length;
+    if (expectedPageCount === 0) {
+      throw new Error('Select at least one page before preparing an e-sign packet.');
+    }
+
+    let structuralFallback: PreparedEsignPdf | null = null;
+
+    const considerCandidate = async (
+      data: ArrayBuffer,
+      label: string,
+      source: PreparedEsignPdf['source'],
+    ): Promise<PreparedEsignPdf | null> => {
+      const check = await verifyEsignPdfCandidate(data, label, expectedPageCount);
+      if (!check.ready) return null;
+
+      const candidate = { data, pageCount: check.pageCount, source };
+      if (!structuralFallback) structuralFallback = candidate;
+      return check.previewVisible ? candidate : null;
+    };
+
+    const unchangedFile = getUnchangedSingleFileSelection(entries);
+    if (unchangedFile) {
+      const originalCandidate = await considerCandidate(unchangedFile.data.slice(0), 'original upload', 'original');
+      if (originalCandidate) return originalCandidate;
+    }
+
+    try {
+      const copiedBytes = await generateMergedPdf();
+      const copiedCandidate = await considerCandidate(copiedBytes, 'merged copy', 'merged');
+      if (copiedCandidate) return copiedCandidate;
+    } catch (error) {
+      console.warn('E-sign preview merged-copy preparation failed; trying rasterized packet:', error);
+    }
+
+    try {
+      const rasterizedBytes = await generateRasterizedPdfForEntries(entries);
+      const rasterizedCandidate = await considerCandidate(rasterizedBytes, 'rasterized packet', 'rasterized');
+      if (rasterizedCandidate) return rasterizedCandidate;
+    } catch (error) {
+      console.warn('E-sign preview rasterized preparation failed; using structural fallback when available:', error);
+    }
+
+    if (structuralFallback) {
+      return structuralFallback;
+    }
+
+    return generateEsignPdf();
   };
 
   const createPreviewUrl = async () => {
@@ -824,7 +879,7 @@ export function PdfEditor() {
   };
 
   const createPreviewDocument = async () => {
-    const preparedPdf = await generateEsignPdf();
+    const preparedPdf = await generateEsignPreviewPdf();
     const blob = new Blob([preparedPdf.data], { type: 'application/pdf' });
     return {
       data: preparedPdf.data.slice(0),

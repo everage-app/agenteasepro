@@ -125,7 +125,8 @@ export function resolveEmailIdentity(params: Pick<EmailParams, 'fromEmail' | 'fr
   const defaultSenderEmail = getDefaultSenderEmail();
   const requestedFromEmail = normalizeEmail(params.fromEmail);
   const requestedReplyTo = normalizeEmail(params.replyTo);
-  const fromName = String(params.fromName || 'AgentEase Pro').trim() || 'AgentEase Pro';
+  const configuredFromName = String(process.env.SENDGRID_FROM_NAME || process.env.SENDER_NAME || '').trim();
+  const fromName = String(params.fromName || configuredFromName || 'AgentEase Pro').trim() || 'AgentEase Pro';
 
   let fromEmail = defaultSenderEmail || requestedFromEmail;
   let replyTo = requestedReplyTo || undefined;

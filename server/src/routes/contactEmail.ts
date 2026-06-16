@@ -4,33 +4,11 @@ import { prisma } from '../lib/prisma';
 import { authenticateToken, AuthenticatedRequest } from '../middleware/auth';
 import { resolveEmailIdentity, sendEmail } from '../services/emailService';
 import { buildContactReplyToAddress, generateContactReplyToken } from '../services/contactReplyToken';
+import { isTransientPrismaError, withPrismaRetry } from '../lib/prismaRetry';
 
 export const router = Router();
 
 router.use(authenticateToken);
-
-function isTransientPrismaError(error: any): boolean {
-  const code = String(error?.code || '');
-  return code === 'P1001' || code === 'P1002';
-}
-
-async function withPrismaRetry<T>(operation: () => Promise<T>, attempts = 3, delayMs = 250): Promise<T> {
-  let lastError: unknown;
-
-  for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    try {
-      return await operation();
-    } catch (error) {
-      lastError = error;
-      if (!isTransientPrismaError(error) || attempt === attempts) {
-        throw error;
-      }
-      await new Promise((resolve) => setTimeout(resolve, delayMs * attempt));
-    }
-  }
-
-  throw lastError;
-}
 
 const sendContactEmailSchema = z
   .object({
@@ -219,57 +197,69 @@ router.post('/send', async (req: AuthenticatedRequest, res) => {
 
     const sentAt = new Date();
 
-    await prisma.internalEvent.create({
-      data: {
-        agentId,
-        kind: sendResult.success ? 'contact_email_sent' : 'contact_email_failed',
-        path: '/api/contact-email/send',
-        meta: {
-          contactType,
-          contactId,
-          contactEmail: contact.email,
-          contactName: contact.name,
-          subject: resolvedSubject,
-          body: resolvedBody,
-          ccAgent,
-          replyTo,
-          replyToken,
-          fromEmail: senderIdentity.fromEmail,
-          requestedFromEmail: senderIdentity.requestedFromEmail || null,
-          senderMode: senderIdentity.senderMode,
-          messageId: sendResult.messageId || null,
-          error: sendResult.error || null,
-        },
-      },
-    });
-
-    if (contactType === 'lead' && contact.leadId) {
-      await prisma.leadActivity.create({
-        data: {
-          leadId: contact.leadId,
-          activityType: 'EMAIL',
-          description: sendResult.success
-            ? `Email sent: ${resolvedSubject}`
-            : `Email failed: ${resolvedSubject}${sendResult.error ? ` (${sendResult.error})` : ''}`,
-          metadata: {
-            source: 'contact_email',
-            messageId: sendResult.messageId || null,
-            ccAgent,
+    try {
+      await withPrismaRetry(() =>
+        prisma.internalEvent.create({
+          data: {
+            agentId,
+            kind: sendResult.success ? 'contact_email_sent' : 'contact_email_failed',
+            path: '/api/contact-email/send',
+            meta: {
+              contactType,
+              contactId,
+              contactEmail: contact.email,
+              contactName: contact.name,
+              subject: resolvedSubject,
+              body: resolvedBody,
+              ccAgent,
+              replyTo,
+              replyToken,
+              fromEmail: senderIdentity.fromEmail,
+              requestedFromEmail: senderIdentity.requestedFromEmail || null,
+              senderMode: senderIdentity.senderMode,
+              messageId: sendResult.messageId || null,
+              error: sendResult.error || null,
+            },
           },
-        },
-      });
+        }),
+      );
 
-      await prisma.lead.update({
-        where: { id: contact.leadId },
-        data: { lastContact: sentAt },
-      });
-    }
+      if (contactType === 'lead' && contact.leadId) {
+        await withPrismaRetry(() =>
+          prisma.leadActivity.create({
+            data: {
+              leadId: contact.leadId!,
+              activityType: 'EMAIL',
+              description: sendResult.success
+                ? `Email sent: ${resolvedSubject}`
+                : `Email failed: ${resolvedSubject}${sendResult.error ? ` (${sendResult.error})` : ''}`,
+              metadata: {
+                source: 'contact_email',
+                messageId: sendResult.messageId || null,
+                ccAgent,
+              },
+            },
+          }),
+        );
 
-    if (contactType === 'client' && contact.clientId && sendResult.success) {
-      await prisma.client.update({
-        where: { id: contact.clientId },
-        data: { lastContactAt: sentAt },
-      });
+        await withPrismaRetry(() =>
+          prisma.lead.update({
+            where: { id: contact.leadId! },
+            data: { lastContact: sentAt },
+          }),
+        );
+      }
+
+      if (contactType === 'client' && contact.clientId && sendResult.success) {
+        await withPrismaRetry(() =>
+          prisma.client.update({
+            where: { id: contact.clientId! },
+            data: { lastContactAt: sentAt },
+          }),
+        );
+      }
+    } catch (activityError) {
+      console.error('Contact email sent but CRM activity logging failed:', activityError);
     }
 
     if (!sendResult.success) {
@@ -558,23 +548,25 @@ router.get('/recent-replies', async (req: AuthenticatedRequest, res) => {
 
     const { limit } = parsed.data;
 
-    const [events, lastSeenEvent] = await Promise.all([
-      prisma.internalEvent.findMany({
-        where: {
-          agentId: req.agentId,
-          kind: 'contact_email_reply_received',
-        },
-        orderBy: { createdAt: 'desc' },
-        take: Math.max(limit * 4, 20),
-      }),
-      prisma.internalEvent.findFirst({
-        where: {
-          agentId: req.agentId,
-          kind: 'contact_email_replies_seen',
-        },
-        orderBy: { createdAt: 'desc' },
-      }),
-    ]);
+    const [events, lastSeenEvent] = await withPrismaRetry(() =>
+      Promise.all([
+        prisma.internalEvent.findMany({
+          where: {
+            agentId: req.agentId,
+            kind: 'contact_email_reply_received',
+          },
+          orderBy: { createdAt: 'desc' },
+          take: Math.max(limit * 4, 20),
+        }),
+        prisma.internalEvent.findFirst({
+          where: {
+            agentId: req.agentId,
+            kind: 'contact_email_replies_seen',
+          },
+          orderBy: { createdAt: 'desc' },
+        }),
+      ]),
+    );
 
     const lastSeenAt = lastSeenEvent?.createdAt || null;
 
@@ -618,6 +610,15 @@ router.get('/recent-replies', async (req: AuthenticatedRequest, res) => {
       lastSeenAt: lastSeenAt ? lastSeenAt.toISOString() : null,
     });
   } catch (error) {
+    if (isTransientPrismaError(error)) {
+      console.warn('Recent replies temporarily unavailable; returning degraded empty state:', error);
+      return res.json({
+        items: [],
+        unseenCount: 0,
+        lastSeenAt: null,
+        degraded: true,
+      });
+    }
     console.error('Error fetching recent replies:', error);
     return res.status(500).json({ error: 'Failed to fetch recent replies' });
   }
@@ -628,19 +629,25 @@ router.post('/recent-replies/mark-seen', async (req: AuthenticatedRequest, res) 
     if (!req.agentId) return res.status(401).json({ error: 'Unauthorized' });
 
     const now = new Date();
-    await prisma.internalEvent.create({
-      data: {
-        agentId: req.agentId,
-        kind: 'contact_email_replies_seen',
-        path: '/api/contact-email/recent-replies/mark-seen',
-        meta: {
-          seenAt: now.toISOString(),
+    await withPrismaRetry(() =>
+      prisma.internalEvent.create({
+        data: {
+          agentId: req.agentId,
+          kind: 'contact_email_replies_seen',
+          path: '/api/contact-email/recent-replies/mark-seen',
+          meta: {
+            seenAt: now.toISOString(),
+          },
         },
-      },
-    });
+      }),
+    );
 
     return res.json({ ok: true, seenAt: now.toISOString() });
   } catch (error) {
+    if (isTransientPrismaError(error)) {
+      console.warn('Could not mark recent replies seen because the database was temporarily unavailable:', error);
+      return res.status(202).json({ ok: false, retry: true });
+    }
     console.error('Error marking recent replies seen:', error);
     return res.status(500).json({ error: 'Failed to mark replies seen' });
   }

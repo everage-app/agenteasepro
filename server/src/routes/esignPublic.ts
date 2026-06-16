@@ -216,9 +216,12 @@ router.get('/envelopes/:envelopeId/:signerId/:token/pdf', async (req, res) => {
       : `${envelope.type}-${deal?.property?.street || envelope.id}-packet.pdf`
         .replace(/[^a-zA-Z0-9.-]/g, '_');
 
+    const responseBuffer = Buffer.isBuffer(guidedPdf) ? guidedPdf : Buffer.from(guidedPdf);
+
     res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Length', String(responseBuffer.length));
     res.setHeader('Content-Disposition', `${download ? 'attachment' : 'inline'}; filename="${filename}"`);
-    return res.send(guidedPdf);
+    return res.end(responseBuffer);
   } catch (error) {
     console.error('Error generating public signing PDF:', error);
     return res.status(500).json({ error: 'Failed to generate PDF' });

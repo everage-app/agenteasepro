@@ -32,8 +32,8 @@ type CanvasVisibility = {
 };
 
 const MAX_SAMPLED_PIXELS = 160_000;
-const WHITE_THRESHOLD = 247;
-const MIN_VISIBLE_INK_RATIO = 0.00035;
+const WHITE_THRESHOLD = 253;
+const MIN_VISIBLE_INK_RATIO = 0.00008;
 
 export const toExactArrayBuffer = (bytes: Uint8Array): ArrayBuffer =>
   bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;

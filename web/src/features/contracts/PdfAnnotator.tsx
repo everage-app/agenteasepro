@@ -164,7 +164,7 @@ export function PdfAnnotator({ pdfUrl, pdfData, expectedPageCount, signers, onSa
   const [alignmentGuide, setAlignmentGuide] = useState<{ page: number | null; x: number | null; y: number | null }>({ page: null, x: null, y: null });
   const smartPlacementTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const didAutoFitRef = useRef(false);
-  const clampZoom = (value: number) => Math.max(0.5, Math.min(2, value));
+  const clampZoom = (value: number) => Math.max(0.5, Math.min(1.5, value));
   const formatCurrency = (amount?: number) => {
     if (amount === undefined || amount === null) return 'Not set';
     return `$${amount.toLocaleString()}`;
@@ -299,7 +299,7 @@ export function PdfAnnotator({ pdfUrl, pdfData, expectedPageCount, signers, onSa
         console.error('Failed to load PDF for e-sign field placement:', error);
         if (!cancelled) {
           setPdfRenderErrors({
-            1: 'This PDF could not be rendered in the field studio. Try re-uploading the PDF or use a freshly downloaded copy.',
+            1: 'The fast preview could not open this PDF. The original file is still preserved for e-sign delivery; use a freshly downloaded copy only if the browser preview is also blank.',
           });
         }
       }
@@ -342,6 +342,7 @@ export function PdfAnnotator({ pdfUrl, pdfData, expectedPageCount, signers, onSa
             maxHeight: PAGE_HEIGHT,
             outputScale: Math.max(1, Math.min(2, window.devicePixelRatio || 1)),
             imageType: 'image/png',
+            throwOnBlank: false,
           });
 
           if (cancelled) return;
@@ -353,7 +354,7 @@ export function PdfAnnotator({ pdfUrl, pdfData, expectedPageCount, signers, onSa
           setPdfRenderErrors((prev) => ({
             ...prev,
             [pageNumber]: /blank/i.test(errorMessage)
-              ? 'The fast preview rendered this page blank, so the studio switched to the browser PDF fallback. If field alignment looks off, re-upload a freshly downloaded or flattened copy before sending.'
+              ? 'The fast preview rendered this page blank, so the studio kept the original PDF bytes and switched to the browser fallback where available.'
               : 'This page could not be displayed in the fast preview. The studio will use the browser PDF fallback when available.',
           }));
         } finally {
@@ -741,8 +742,9 @@ export function PdfAnnotator({ pdfUrl, pdfData, expectedPageCount, signers, onSa
     const containerEl = containerRef.current;
     if (!containerEl) return;
 
-    const availableWidth = Math.max(320, containerEl.clientWidth - 48);
-    setZoom(clampZoom(availableWidth / PAGE_WIDTH));
+    const sidePadding = containerEl.clientWidth < 640 ? 24 : 72;
+    const availableWidth = Math.max(320, containerEl.clientWidth - sidePadding);
+    setZoom(clampZoom(Math.min(1, availableWidth / PAGE_WIDTH)));
   }, [PAGE_WIDTH]);
 
   useEffect(() => {
@@ -1555,7 +1557,7 @@ export function PdfAnnotator({ pdfUrl, pdfData, expectedPageCount, signers, onSa
         </aside>
 
         {/* PDF Viewer */}
-        <div 
+        <div
           ref={containerRef}
           className="flex-1 min-w-0 relative overflow-auto bg-slate-800/50"
           onClick={handleCanvasClick}
@@ -1564,7 +1566,7 @@ export function PdfAnnotator({ pdfUrl, pdfData, expectedPageCount, signers, onSa
           onScroll={handleDocumentScroll}
           style={{ cursor: selectedTool ? 'crosshair' : activeInteraction?.mode === 'drag' ? 'grabbing' : activeInteraction?.mode === 'resize' ? 'nwse-resize' : 'default' }}
         >
-          <div className="mx-auto flex w-max min-w-full flex-col items-center gap-7 px-4 py-6">
+          <div className="mx-auto flex min-w-full flex-col items-center gap-6 px-3 py-5 sm:px-6">
             {pageNumbers.map((pageNumber) => {
               const pageImage = pdfPageImages[pageNumber];
               const pageRenderError = pdfRenderErrors[pageNumber];
@@ -1759,7 +1761,7 @@ export function PdfAnnotator({ pdfUrl, pdfData, expectedPageCount, signers, onSa
         </div>
 
         {/* Right Sidebar - Field Properties & Summary */}
-        <div className={`${showFieldPanel ? 'hidden lg:flex' : 'hidden'} w-80 shrink-0 border-l border-white/10 bg-slate-900/80 flex-col transition-all`}>
+        <div className={`${showFieldPanel ? 'hidden lg:flex' : 'hidden'} w-72 xl:w-80 shrink-0 border-l border-white/10 bg-slate-900/80 flex-col transition-all`}>
           {/* Selected Field Properties */}
           {selectedAnnotation && (() => {
             const ann = annotations.find(a => a.id === selectedAnnotation);

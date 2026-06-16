@@ -6,6 +6,7 @@ import { resolveSnapshotWithEnvelopeFields } from '../lib/esignFieldPlan';
 import { sendSigningRequestEmail } from '../services/emailService';
 import { addSigningGuidesToPdf, generateSignedContractPdf, fillRepcPdf } from '../services/pdfService';
 import { createESignToken } from '../lib/esignToken';
+import { runBestEffortPrisma } from '../lib/prismaRetry';
 import {
   completeESignFollowUpTasks,
   logESignDealEvent,
@@ -281,33 +282,35 @@ router.get('/envelopes', async (req: AuthenticatedRequest, res) => {
     if (!reminderAttempted) continue;
 
     const reminderAt = new Date();
-    await prisma.signatureEnvelope.update({
-      where: { id: item.envelope.id },
-      data: { lastReminderSentAt: reminderAt },
+    await runBestEffortPrisma('Auto e-sign reminder bookkeeping', async () => {
+      await prisma.signatureEnvelope.update({
+        where: { id: item.envelope.id },
+        data: { lastReminderSentAt: reminderAt },
+      });
+      item.envelope.lastReminderSentAt = reminderAt;
+
+      if (item.envelope.dealId) {
+        await logESignDealEvent({
+          agentId: req.agentId!,
+          dealId: item.envelope.dealId,
+          title: 'Auto reminder sent for e-sign packet',
+          description: `Reminder delivery: ${formatEmailStatusSummary(emailStatus)}.`,
+          date: reminderAt,
+        });
+
+        await upsertESignFollowUpTask({
+          agentId: req.agentId!,
+          dealId: item.envelope.dealId,
+          envelopeId: item.envelope.id,
+          propertyLabel,
+          dueAt: new Date(reminderAt.getTime() + AUTO_REMINDER_INTERVAL_MS),
+          note: `${item.pendingSigners.length} signer(s) still pending. Last reminder sent automatically.`,
+          priority: item.pendingSigners.some((signer) => Boolean(signer.viewedAt))
+            ? TaskPriority.HIGH
+            : TaskPriority.NORMAL,
+        });
+      }
     });
-    item.envelope.lastReminderSentAt = reminderAt;
-
-    if (item.envelope.dealId) {
-      await logESignDealEvent({
-        agentId: req.agentId,
-        dealId: item.envelope.dealId,
-        title: 'Auto reminder sent for e-sign packet',
-        description: `Reminder delivery: ${formatEmailStatusSummary(emailStatus)}.`,
-        date: reminderAt,
-      });
-
-      await upsertESignFollowUpTask({
-        agentId: req.agentId,
-        dealId: item.envelope.dealId,
-        envelopeId: item.envelope.id,
-        propertyLabel,
-        dueAt: new Date(reminderAt.getTime() + AUTO_REMINDER_INTERVAL_MS),
-        note: `${item.pendingSigners.length} signer(s) still pending. Last reminder sent automatically.`,
-        priority: item.pendingSigners.some((signer) => Boolean(signer.viewedAt))
-          ? TaskPriority.HIGH
-          : TaskPriority.NORMAL,
-      });
-    }
   }
 
   for (const envelope of envelopes) {
@@ -468,24 +471,26 @@ router.post('/envelopes', async (req: AuthenticatedRequest, res) => {
     console.log(`📭 Envelope ${envelope.id}: outbound email dispatch skipped by request`);
   }
 
-  const initialFollowUpDueAt = new Date(Date.now() + AUTO_REMINDER_INTERVAL_MS);
-  await upsertESignFollowUpTask({
-    agentId: req.agentId,
-    dealId,
-    envelopeId: envelope.id,
-    propertyLabel,
-    dueAt: initialFollowUpDueAt,
-    note: `${envelope.signers.length} signer(s) invited. Auto-reminders run every 18 hours until complete.`,
-    priority: TaskPriority.NORMAL,
-  });
+  await runBestEffortPrisma('E-sign envelope follow-up logging', async () => {
+    const initialFollowUpDueAt = new Date(Date.now() + AUTO_REMINDER_INTERVAL_MS);
+    await upsertESignFollowUpTask({
+      agentId: req.agentId!,
+      dealId,
+      envelopeId: envelope.id,
+      propertyLabel,
+      dueAt: initialFollowUpDueAt,
+      note: `${envelope.signers.length} signer(s) invited. Auto-reminders run every 18 hours until complete.`,
+      priority: TaskPriority.NORMAL,
+    });
 
-  await logESignDealEvent({
-    agentId: req.agentId,
-    dealId,
-    title: sendEmails ? 'E-sign packet sent' : 'E-sign packet prepared',
-    description: sendEmails
-      ? `${envelope.signers.length} signer(s) invited. Delivery: ${formatEmailStatusSummary(emailStatus)}.`
-      : `${envelope.signers.length} signer(s) added. ${emailStatus.skipped || envelope.signers.length} signing link(s) ready for manual sharing.`,
+    await logESignDealEvent({
+      agentId: req.agentId!,
+      dealId,
+      title: sendEmails ? 'E-sign packet sent' : 'E-sign packet prepared',
+      description: sendEmails
+        ? `${envelope.signers.length} signer(s) invited. Delivery: ${formatEmailStatusSummary(emailStatus)}.`
+        : `${envelope.signers.length} signer(s) added. ${emailStatus.skipped || envelope.signers.length} signing link(s) ready for manual sharing.`,
+    });
   });
 
   res.status(201).json({ 
@@ -639,24 +644,26 @@ router.post('/document-envelopes', handleDocumentEnvelopeUpload, async (req: Aut
       };
 
   if (deal?.id) {
-    const dueAt = new Date(Date.now() + AUTO_REMINDER_INTERVAL_MS);
-    await upsertESignFollowUpTask({
-      agentId: req.agentId,
-      dealId: deal.id,
-      envelopeId: envelope.id,
-      propertyLabel,
-      dueAt,
-      note: `${envelope.signers.length} signer(s) invited for ${documentName}. Auto-reminders run every 18 hours until complete.`,
-      priority: TaskPriority.NORMAL,
-    });
+    await runBestEffortPrisma('Document e-sign follow-up logging', async () => {
+      const dueAt = new Date(Date.now() + AUTO_REMINDER_INTERVAL_MS);
+      await upsertESignFollowUpTask({
+        agentId: req.agentId!,
+        dealId: deal.id,
+        envelopeId: envelope.id,
+        propertyLabel,
+        dueAt,
+        note: `${envelope.signers.length} signer(s) invited for ${documentName}. Auto-reminders run every 18 hours until complete.`,
+        priority: TaskPriority.NORMAL,
+      });
 
-    await logESignDealEvent({
-      agentId: req.agentId,
-      dealId: deal.id,
-      title: sendEmails ? 'Document e-sign packet sent' : 'Document e-sign packet prepared',
-      description: sendEmails
-        ? `${documentName}: ${envelope.signers.length} signer(s) invited. Delivery: ${formatEmailStatusSummary(emailStatus)}.`
-        : `${documentName}: ${envelope.signers.length} signer(s) added. ${emailStatus.skipped || envelope.signers.length} signing link(s) ready for manual sharing.`,
+      await logESignDealEvent({
+        agentId: req.agentId!,
+        dealId: deal.id,
+        title: sendEmails ? 'Document e-sign packet sent' : 'Document e-sign packet prepared',
+        description: sendEmails
+          ? `${documentName}: ${envelope.signers.length} signer(s) invited. Delivery: ${formatEmailStatusSummary(emailStatus)}.`
+          : `${documentName}: ${envelope.signers.length} signer(s) added. ${emailStatus.skipped || envelope.signers.length} signing link(s) ready for manual sharing.`,
+      });
     });
   }
 
@@ -749,32 +756,34 @@ router.post('/envelopes/:envelopeId/remind', async (req: AuthenticatedRequest, r
   const reminderAttempted = emailStatus.sent > 0 || emailStatus.failed > 0;
   const lastReminderSentAt = reminderAttempted ? new Date() : envelope.lastReminderSentAt;
   if (reminderAttempted && lastReminderSentAt) {
-    await prisma.signatureEnvelope.update({
-      where: { id: envelope.id },
-      data: { lastReminderSentAt },
+    await runBestEffortPrisma('Manual e-sign reminder bookkeeping', async () => {
+      await prisma.signatureEnvelope.update({
+        where: { id: envelope.id },
+        data: { lastReminderSentAt },
+      });
+
+      if (envelope.dealId) {
+        await upsertESignFollowUpTask({
+          agentId: req.agentId!,
+          dealId: envelope.dealId,
+          envelopeId: envelope.id,
+          propertyLabel,
+          dueAt: new Date(lastReminderSentAt.getTime() + AUTO_REMINDER_INTERVAL_MS),
+          note: `${pendingSigners.length} signer(s) still pending after reminder.`,
+          priority: pendingSigners.some((signer) => Boolean(signer.viewedAt))
+            ? TaskPriority.HIGH
+            : TaskPriority.NORMAL,
+        });
+
+        await logESignDealEvent({
+          agentId: req.agentId!,
+          dealId: envelope.dealId,
+          title: 'Reminder sent for e-sign packet',
+          description: `Reminder delivery: ${formatEmailStatusSummary(emailStatus)}.`,
+          date: lastReminderSentAt,
+        });
+      }
     });
-
-    if (envelope.dealId) {
-      await upsertESignFollowUpTask({
-        agentId: req.agentId,
-        dealId: envelope.dealId,
-        envelopeId: envelope.id,
-        propertyLabel,
-        dueAt: new Date(lastReminderSentAt.getTime() + AUTO_REMINDER_INTERVAL_MS),
-        note: `${pendingSigners.length} signer(s) still pending after reminder.`,
-        priority: pendingSigners.some((signer) => Boolean(signer.viewedAt))
-          ? TaskPriority.HIGH
-          : TaskPriority.NORMAL,
-      });
-
-      await logESignDealEvent({
-        agentId: req.agentId,
-        dealId: envelope.dealId,
-        title: 'Reminder sent for e-sign packet',
-        description: `Reminder delivery: ${formatEmailStatusSummary(emailStatus)}.`,
-        date: lastReminderSentAt,
-      });
-    }
   }
 
   return res.json({
@@ -912,12 +921,15 @@ router.get('/envelopes/:envelopeId/pdf', async (req: AuthenticatedRequest, res) 
       : `${envelope.type}-${deal?.property?.street || envelope.id}-signed.pdf`
         .replace(/[^a-zA-Z0-9.-]/g, '_');
 
+    const responseBuffer = Buffer.isBuffer(pdfBuffer) ? pdfBuffer : Buffer.from(pdfBuffer);
+
     res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Length', String(responseBuffer.length));
     res.setHeader(
       'Content-Disposition',
       `${download ? 'attachment' : 'inline'}; filename="${filename}"`,
     );
-    return res.send(pdfBuffer);
+    return res.end(responseBuffer);
   } catch (error) {
     console.error('Error generating signed PDF:', error);
     return res.status(500).json({ error: 'Failed to generate PDF' });

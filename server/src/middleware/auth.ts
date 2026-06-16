@@ -3,6 +3,7 @@ import { Request, Response, NextFunction } from 'express';
 import { verifyToken } from '../services/identityService';
 import { auditLog, extractIp } from '../services/securityAuditService';
 import { prisma } from '../lib/prisma';
+import { isTransientPrismaError, withPrismaRetry } from '../lib/prismaRetry';
 
 export interface AuthenticatedRequest extends Request {
   agentId?: string;
@@ -37,10 +38,20 @@ export const authMiddleware = async (
   }
 
   const agentId = payload.agentId.trim();
-  const agent = await prisma.agent.findUnique({
-    where: { id: agentId },
-    select: { id: true, email: true, status: true },
-  });
+  let agent;
+  try {
+    agent = await withPrismaRetry(() =>
+      prisma.agent.findUnique({
+        where: { id: agentId },
+        select: { id: true, email: true, status: true },
+      }),
+    );
+  } catch (error) {
+    if (isTransientPrismaError(error)) {
+      return res.status(503).json({ error: 'Service temporarily unavailable. Please try again.' });
+    }
+    throw error;
+  }
 
   if (!agent) {
     return res.status(401).json({ error: 'Unauthorized' });

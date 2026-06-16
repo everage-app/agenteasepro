@@ -278,6 +278,75 @@ function getSignerLink(response: EnvelopeResponse, role: EnvelopeRoleHint) {
   return resolvedUrl as string;
 }
 
+function getPublicPdfPath(signingUrl: string) {
+  const parsed = new URL(signingUrl, 'http://127.0.0.1');
+  const parts = parsed.pathname.split('/').filter(Boolean);
+  expect(parts[0]).toBe('esign');
+  expect(parts.length).toBeGreaterThanOrEqual(4);
+  const [, envelopeId, signerId, token] = parts;
+  return `/api/esign-public/envelopes/${envelopeId}/${signerId}/${token}/pdf`;
+}
+
+async function expectPdfBytes(response: APIResponse, label: string) {
+  const body = await response.body();
+  expect(response.ok(), `${label} failed (${response.status()}): ${body.toString('utf8', 0, 200)}`).toBeTruthy();
+  expect(response.headers()['content-type'] || '').toContain('application/pdf');
+  expect(body.length, `${label} PDF was unexpectedly small`).toBeGreaterThan(1000);
+  expect(body.subarray(0, 4).toString('ascii'), `${label} did not return a PDF header`).toBe('%PDF');
+}
+
+async function createDocumentEnvelope(request: APIRequestContext) {
+  const token = await getApiToken(request);
+  const templatePath = path.resolve(__dirname, '..', '..', 'contracts', 'templates', 'Utah RE REPC.pdf');
+  const pdfBuffer = fs.readFileSync(templatePath);
+
+  const result = await requestTextWithRetry({
+    label: 'document envelope creation',
+    maxAttempts: 8,
+    run: () =>
+      request.post('/api/esign/document-envelopes', {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        multipart: {
+          file: {
+            name: 'Utah RE REPC.pdf',
+            mimeType: 'application/pdf',
+            buffer: pdfBuffer,
+          },
+          documentName: 'Playwright PDF integrity packet',
+          signers: JSON.stringify([{ role: 'BUYER', name: 'PDF Integrity Buyer', email: '' }]),
+          subject: 'Playwright PDF integrity packet',
+          message: 'Verify uploaded document envelope PDF integrity.',
+          sendEmails: 'false',
+          fields: JSON.stringify([
+            {
+              id: 'pdf-integrity-signature',
+              type: 'signature',
+              x: 72,
+              y: 650,
+              width: 180,
+              height: 42,
+              page: 1,
+              assignedTo: 'BUYER',
+              required: true,
+            },
+          ]),
+        },
+      }),
+  });
+
+  expect(
+    result.ok,
+    `document envelope creation failed (${result.status}): ${result.text.slice(0, 500)}`,
+  ).toBeTruthy();
+
+  return {
+    token,
+    envelope: JSON.parse(result.text) as EnvelopeResponse,
+  };
+}
+
 async function openDisclosureFlow(page: Page, signerUrl: string) {
   await page.goto(signerUrl, { waitUntil: 'domcontentloaded' });
 
@@ -602,6 +671,25 @@ test.describe('E-sign signer experience', () => {
     await page.waitForTimeout(1200);
 
     expect(duplicateKeyWarnings).toEqual([]);
+  });
+
+  test('serves valid PDFs for uploaded document envelopes', async ({ request }, testInfo) => {
+    test.slow();
+    test.setTimeout(120_000);
+
+    await staggerApiCallsForProject(testInfo.project.name);
+
+    const { token, envelope } = await createDocumentEnvelope(request);
+    const envelopeId = envelope.envelope.id;
+    const buyerLink = getSignerLink(envelope, 'BUYER');
+
+    const agentPdf = await request.get(`/api/esign/envelopes/${envelopeId}/pdf`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    await expectPdfBytes(agentPdf, 'Agent document envelope PDF');
+
+    const publicPdf = await request.get(getPublicPdfPath(buyerLink));
+    await expectPdfBytes(publicPdf, 'Public signer document envelope PDF');
   });
 
   test('keeps disclosure prompt top-aligned on mobile signer links', async ({ page, request }, testInfo) => {
