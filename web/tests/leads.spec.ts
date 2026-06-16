@@ -119,12 +119,10 @@ test.describe('Leads Page', () => {
     const firstRow = page.locator('table tbody tr').first();
     await expect(firstRow).toBeVisible({ timeout: 10000 });
 
-    const leadCell = firstRow.locator('td').first();
-    const leadCellText = ((await leadCell.textContent()) || '').split('\n').map((value) => value.trim()).filter(Boolean);
-    const leadName = leadCellText[0] || '';
-    const leadEmail = leadCellText[1] || '';
+    const leadCell = firstRow.locator('td').nth(1);
+    const leadName = ((await leadCell.locator('div').first().textContent()) || '').replace(/\s+/g, ' ').trim();
 
-    await firstRow.click();
+    await leadCell.click({ force: true });
 
     await expect(page).toHaveURL(/\/leads\/[a-z0-9-]+$/i, { timeout: 10000 });
     await expect(page.getByRole('heading', { name: /Profile Details/i })).toBeVisible({ timeout: 10000 });

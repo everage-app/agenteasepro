@@ -12,6 +12,10 @@ const crashEl = document.getElementById('app-crash');
 const crashMsgEl = document.getElementById('app-crash-message');
 const crashReloadBtn = document.getElementById('app-crash-reload');
 
+if (import.meta.env.VITE_E2E_DISABLE_MOTION === 'true') {
+  document.documentElement.setAttribute('data-e2e-disable-motion', 'true');
+}
+
 const hideLoader = () => {
   if (!loaderEl) return;
   loaderEl.classList.add('fade-out');

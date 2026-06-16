@@ -45,6 +45,8 @@ export default defineConfig({
   use: {
     /* Base URL to use in actions like `await page.goto('/')`. */
     baseURL: process.env.PW_BASE_URL || 'http://127.0.0.1:5174',
+    /* Keep polished UI motion from making animated controls look unstable to WebKit. */
+    reducedMotion: 'reduce',
     /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
     trace: 'on-first-retry',
     /* Screenshot on failure */
@@ -147,6 +149,7 @@ export default defineConfig({
           ALLOW_DEV_LOGIN: process.env.ALLOW_DEV_LOGIN || 'true',
           NODE_ENV: process.env.NODE_ENV || 'test',
           PORT: process.env.PORT || '3001',
+          VITE_E2E_DISABLE_MOTION: 'true',
         },
       },
 });

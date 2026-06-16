@@ -1043,6 +1043,7 @@ export function CalendarPage() {
           defaultDueAt={taskDefaults?.dueAt}
           defaultCategory={taskDefaults?.category}
           defaultTitle={taskDefaults?.title}
+          mode="event"
         />
       )}
     </PageLayout>

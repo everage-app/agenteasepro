@@ -81,15 +81,14 @@ test.describe('Calendar Page', () => {
     await waitForLoadingToComplete(page);
     
     // Find "New Event" button
-    const newEventButton = page.locator('button').filter({ hasText: /new event|add event|create event|\\+/i }).first();
+    const newEventButton = page.getByRole('button', { name: /new event/i }).first();
     
     if (await newEventButton.isVisible()) {
-      await newEventButton.click();
-      await page.waitForTimeout(500);
+      await newEventButton.click({ force: true });
       
-      // Check for event form
-      const titleInput = page.locator('input[name="title"], input[placeholder*="title" i]');
-      await expect(titleInput).toBeVisible({ timeout: 3000 });
+      await expect(page.getByRole('heading', { name: /new event/i })).toBeVisible({ timeout: 5000 });
+      await expect(page.getByLabel(/event title/i)).toBeVisible({ timeout: 5000 });
+      await expect(page.getByRole('button', { name: /create event/i })).toBeVisible();
     }
   });
 
@@ -97,25 +96,28 @@ test.describe('Calendar Page', () => {
     await navigateTo(page, '/calendar');
     await waitForLoadingToComplete(page);
     
-    const newEventButton = page.locator('button').filter({ hasText: /new event|add event|\\+/i }).first();
+    const newEventButton = page.getByRole('button', { name: /new event/i }).first();
     
     if (await newEventButton.isVisible()) {
-      await newEventButton.click();
-      await page.waitForTimeout(500);
+      await newEventButton.click({ force: true });
       
       // Fill in event details
-      const titleInput = page.locator('input[name="title"], input[placeholder*="title" i]');
-      await titleInput.fill('Property Showing');
+      const eventTitle = `Property Showing ${Date.now()}`;
+      await page.getByLabel(/event title/i).fill(eventTitle);
       
-      const descInput = page.locator('textarea[name="description"], textarea[placeholder*="description" i]');
+      const descInput = page.getByLabel(/description/i);
       if (await descInput.isVisible()) {
         await descInput.fill('Show property to potential buyers');
       }
       
       // Submit
-      const submitButton = page.locator('button[type="submit"], button').filter({ hasText: /create|save|add/i }).first();
-      await submitButton.click();
-      await page.waitForTimeout(2000);
+      const createResponse = page.waitForResponse((response) =>
+        response.url().includes('/api/tasks') &&
+        response.request().method() === 'POST',
+      );
+      await page.getByRole('button', { name: /create event/i }).click({ force: true });
+      await expect((await createResponse).ok()).toBeTruthy();
+      await expect(page.getByText(eventTitle).first()).toBeVisible({ timeout: 10000 });
     }
   });
 
@@ -123,8 +125,8 @@ test.describe('Calendar Page', () => {
     await navigateTo(page, '/calendar');
     await waitForLoadingToComplete(page);
 
-    const monthHeading = page.getByRole('heading', { level: 2 }).first();
-    await expect(monthHeading).toBeVisible({ timeout: 5000 });
+    await expect(page.getByRole('heading', { name: /Calendar/i })).toBeVisible({ timeout: 5000 });
+    expect(await page.locator('button[aria-label="Add event"]').count()).toBeGreaterThan(0);
 
     const knownEvent = page.locator('text=/Reply from|Showing|Open House|Event/i').first();
     const hasKnownEvent = await knownEvent.isVisible({ timeout: 2500 }).catch(() => false);

@@ -16,6 +16,7 @@ interface NewTaskModalProps {
   defaultDueAt?: string;
   defaultCategory?: 'GENERAL' | 'CONTRACT' | 'MARKETING' | 'CALL' | 'NOTE' | 'POPBY' | 'EVENT';
   defaultTitle?: string;
+  mode?: 'task' | 'event';
 }
 
 interface Deal {
@@ -63,6 +64,7 @@ export function NewTaskModal({
   defaultDueAt,
   defaultCategory,
   defaultTitle,
+  mode = 'task',
 }: NewTaskModalProps) {
   const [title, setTitle] = useState(defaultTitle || '');
   const [description, setDescription] = useState('');
@@ -87,6 +89,13 @@ export function NewTaskModal({
   const [error, setError] = useState('');
   const [isVisible, setIsVisible] = useState(false);
   const isClientLocked = Boolean(defaultClientId);
+  const isEventMode = mode === 'event';
+  const HeaderIcon = isEventMode ? CalendarDays : ClipboardCheck;
+  const modalTitle = isEventMode ? 'New Event' : 'New Task';
+  const modalSubtitle = isEventMode ? 'Add a calendar item to your workflow' : 'Add a task to your workflow';
+  const titleLabel = isEventMode ? 'Event Title' : 'Task Title';
+  const titlePlaceholder = isEventMode ? 'e.g., Property showing or inspection deadline' : 'e.g., Follow up with client about inspection';
+  const submitLabel = isEventMode ? 'Create Event' : 'Create Task';
 
   useEffect(() => {
     // Trigger entrance animation
@@ -239,12 +248,12 @@ export function NewTaskModal({
                   <div className="relative">
                     <div className="absolute inset-0 bg-gradient-to-br from-blue-400 to-indigo-500 rounded-xl blur-lg opacity-40" />
                     <div className="relative flex items-center justify-center w-11 h-11 rounded-xl bg-gradient-to-br from-blue-500/20 to-indigo-600/20 border border-blue-400/30">
-                      <ClipboardCheck className="h-5 w-5 text-blue-400" />
+                      <HeaderIcon className="h-5 w-5 text-blue-400" />
                     </div>
                   </div>
                   <div>
-                    <h3 className="text-xl font-bold text-slate-900 dark:text-slate-100 tracking-tight">New Task</h3>
-                    <p className="text-xs text-slate-600 dark:text-slate-300 mt-0.5">Add a task to your workflow</p>
+                    <h3 className="text-xl font-bold text-slate-900 dark:text-slate-100 tracking-tight">{modalTitle}</h3>
+                    <p className="text-xs text-slate-600 dark:text-slate-300 mt-0.5">{modalSubtitle}</p>
                   </div>
                 </div>
                 <button
@@ -268,13 +277,15 @@ export function NewTaskModal({
                 {/* Title */}
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200 mb-2">
-                    Task Title <span className="text-red-400">*</span>
+                    {titleLabel} <span className="text-red-400">*</span>
                   </label>
                   <input
+                    name="title"
+                    aria-label={titleLabel}
                     type="text"
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
-                    placeholder="e.g., Follow up with client about inspection"
+                    placeholder={titlePlaceholder}
                     className="w-full rounded-xl border border-slate-200/80 bg-white px-4 py-3 text-slate-900 placeholder-slate-400 focus:border-blue-500/50 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all dark:border-white/12 dark:bg-slate-900/75 dark:text-slate-100 dark:placeholder-slate-400"
                     required
                     autoFocus
@@ -285,6 +296,8 @@ export function NewTaskModal({
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200 mb-2">Description</label>
                   <textarea
+                    name="description"
+                    aria-label="Description"
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
                     placeholder="Add details about this task..."
@@ -381,6 +394,7 @@ export function NewTaskModal({
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200 mb-2">Due Date</label>
                   <input
+                    name="dueAt"
                     type="datetime-local"
                     value={dueAt}
                     onChange={(e) => setDueAt(e.target.value)}
@@ -522,7 +536,7 @@ export function NewTaskModal({
                           <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
                         </svg>
                       )}
-                      {loading ? 'Creating...' : 'Create Task'}
+                      {loading ? 'Creating...' : submitLabel}
                     </span>
                   </button>
                 </div>

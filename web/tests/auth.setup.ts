@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 
 const authFile = path.join(__dirname, '.auth/user.json');
+const AUTH_STATE_MIN_REMAINING_MS = 45 * 60_000;
 
 const isUsableJwt = (token: string | undefined) => {
   if (!token) return false;
@@ -15,7 +16,7 @@ const isUsableJwt = (token: string | undefined) => {
     const paddedPayload = normalizedPayload.padEnd(Math.ceil(normalizedPayload.length / 4) * 4, '=');
     const decodedPayload = JSON.parse(Buffer.from(paddedPayload, 'base64').toString('utf8')) as { exp?: number };
 
-    return typeof decodedPayload.exp === 'number' && decodedPayload.exp * 1000 > Date.now() + 60_000;
+    return typeof decodedPayload.exp === 'number' && decodedPayload.exp * 1000 > Date.now() + AUTH_STATE_MIN_REMAINING_MS;
   } catch {
     return false;
   }

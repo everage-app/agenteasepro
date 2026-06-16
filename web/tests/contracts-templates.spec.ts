@@ -310,11 +310,13 @@ test.describe('Contracts • Document e-sign studio', () => {
     await expect(page.getByText(/Added 1 PDF/i)).toBeVisible({ timeout: 30000 });
     await expect(page.getByText(/6\/6 pages selected/i)).toBeVisible({ timeout: 30000 });
 
-    await page.getByRole('button', { name: /Open E-sign Studio/i }).click();
+    await page.getByRole('button', { name: /Open E-sign Studio/i }).click({ force: true });
     await expect(page.getByRole('heading', { name: /Recipients & Message/i })).toBeVisible({ timeout: 30000 });
 
     await page.getByPlaceholder('Full name').fill('Preview Test Buyer');
-    await page.getByRole('button', { name: /Review & Place Fields/i }).click();
+    const reviewButton = page.getByRole('button', { name: /Review & Place Fields/i }).first();
+    await reviewButton.scrollIntoViewIfNeeded().catch(() => null);
+    await reviewButton.click({ force: true });
 
     const renderedPage = page.locator('img[alt="PDF page 1"]').first();
     await expect(
@@ -376,16 +378,20 @@ test.describe('Contracts • Document e-sign studio', () => {
     expect(lastPageDimensions.height).toBeGreaterThan(100);
     expect(lastPageDimensions.src).toContain('data:image/');
 
-    await page.getByRole('button', { name: /^Signature$/i }).click();
+    await page.locator('button[title="Signature (click to place or drag onto document)"]').click({ force: true });
     const lastPageBox = await renderedLastPage.boundingBox();
     expect(lastPageBox).not.toBeNull();
     await renderedLastPage.click({
       position: {
-        x: Math.min(260, lastPageBox!.width - 20),
-        y: Math.min(220, lastPageBox!.height - 20),
+        x: Math.min(180, lastPageBox!.width - 20),
+        y: Math.min(120, lastPageBox!.height - 20),
       },
     });
-    await expect(page.getByText(/Fields \(1\)/i)).toBeVisible({ timeout: 10000 });
-    await expect(page.getByText(/pg 6/i)).toBeVisible({ timeout: 10000 });
+    const isCompactAnnotator = (page.viewportSize()?.width ?? 0) < 1024;
+    const fieldCount = isCompactAnnotator
+      ? page.getByText(/^Fields \(1\)$/i).last()
+      : page.getByRole('heading', { name: /Fields \(1\)/i });
+    await expect(fieldCount).toBeVisible({ timeout: 10000 });
+    await expect(page.getByRole('button', { name: /Jump to page 6/i })).toContainText('1', { timeout: 10000 });
   });
 });

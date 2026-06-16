@@ -309,10 +309,6 @@ test.describe('Marketing Page', () => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: 'blast_1' }) });
     });
 
-    const createRequestPromise = page.waitForRequest((req) =>
-      req.url().includes('/api/marketing/blasts') && req.method() === 'POST',
-    );
-
     // Open new blast drawer
     await page.getByRole('button', { name: /\+\s*listing blast|start listing blast|launch listing blast|new blast/i }).first().click();
     await expect(page.getByText(/launch listing marketing/i)).toBeVisible();
@@ -320,9 +316,12 @@ test.describe('Marketing Page', () => {
     const drawer = page.getByTestId('new-blast-drawer');
 
     // Select listing
-    await drawer.getByText('123 Main St, Provo, UT').click();
+    await drawer.getByText('123 Main St, Provo, UT').click({ force: true });
 
     // Create blast
+    const createRequestPromise = page.waitForRequest((req) =>
+      req.url().includes('/api/marketing/blasts') && req.method() === 'POST',
+    );
     await drawer.getByRole('button', { name: /create ai campaign workspace/i }).click({ force: true });
 
     const createReq = await createRequestPromise;

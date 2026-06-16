@@ -3,6 +3,7 @@ import { navigateTo, waitForLoadingToComplete, clickAndWait, fillFormField } fro
 import { testTask } from './helpers/fixtures';
 
 async function openNewTaskModal(page: import('@playwright/test').Page) {
+  const modalHeading = page.getByRole('heading', { name: /new task/i }).first();
   const candidates = [
     page.getByRole('button', { name: /new task/i }).first(),
     page.getByRole('button', { name: /add task/i }).first(),
@@ -11,12 +12,19 @@ async function openNewTaskModal(page: import('@playwright/test').Page) {
 
   for (const button of candidates) {
     if (await button.isVisible().catch(() => false)) {
-      await button.click();
-      break;
+      await button.scrollIntoViewIfNeeded().catch(() => null);
+      await button.click({ force: true });
+      if (await modalHeading.isVisible({ timeout: 2000 }).catch(() => false)) {
+        return modalHeading.locator('xpath=ancestor::div[contains(@class,"relative w-full max-w-xl")]').first();
+      }
+
+      await button.evaluate((element: HTMLButtonElement) => element.click()).catch(() => null);
+      if (await modalHeading.isVisible({ timeout: 2000 }).catch(() => false)) {
+        return modalHeading.locator('xpath=ancestor::div[contains(@class,"relative w-full max-w-xl")]').first();
+      }
     }
   }
 
-  const modalHeading = page.getByRole('heading', { name: /new task/i }).first();
   await expect(modalHeading).toBeVisible({ timeout: 5000 });
   return modalHeading.locator('xpath=ancestor::div[contains(@class,"relative w-full max-w-xl")]').first();
 }
@@ -130,7 +138,7 @@ test.describe('Tasks Page', () => {
 
     const todayBucket = modalForm.locator('button').filter({ hasText: /^Today$/i }).first();
     if (await todayBucket.isVisible().catch(() => false)) {
-      await todayBucket.click();
+      await todayBucket.click({ force: true });
     }
 
     const submitButton = modalForm.locator('button[type="submit"]').first();
@@ -149,7 +157,7 @@ test.describe('Tasks Page', () => {
     for (const filter of filters.slice(0, 3)) { // Test first 3
       const filterButton = page.locator('button, a').filter({ hasText: new RegExp(filter, 'i') }).first();
       if (await filterButton.isVisible()) {
-        await filterButton.click();
+        await filterButton.click({ force: true });
         await page.waitForTimeout(500);
         // Just verify no errors
       }

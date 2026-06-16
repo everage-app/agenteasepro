@@ -1093,10 +1093,10 @@ export function PdfAnnotator({ pdfUrl, pdfData, expectedPageCount, signers, onSa
     <div className="flex flex-col h-full bg-slate-950">
       {/* Top Toolbar */}
       <div className="flex-shrink-0 border-b border-white/10 bg-slate-900/80 backdrop-blur-sm">
-        <div className="flex items-center justify-between p-3 gap-4">
+        <div className="flex flex-wrap items-center justify-between gap-2 p-2 sm:gap-4 sm:p-3">
           {/* Left: Basic Tools */}
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Fields:</span>
+            <span className="hidden text-xs font-bold text-slate-500 uppercase tracking-wider sm:inline">Fields:</span>
             {BASIC_TOOLS.map(tool => {
               const ToolIcon = tool.icon;
               return (
@@ -1105,7 +1105,7 @@ export function PdfAnnotator({ pdfUrl, pdfData, expectedPageCount, signers, onSa
                 onClick={() => setSelectedTool(selectedTool === tool.type ? null : tool.type)}
                 draggable
                 onDragStart={(e) => handleFieldDragStart(e, tool.type)}
-                className={`px-3 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${
+                className={`flex h-10 w-10 items-center justify-center rounded-lg text-sm font-medium transition-all sm:h-auto sm:w-auto sm:px-3 sm:py-2 sm:gap-2 ${
                   selectedTool === tool.type
                     ? 'bg-blue-500 text-white shadow-lg shadow-blue-500/30'
                     : 'bg-white/5 text-slate-300 hover:bg-white/10 border border-white/10'
@@ -1121,7 +1121,7 @@ export function PdfAnnotator({ pdfUrl, pdfData, expectedPageCount, signers, onSa
             {/* Smart Fields Toggle */}
             <button
               onClick={() => setShowSmartFields(!showSmartFields)}
-              className={`px-3 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${
+              className={`flex h-10 w-10 items-center justify-center rounded-lg text-sm font-medium transition-all sm:h-auto sm:w-auto sm:px-3 sm:py-2 sm:gap-2 ${
                 showSmartFields
                   ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/30'
                   : 'bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 border border-emerald-500/30'
@@ -1172,7 +1172,7 @@ export function PdfAnnotator({ pdfUrl, pdfData, expectedPageCount, signers, onSa
             <select
               value={assignTo}
               onChange={(e) => setAssignTo(e.target.value)}
-              className="bg-slate-800 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+              className="max-w-[54vw] bg-slate-800 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50 sm:max-w-none"
             >
               {signers.map(s => (
                 <option key={s.role} value={s.role}>{s.role} - {s.name || 'TBD'}</option>
@@ -1505,7 +1505,7 @@ export function PdfAnnotator({ pdfUrl, pdfData, expectedPageCount, signers, onSa
 
         {/* Tool hint */}
         {selectedTool && (
-          <div className="px-4 py-2 bg-blue-500/10 border-t border-blue-500/20 text-sm text-blue-300 flex items-center gap-2">
+          <div className="hidden px-4 py-2 bg-blue-500/10 border-t border-blue-500/20 text-sm text-blue-300 sm:flex sm:items-center sm:gap-2">
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
@@ -1515,13 +1515,13 @@ export function PdfAnnotator({ pdfUrl, pdfData, expectedPageCount, signers, onSa
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 flex overflow-hidden">
-        <aside className="w-24 shrink-0 border-r border-white/10 bg-slate-950/95 flex flex-col">
-          <div className="border-b border-white/10 px-3 py-3">
+      <div className="flex-1 flex flex-col overflow-hidden md:flex-row">
+        <aside className="shrink-0 border-b border-white/10 bg-slate-950/95 md:w-24 md:border-b-0 md:border-r">
+          <div className="hidden border-b border-white/10 px-3 py-3 md:block">
             <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Pages</div>
             <div className="mt-0.5 text-sm font-bold text-white">{totalPages}</div>
           </div>
-          <div className="flex-1 overflow-y-auto p-2 space-y-2">
+          <div className="flex flex-wrap gap-2 p-2 md:block md:flex-1 md:space-y-2 md:overflow-y-auto">
             {pageNumbers.map((pageNumber) => {
               const isActivePage = pageNumber === currentPage;
               const fieldCount = annotationCountsByPage.get(pageNumber) || 0;
@@ -1535,14 +1535,14 @@ export function PdfAnnotator({ pdfUrl, pdfData, expectedPageCount, signers, onSa
                     scrollToPage(pageNumber);
                     setSelectedTool(null);
                   }}
-                  className={`relative flex h-16 w-full flex-col items-center justify-center rounded-lg border text-xs transition-all ${
+                  className={`relative flex h-12 w-14 flex-col items-center justify-center rounded-lg border text-[11px] transition-all md:h-16 md:w-full md:text-xs ${
                     isActivePage
                       ? 'border-blue-400 bg-blue-500/20 text-white shadow-lg shadow-blue-950/30'
                       : 'border-white/10 bg-white/[0.04] text-slate-300 hover:border-blue-400/60 hover:bg-blue-500/10'
                   }`}
                 >
                   <FileText className="h-4 w-4" aria-hidden="true" />
-                  <span className="mt-1 font-bold">Page {pageNumber}</span>
+                  <span className="mt-1 font-bold leading-none">Page {pageNumber}</span>
                   {fieldCount > 0 && (
                     <span className="absolute -right-1 -top-1 rounded-full border border-slate-950 bg-emerald-400 px-1.5 py-0.5 text-[9px] font-black text-slate-950">
                       {fieldCount}
@@ -1759,7 +1759,7 @@ export function PdfAnnotator({ pdfUrl, pdfData, expectedPageCount, signers, onSa
         </div>
 
         {/* Right Sidebar - Field Properties & Summary */}
-        <div className={`w-80 shrink-0 border-l border-white/10 bg-slate-900/80 flex flex-col transition-all ${showFieldPanel ? '' : 'hidden'}`}>
+        <div className={`${showFieldPanel ? 'hidden lg:flex' : 'hidden'} w-80 shrink-0 border-l border-white/10 bg-slate-900/80 flex-col transition-all`}>
           {/* Selected Field Properties */}
           {selectedAnnotation && (() => {
             const ann = annotations.find(a => a.id === selectedAnnotation);
@@ -2050,9 +2050,9 @@ export function PdfAnnotator({ pdfUrl, pdfData, expectedPageCount, signers, onSa
       </div>
 
       {/* Bottom Toolbar */}
-      <div className="flex-shrink-0 border-t border-white/10 bg-slate-900/80 p-4 flex items-center justify-between">
+      <div className="flex-shrink-0 border-t border-white/10 bg-slate-900/80 p-2 flex items-center justify-between gap-2 overflow-x-auto sm:p-4">
         {/* Left: Page navigation & zoom */}
-        <div className="flex items-center gap-4">
+        <div className="flex shrink-0 items-center gap-2 sm:gap-4">
           <div className="flex items-center gap-2 bg-slate-800 rounded-lg p-1">
             <button
               onClick={() => scrollToPage(currentPage - 1)}
@@ -2097,6 +2097,10 @@ export function PdfAnnotator({ pdfUrl, pdfData, expectedPageCount, signers, onSa
             </button>
           </div>
 
+          <div className="rounded-lg bg-slate-800 px-3 py-2 text-sm font-semibold text-white lg:hidden">
+            Fields ({annotations.length})
+          </div>
+
           <div className="hidden sm:flex items-center gap-2 bg-slate-800 rounded-lg p-1">
             <button
               onClick={fitDocumentWidth}
@@ -2120,10 +2124,10 @@ export function PdfAnnotator({ pdfUrl, pdfData, expectedPageCount, signers, onSa
         </div>
 
         {/* Right: Actions */}
-        <div className="flex items-center gap-3">
+        <div className="flex shrink-0 items-center gap-2 sm:gap-3">
           <button
             onClick={() => setShowFieldPanel(!showFieldPanel)}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+            className={`hidden px-4 py-2 rounded-lg text-sm font-medium transition-all lg:inline-flex ${
               showFieldPanel
                 ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
                 : 'bg-white/5 text-slate-400 hover:text-white'
@@ -2135,7 +2139,7 @@ export function PdfAnnotator({ pdfUrl, pdfData, expectedPageCount, signers, onSa
           {onCancel && (
             <button
               onClick={onCancel}
-              className="px-5 py-2.5 rounded-xl text-sm font-medium text-slate-400 hover:text-white hover:bg-white/5 transition-all"
+              className="px-3 py-2 rounded-xl text-sm font-medium text-slate-400 hover:text-white hover:bg-white/5 transition-all sm:px-5 sm:py-2.5"
             >
               Back
             </button>
@@ -2144,7 +2148,7 @@ export function PdfAnnotator({ pdfUrl, pdfData, expectedPageCount, signers, onSa
           {onSend && (
             <button
               onClick={() => onSave?.(annotations)}
-              className="px-5 py-2.5 rounded-xl text-sm font-semibold border border-white/10 text-slate-200 hover:bg-white/5 transition-all"
+              className="px-3 py-2 rounded-xl text-sm font-semibold border border-white/10 text-slate-200 hover:bg-white/5 transition-all sm:px-5 sm:py-2.5"
             >
               Save Field Layout
             </button>
@@ -2157,7 +2161,7 @@ export function PdfAnnotator({ pdfUrl, pdfData, expectedPageCount, signers, onSa
                 onSend(annotations);
               }}
               disabled={sending}
-              className="px-6 py-2.5 rounded-xl text-sm font-bold bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 text-white shadow-lg shadow-emerald-900/30 transition-all disabled:opacity-50 flex items-center gap-2"
+              className="px-4 py-2 rounded-xl text-sm font-bold bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 text-white shadow-lg shadow-emerald-900/30 transition-all disabled:opacity-50 flex items-center gap-2 sm:px-6 sm:py-2.5"
             >
               {sending ? (
                 <>

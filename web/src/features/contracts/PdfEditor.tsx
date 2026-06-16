@@ -1988,7 +1988,7 @@ export function PdfEditor() {
 
       {showEsign && esignStep === 'recipients' && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
-          <div className="w-full max-w-5xl rounded-3xl border border-white/10 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 shadow-2xl overflow-hidden">
+          <div className="w-full max-w-5xl max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-3xl border border-white/10 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 shadow-2xl">
             <div className="p-6 border-b border-white/10 bg-gradient-to-r from-emerald-500/10 via-slate-900/40 to-blue-500/10 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <div>
                 <p className="text-xs uppercase tracking-[0.3em] text-emerald-300/70">E-sign Studio</p>
@@ -2190,7 +2190,7 @@ export function PdfEditor() {
                       disabled={!canProceedEsign || esignSending}
                       className="px-4 py-2 rounded-lg text-sm font-semibold border border-white/10 text-slate-200 hover:bg-white/5 transition-colors disabled:opacity-50"
                     >
-                      Preview
+                      Review & Place Fields
                     </button>
                   </div>
                   {isEsignSent && (
